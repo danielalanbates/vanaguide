@@ -92,6 +92,7 @@ launching anything.
 * [docs/VERIFICATION.md](docs/VERIFICATION.md) — what is proven and what is not
 * [docs/PATHWAYS.md](docs/PATHWAYS.md) — where this goes next, for whoever picks it up
 * [docs/SERVERS.md](docs/SERVERS.md) — the addon-policy problem, honestly
+* [docs/INSTALL_MAC.md](docs/INSTALL_MAC.md) — installing into FFXI-on-Mac, and loading it only where it is allowed
 
 ## Credits
 

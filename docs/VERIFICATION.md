@@ -32,6 +32,13 @@ Written 2026-08-22. Be suspicious of anything not in the first table.
    the wrong moment, the id is off by one.
 5. **Item ids** in guide steps. None have been checked against the client's item table.
 
+## Installed, but not yet run
+
+As of 2026-08-22 the addon **is** installed in the live client and wired to load only for the
+local LandSandBoat world — see [INSTALL_MAC.md](INSTALL_MAC.md). It has still never been
+loaded by a running client: the attempt stopped because HorizonXI was being played at the
+time, and testing would have meant a second client and taking the screen mid-session.
+
 ## Why it was not verified
 
 The machine this was written on cannot read the volume the game is installed on: macOS TCC
