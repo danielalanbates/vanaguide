@@ -147,16 +147,33 @@ ashita.events.register('command', 'vg_command', function (e)
         return;
     end
 
+    -- Guides are listed with a number, and `/vg load 7` takes it.  Typing
+    -- "San d'Oria — every quest" into the FFXI chat box is not a thing anyone will do,
+    -- and on this Mac port the window's buttons cannot be clicked at all (see
+    -- HorizonXI-on-Mac docs/MOUSE.md), so the numbers are the real interface.
     if (sub == 'guides' or sub == 'list') then
         Window.picker[1] = true;
-        for _, g in ipairs(G.list()) do
-            U.print(('  %s  (%s)'):format(g.name, g.levels or 'any level'));
+        for i, g in ipairs(G.list()) do
+            U.print(('  %2d. %s  (%d steps%s)')
+                :format(i, g.name, #g.steps, g.levels and (', levels ' .. g.levels) or ''));
         end
+        U.print('load one with /vg load <number>');
         return;
     end
 
     if (sub == 'load' and #args > 2) then
-        load_guide(table.concat({ unpack(args, 3) }, ' '));
+        local wanted = table.concat({ unpack(args, 3) }, ' ');
+        local n = tonumber(wanted);
+        if (n ~= nil) then
+            local list = G.list();
+            if (list[n] == nil) then
+                U.print(('there is no guide %d; /vg guides lists them'):format(n));
+            else
+                load_guide(list[n].name);
+            end
+        else
+            load_guide(wanted);
+        end
         return;
     end
 

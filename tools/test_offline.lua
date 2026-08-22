@@ -256,5 +256,33 @@ do
     eq(violations, 0, 'a quest never comes before the quest it requires')
 end
 
+-- ---- the generated mission database ---------------------------------------------
+do
+    local MDB = require('data.missions')
+    local total, bad_zone = 0, 0
+    for _, missions in pairs(MDB.missions) do
+        for _, m in pairs(missions) do
+            total = total + 1
+            if m.zone ~= nil and zones.name[m.zone] == nil then bad_zone = bad_zone + 1 end
+        end
+    end
+    ok(total >= 400, ('the mission database has every storyline (%d)'):format(total))
+    eq(bad_zone, 0, 'every mission zone is a real zone')
+
+    -- The ids the retired hand-written guide got wrong.  This is the regression.
+    local first = MDB.get('sandoria', 0)
+    ok(first ~= nil and first.name:find('Orcish Scouts') ~= nil,
+       "San d'Oria mission 0 is Smash the Orcish Scouts, not mission 1")
+    ok(MDB.get('sandoria', 1).name:find('Bat Hunt') ~= nil, "mission 1 is Bat Hunt")
+
+    local g = G.get("San d'Oria missions — in order")
+    ok(g ~= nil, 'the storyline guide is registered')
+    eq(#g.errors, 0, 'and parses cleanly')
+    eq(g.steps[1].mission.id, 0, 'its first step waits on mission 0')
+    for i = 2, #g.steps do
+        ok(g.steps[i].mission.id > g.steps[i - 1].mission.id, 'missions are in order')
+    end
+end
+
 print(('\n%d passed, %d failed'):format(pass, fail))
 os.exit(fail == 0 and 0 or 1)

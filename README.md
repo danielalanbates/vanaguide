@@ -14,7 +14,7 @@ in-game yet.** Read [docs/VERIFICATION.md](docs/VERIFICATION.md) before you trus
 | Waypoint arrow with distance | ✅ `ui/arrow.lua`, drawn on ImGui's foreground list so it works under DXVK on the Mac port |
 | Travel routing (flight paths, boats) | ✅ `routing/zonegraph.lua` — Dijkstra over the zone graph, with airships and the Selbina/Mhaura ferry as real edges |
 | A travel graph that is actually complete | ⚠️ partly. The seed graph covers the base world; **the addon learns every zone line you walk through** and saves it, so it fills itself in from play instead of from guesswork |
-| Guide library | **506 quests across 10 areas**, generated from server data into one guide per area ([docs/QUEST_DATABASE.md](docs/QUEST_DATABASE.md)), plus hand-written guides in `Vanaguide/guides/` |
+| Guide library | **506 quests and 459 missions**, generated from server data into 25 guides — one per quest area, one per storyline ([docs/QUEST_DATABASE.md](docs/QUEST_DATABASE.md)) — plus hand-written guides in `Vanaguide/guides/` |
 | Guide editor | ❌ — but `/vg mark` writes a paste-ready guide line for wherever you are standing |
 
 ## Install
@@ -50,7 +50,8 @@ exactly what that does and does not prove.
 | | |
 | --- | --- |
 | `/vg` | show / hide the guide window |
-| `/vg guides` | list and pick a guide |
+| `/vg guides` | list the guides, numbered |
+| `/vg load 7` | load one by number (the window's buttons cannot be clicked on the Mac port — see [docs/MOUSE.md](https://github.com/danielalanbates/HorizonXI-on-Mac/blob/master/docs/MOUSE.md)) |
 | `/vg next` · `back` · `skip` | move through the current guide |
 | `/vg route` | explain the route to the current step |
 | `/vg mark <name>` | write a guide line for where you stand into `marks.txt` |
@@ -74,7 +75,7 @@ docs/         format, routing, packets, arrow calibration, verification, pathway
 ## Testing
 
 ```sh
-luajit tools/test_offline.lua      # 456 assertions, no game required
+luajit tools/test_offline.lua      # 828 assertions, no game required
 ```
 
 The harness fakes Ashita's globals (`tools/stubs.lua`), so the parser, the completion

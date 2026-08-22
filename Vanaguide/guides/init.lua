@@ -5,7 +5,6 @@
 -- Copyright (c) 2026 Bates LLC.  All rights reserved.
 
 require('guides.starting_out')
-require('guides.sandoria_rank1')
 require('guides.subjob')
 
 -- Every quest the server implements, one guide per area, built from data/quests.lua.

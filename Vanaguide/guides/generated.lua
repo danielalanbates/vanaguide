@@ -16,6 +16,7 @@
 
 local G = require('core.guide')
 local Q = require('data.quests')
+local MI = require('data.missions')
 
 local AREA_TITLE = {
     sandoria = "San d'Oria", bastok = 'Bastok', windurst = 'Windurst', jeuno = 'Jeuno',
@@ -85,9 +86,50 @@ local function build(area)
     })
 end
 
-local M = { areas = {} }
+local STORY_TITLE = {
+    sandoria = "San d'Oria missions", bastok = 'Bastok missions',
+    windurst = 'Windurst missions', zilart = 'Rise of the Zilart',
+    cop = 'Chains of Promathia', toau = 'Treasures of Aht Urhgan',
+    wotg = 'Wings of the Goddess', acp = 'A Crystalline Prophecy',
+    amk = "A Moogle Kupo d'Etat", asa = 'A Shantotto Ascension',
+    adoulin = 'Seekers of Adoulin', rov = 'Rhapsodies of Vana\'diel',
+    tvr = 'The Voracious Resurgence', campaign = 'Campaign', assault = 'Assault',
+}
+
+--- Missions are linear, so the guide is simply the storyline in order.  `M|area,id|`
+--- completes when the server's current-mission number passes the id, which is why these
+--- ids are generated rather than remembered — being one out means waiting forever.
+local function build_missions(area)
+    local entries = MI.area(area)
+    if #entries == 0 then return nil end
+    local steps = {}
+    for _, entry in ipairs(entries) do
+        local m = entry.mission
+        local title = m.label and ('%s: %s'):format(m.label, m.name) or m.name
+        local line = { 'C ' .. title, ('|M|%s,%d|'):format(area, entry.id) }
+        if m.zone ~= nil then
+            line[#line + 1] = ('|Z|%d|'):format(m.zone)
+            if m.x ~= nil then line[#line + 1] = ('|POS|%.1f,%.1f,8|'):format(m.x, m.z) end
+        end
+        line[#line + 1] = ('|N|%s|'):format(m.npc and ('Starts with ' .. m.npc .. '.')
+            or 'No location recorded for this one yet.')
+        steps[#steps + 1] = table.concat(line)
+    end
+    return G.register({
+        name = ('%s — in order'):format(STORY_TITLE[area] or area),
+        author = 'generated from server data',
+        desc = ('All %d missions in the %s storyline.'):format(#entries, STORY_TITLE[area] or area),
+        steps = table.concat(steps, '\n'),
+    })
+end
+
+local M = { areas = {}, storylines = {} }
 for area in pairs(Q.quests) do M.areas[#M.areas + 1] = area end
 table.sort(M.areas)
 for _, area in ipairs(M.areas) do build(area) end
+
+for area in pairs(MI.missions) do M.storylines[#M.storylines + 1] = area end
+table.sort(M.storylines)
+for _, area in ipairs(M.storylines) do build_missions(area) end
 
 return M

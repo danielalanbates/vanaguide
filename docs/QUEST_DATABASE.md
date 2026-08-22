@@ -66,9 +66,11 @@ guide sit in the same list and use the same format.
 
 ## What is missing
 
-* **Missions.** `scripts/missions/` in the same checkout has the same shape and is not read
-  yet — nation missions, Zilart, CoP, and the rest. That is the next obvious pass, and the
-  mission tags (`M|area,id|`) already exist.
+* ~~Missions.~~ Done — `tools/gen_missions.py` reads `scripts/missions/` the same way:
+  **459 missions across 13 storylines, 327 with coordinates**, into `data/missions.lua` and
+  a guide per storyline. It immediately paid for itself: the hand-written *"San d'Oria —
+  Rank 1"* seed guide had Mission 1-1 as id 1, where the server's enum says 0. For a linear
+  storyline that is a step which waits forever. The seed guide is in `archive/`.
 * **The 60 quests whose script states no coordinates,** and the 72 files the generator
   skipped (mostly `.todo` stubs and quests defined outside the `Quest:new` shape).
 * **Turn-in coordinates.** Only the *first* NPC in each header is recorded, which is where
