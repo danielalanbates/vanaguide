@@ -50,6 +50,7 @@ local C      = require('core.conditions');
 local P      = require('core.progress');
 local graph  = require('routing.zonegraph');
 local R      = require('routing.router');
+local L      = require('core.lookup');
 local Arrow  = require('ui.arrow');
 local Window = require('ui.window');
 
@@ -67,6 +68,7 @@ local vg = {
     settings = settings.load(default_settings),
     last_zone = nil,
     last_advance = 0,
+    results = {},
     was_logged_in = false,
     d3d8 = nil,
 };
@@ -190,6 +192,86 @@ ashita.events.register('command', 'vg_command', function (e)
         return;
     end
 
+    -- Lookups.  Each prints a numbered list and remembers it, so `/vg track 2` can turn any
+    -- line of it into the active step -- same arrow, same router, no second navigation path.
+    if (sub == 'find' and #args > 2) then
+        local text = table.concat({ unpack(args, 3) }, ' ');
+        vg.results = {};
+        for _, item in ipairs(L.find_item(text)) do
+            for _, src in ipairs(item.sources) do
+                vg.results[#vg.results + 1] = {
+                    title = item.name, text = ('%s: %s'):format(item.name, src.text),
+                    zone = src.zone, x = src.x, z = src.z,
+                    note = ('level %d %s%s'):format(item.level, item.slot,
+                        item.rare and ' (rare)' or (item.ex and ' (ex)' or '')),
+                };
+                if (#vg.results >= 15) then break; end
+            end
+            if (#vg.results >= 15) then break; end
+        end
+        if (#vg.results == 0) then
+            U.print(('nothing called "%s" that anything drops or sells'):format(text));
+        else
+            for i, r in ipairs(vg.results) do U.print(('  %2d. %s'):format(i, r.text)); end
+            U.print('/vg track <number> to point the arrow at one');
+        end
+        return;
+    end
+
+    if (sub == 'gear') then
+        local slot = (#args > 2) and args[3]:lower() or 'body';
+        local job, level = U.main_job();
+        vg.results = {};
+        for _, item in ipairs(L.gear_for(slot, level, job)) do
+            local src = item.sources[1];
+            vg.results[#vg.results + 1] = {
+                title = item.name, text = ('%s (lvl %d) - %s'):format(item.name, item.level, src.text),
+                zone = src.zone, x = src.x, z = src.z,
+            };
+        end
+        if (#vg.results == 0) then
+            U.print(('no %s gear with a source at level %d for this job'):format(slot, level or 0));
+        else
+            U.print(('%s, for your level and job:'):format(slot));
+            for i, r in ipairs(vg.results) do U.print(('  %2d. %s'):format(i, r.text)); end
+            U.print('/vg track <number>');
+        end
+        return;
+    end
+
+    if (sub == 'nm') then
+        local where = (#args > 2) and table.concat({ unpack(args, 3) }, ' ') or nil;
+        vg.results = {};
+        for _, n in ipairs(L.nms(where)) do
+            local place = n.x and ('%s (%.0f, %.0f)'):format(U.zone_name(n.zone), n.x, n.z)
+                or ('%s (spot unknown)'):format(U.zone_name(n.zone));
+            vg.results[#vg.results + 1] = {
+                title = n.name, text = ('%s, level %d-%d, %s'):format(n.name, n.lo, n.hi, place),
+                zone = n.zone, x = n.x, z = n.z,
+                note = (#n.loot > 0) and ('%d things drop from it'):format(#n.loot) or nil,
+            };
+            if (#vg.results >= 20) then break; end
+        end
+        if (#vg.results == 0) then
+            U.print(where and ('no notorious monster called "' .. where .. '"')
+                or 'no notorious monsters recorded in this zone');
+        else
+            for i, r in ipairs(vg.results) do U.print(('  %2d. %s'):format(i, r.text)); end
+            U.print('/vg track <number>');
+        end
+        return;
+    end
+
+    if (sub == 'track' and #args > 2) then
+        local n = tonumber(args[3]);
+        local r = n and vg.results and vg.results[n];
+        if (r == nil) then U.print('no such result; run /vg find, /vg gear or /vg nm first'); return; end
+        L.track(P, r);
+        save_progress();
+        U.print('tracking: ' .. r.text);
+        return;
+    end
+
     if (sub == 'route') then
         local step = P.step();
         if (step == nil or step.zone == nil) then U.print('the current step has no place'); return; end
@@ -222,7 +304,8 @@ ashita.events.register('command', 'vg_command', function (e)
         return;
     end
 
-    U.print('commands: guides, load <name>, next, back, skip, reset, route, mark, arrow');
+    U.print('commands: guides, load <n>, next, back, skip, reset, route, mark, arrow');
+    U.print('lookups:  find <item>, gear <slot>, nm [name], track <n>');
 end);
 
 ashita.events.register('d3d_present', 'vg_present', function ()

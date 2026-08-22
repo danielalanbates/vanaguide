@@ -17,6 +17,7 @@
 local G = require('core.guide')
 local Q = require('data.quests')
 local MI = require('data.missions')
+local NM = require('data.nm')
 
 local AREA_TITLE = {
     sandoria = "San d'Oria", bastok = 'Bastok', windurst = 'Windurst', jeuno = 'Jeuno',
@@ -123,10 +124,47 @@ local function build_missions(area)
     })
 end
 
+--- Notorious monsters, one guide per zone that has any with a known spot.  Hunting is not a
+--- sequence, so these are `FIXED`: nothing auto-completes, the list stays put, and each entry
+--- is a place the arrow can take you.
+local function build_nms(zone, list)
+    local steps = {}
+    table.sort(list, function(a, b) return (a.lo or 0) < (b.lo or 0) end)
+    for _, n in ipairs(list) do
+        if n.x ~= nil then
+            steps[#steps + 1] = ('K %s (level %d-%d)|Z|%d|POS|%.1f,%.1f,20|FIXED||N|%s|')
+                :format(n.name, n.lo, n.hi, zone, n.x, n.z,
+                        (#n.loot > 0) and ('%d recorded drops'):format(#n.loot) or 'no drops recorded')
+        end
+    end
+    if #steps == 0 then return nil end
+    return G.register({
+        name = ('Notorious monsters — %s'):format(require('core.util').zone_name(zone)),
+        author = 'generated from server data',
+        desc = ('%d notorious monsters with a known spawn in this zone.'):format(#steps),
+        steps = table.concat(steps, '\n'),
+    })
+end
+
 local M = { areas = {}, storylines = {} }
 for area in pairs(Q.quests) do M.areas[#M.areas + 1] = area end
 table.sort(M.areas)
 for _, area in ipairs(M.areas) do build(area) end
+
+do
+    local by_zone = {}
+    for _, n in ipairs(NM.list) do
+        if n.x ~= nil then
+            by_zone[n.zone] = by_zone[n.zone] or {}
+            table.insert(by_zone[n.zone], n)
+        end
+    end
+    local zones_with = {}
+    for zone in pairs(by_zone) do zones_with[#zones_with + 1] = zone end
+    table.sort(zones_with)
+    for _, zone in ipairs(zones_with) do build_nms(zone, by_zone[zone]) end
+    M.nm_zones = zones_with
+end
 
 for area in pairs(MI.missions) do M.storylines[#M.storylines + 1] = area end
 table.sort(M.storylines)

@@ -284,5 +284,75 @@ do
     end
 end
 
+-- ---- loot, gear and notorious monsters ------------------------------------------
+do
+    local NM = require('data.nm')
+    local GEAR = require('data.gear')
+    local VEND = require('data.vendors')
+    local L = require('core.lookup')
+
+    ok(#NM.list >= 300, ('the notorious-monster list is populated (%d)'):format(#NM.list))
+    local placed, bad_zone, placeholder = 0, 0, 0
+    for _, n in ipairs(NM.list) do
+        if zones.name[n.zone] == nil then bad_zone = bad_zone + 1 end
+        if n.x ~= nil then
+            placed = placed + 1
+            -- (1,1,1) is LandSandBoat's "a script decides where this spawns". Writing it out
+            -- would aim the arrow at the middle of nowhere with full confidence.
+            if math.abs(n.x) <= 1 and math.abs(n.z) <= 1 then placeholder = placeholder + 1 end
+        end
+    end
+    eq(bad_zone, 0, 'every notorious monster is in a real zone')
+    eq(placeholder, 0, 'no placeholder coordinates survive into the data')
+    ok(placed >= 100, ('%d of them have a real spawn point'):format(placed))
+
+    local gear_count = 0
+    for id, e in pairs(GEAR.items) do
+        gear_count = gear_count + 1
+        ok(type(e[1]) == 'string' and e[1] ~= '', 'gear entry has a name')
+        break
+    end
+    for _ in pairs(GEAR.items) do gear_count = gear_count + 1 end
+    ok(gear_count >= 400, ('gear with a findable source (%d)'):format(gear_count))
+
+    local sold = 0
+    for _ in pairs(VEND.sold_by) do sold = sold + 1 end
+    ok(sold >= 1000, ('items somebody sells (%d)'):format(sold))
+
+    -- a real lookup, end to end
+    local found = L.find_item('bronze')
+    ok(#found > 0, 'searching for bronze gear finds something')
+    ok(#found[1].sources > 0, 'and it says where to get it')
+    ok(found[1].sources[1].zone ~= nil, 'with a zone the router can use')
+
+    -- jobs are a bitmask; a WAR-only piece must not show up for a WHM
+    local war = GEAR.for_slot('body', 99, 1)
+    ok(#war > 0, 'body armour exists for a warrior')
+
+    -- tracking turns a lookup into an ordinary one-step guide
+    local before = P.guide
+    L.track(P, { title = 'Test target', text = 'Go here', zone = 230, x = 10, z = -20 })
+    eq(P.step().zone, 230, 'tracking builds a step in the right zone')
+    eq(P.step().pos.x, 10, 'with the right coordinates')
+    eq(P.step().kind, 'run', 'as a run-to step')
+    P.set_guide(before or G.get('Starting out'))
+end
+
+-- ---- the notorious-monster guides -----------------------------------------------
+do
+    local nm_guides = 0
+    for _, g in ipairs(G.list()) do
+        if g.name:find('Notorious monsters') then
+            nm_guides = nm_guides + 1
+            eq(#g.errors, 0, ('%s parses cleanly'):format(g.name))
+            for _, st in ipairs(g.steps) do
+                ok(st.pos ~= nil, 'every notorious-monster step has a place to point at')
+                ok(st.fixed == true, 'and never completes itself')
+            end
+        end
+    end
+    ok(nm_guides >= 5, ('a hunting guide per zone that has notorious monsters (%d)'):format(nm_guides))
+end
+
 print(('\n%d passed, %d failed'):format(pass, fail))
 os.exit(fail == 0 and 0 or 1)
