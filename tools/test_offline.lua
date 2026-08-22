@@ -172,5 +172,32 @@ end
 ok(P.complete(), 'the starting guide can be played to the end')
 ok(guard < 100, 'and it terminates')
 
+-- ---- the arrow's rotation sense -------------------------------------------------
+-- The bug this catches: the screen's y grows downward, so drawing the bearing
+-- unnegated mirrors the arrow — left targets get a right-pointing arrow.
+do
+    local lines = {}
+    _G.imgui = { GetForegroundDrawList = function()
+        return { AddLine = function(_, a, b, _, width)
+            if width == 3 then lines[#lines + 1] = { a[1], a[2], b[1], b[2] } end
+        end }
+    end }
+    local A = require('ui.arrow')
+    local function tip(bearing)
+        lines = {}
+        A.pos_x, A.pos_y = 100, 100
+        A.draw(bearing, 10, nil, nil)
+        -- the tip is the point two of the coloured lines share
+        return lines[1][1], lines[1][2]
+    end
+    local tx, ty = tip(0)
+    ok(math.abs(tx - 100) < 1 and ty < 100, 'bearing 0 points up the screen')
+    tx, ty = tip(math.pi / 2)
+    ok(tx < 100 and math.abs(ty - 100) < 1, 'a bearing to the left points left on screen')
+    tx, ty = tip(-math.pi / 2)
+    ok(tx > 100, 'a bearing to the right points right on screen')
+    _G.imgui = nil
+end
+
 print(('\n%d passed, %d failed'):format(pass, fail))
 os.exit(fail == 0 and 0 or 1)

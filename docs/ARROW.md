@@ -12,7 +12,19 @@ angle = atan2(-(target.z - player.z), target.x - player.x) - player.yaw
 exactly right or exactly mirrored, and **it has not been checked against a running client
 yet** (see [VERIFICATION.md](VERIFICATION.md)).
 
-So the arrow ships with a calibration you can fix in five seconds without editing code:
+The *screen* half of the rotation, on the other hand, is proven. `tools/render_arrow.lua`
+draws the real `ui.arrow` code through a fake ImGui draw list and writes
+`docs/arrow-geometry.svg`:
+
+![the arrow at five bearings](arrow-geometry.svg)
+
+Left to right: ahead, 90° left, behind, 90° right, ahead-left. That picture caught a real
+bug — the screen's y axis grows downward, so the first version drew every bearing mirrored.
+`tools/test_offline.lua` now asserts it, so it cannot come back.
+
+What remains unproven is the *game* half: whether FFXI's yaw grows the same way this code
+assumes. So the arrow ships with a calibration you can fix in five seconds without editing
+code:
 
 * `/vg arrow flip` — mirror the rotation. If the arrow points left when the target is
   right, this is the fix.

@@ -11,6 +11,7 @@ Written 2026-08-22. Be suspicious of anything not in the first table.
 | Packet `0x056` bit maths — quest flags in, quest flags out; current-mission decode | same, against synthetic packets built to the layout in [PACKETS.md](PACKETS.md) |
 | Progress cursor: ticking, skipping, back, walking over already-finished steps | same |
 | Router: Dijkstra finds San d'Oria → Port Jeuno, prefers the airship where it is cheaper, returns nil rather than a wrong answer, and opens a route once a zone line is learned | same |
+| The arrow's screen geometry and rotation sense | `tools/render_arrow.lua` renders the real drawing code to `docs/arrow-geometry.svg`; the harness asserts up/left/right |
 | Every shipped guide parses with zero errors and names only real zones | same |
 | All 300 zone ids and names | generated from LandSandBoat `zone_settings.sql` by `tools/gen_zones.py` |
 
@@ -20,8 +21,9 @@ Written 2026-08-22. Be suspicious of anything not in the first table.
    client. Syntax is checked (`luajit -bl`), the module graph resolves offline, but Ashita's
    `require` path, the `settings` library's per-character behaviour and the `d3d_present`
    hook are all untested here.
-2. **The arrow's rotation sense.** See [ARROW.md](ARROW.md). Assume it is mirrored until
-   somebody looks.
+2. **Which way FFXI's yaw grows.** The arrow's screen rotation is proven (above); whether
+   the game's heading value has the sign this code assumes is not. See [ARROW.md](ARROW.md);
+   if it is mirrored, `/vg arrow flip` fixes it and the default should then change.
 3. **`0x056` against a real server.** The bit maths is proven; the *page ids* come from a
    third-party reading of the protocol. A wrong page id shows up as a quest area that never
    updates.
