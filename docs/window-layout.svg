@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="360" viewBox="0 0 860 360">
+<rect width="860" height="360" fill="#0f1116"/>
+<text x="20" y="24" fill="#8891a8" font-family="monospace" font-size="12">in Southern San d'Oria, on step 1</text>
+<rect x="20" y="40" width="400" height="300" rx="6" fill="#1b1f2a" stroke="#333a4d"/>
+<rect x="20" y="40" width="400" height="22" rx="6" fill="#232a3a"/>
+<text x="30" y="56" fill="#dde3f0" font-family="sans-serif" font-size="12">Vanaguide</text>
+<text x="30" y="66" fill="#ffd133" font-family="sans-serif" font-size="12">San d'Oria — Rank 1</text>
+<text x="30" y="84" fill="#c9d1e0" font-family="sans-serif" font-size="12">(1/9)</text>
+<line x1="28" y1="102" x2="412" y2="102" stroke="#333a4d"/>
+<text x="30" y="116" fill="#e5e5ff" font-family="sans-serif" font-size="12">Talk: Take a mission from the Gate Guard in Southern San</text>
+<text x="30" y="133" fill="#e5e5ff" font-family="sans-serif" font-size="12">    d'Oria.</text>
+<text x="30" y="151" fill="#8cccff" font-family="sans-serif" font-size="12">In Southern San d'Oria</text>
+<rect x="30" y="157" width="50" height="20" rx="4" fill="#2c3448" stroke="#3d4763"/>
+<text x="41" y="171" fill="#cfd6e6" font-family="sans-serif" font-size="11">Done</text>
+<rect x="90" y="157" width="50" height="20" rx="4" fill="#2c3448" stroke="#3d4763"/>
+<text x="101" y="171" fill="#cfd6e6" font-family="sans-serif" font-size="11">Skip</text>
+<rect x="150" y="157" width="50" height="20" rx="4" fill="#2c3448" stroke="#3d4763"/>
+<text x="161" y="171" fill="#cfd6e6" font-family="sans-serif" font-size="11">Back</text>
+<rect x="210" y="157" width="64" height="20" rx="4" fill="#2c3448" stroke="#3d4763"/>
+<text x="221" y="171" fill="#cfd6e6" font-family="sans-serif" font-size="11">Guides</text>
+<line x1="28" y1="195" x2="412" y2="195" stroke="#333a4d"/>
+<text x="30" y="209" fill="#c9d1e0" font-family="sans-serif" font-size="12">Next:</text>
+<text x="30" y="227" fill="#c9d1e0" font-family="sans-serif" font-size="12">Do Mission 1-1: Smash the Orcish Scouts. Kill orcs in</text>
+<text x="30" y="244" fill="#c9d1e0" font-family="sans-serif" font-size="12">    Ghelsba Outpost.</text>
+<text x="30" y="262" fill="#c9d1e0" font-family="sans-serif" font-size="12">Turn in Report back to the Gate Guard and take your</text>
+<text x="30" y="279" fill="#c9d1e0" font-family="sans-serif" font-size="12">    reward.</text>
+<text x="30" y="297" fill="#c9d1e0" font-family="sans-serif" font-size="12">Talk Take Mission 1-2 from the Gate Guard.</text>
+<text x="30" y="315" fill="#c9d1e0" font-family="sans-serif" font-size="12">Do Mission 1-2: Bat Hunt. Collect the bat wings in Kings</text>
+<text x="30" y="332" fill="#c9d1e0" font-family="sans-serif" font-size="12">    Ranperre's Tomb.</text>
+<text x="440" y="24" fill="#8891a8" font-family="monospace" font-size="12">in Port Jeuno, four steps in</text>
+<rect x="440" y="40" width="400" height="300" rx="6" fill="#1b1f2a" stroke="#333a4d"/>
+<rect x="440" y="40" width="400" height="22" rx="6" fill="#232a3a"/>
+<text x="450" y="56" fill="#dde3f0" font-family="sans-serif" font-size="12">Vanaguide</text>
+<text x="450" y="66" fill="#ffd133" font-family="sans-serif" font-size="12">San d'Oria — Rank 1</text>
+<text x="450" y="84" fill="#c9d1e0" font-family="sans-serif" font-size="12">(4/9)</text>
+<line x1="448" y1="102" x2="832" y2="102" stroke="#333a4d"/>
+<text x="450" y="116" fill="#e5e5ff" font-family="sans-serif" font-size="12">Talk: Take Mission 1-2 from the Gate Guard.</text>
+<text x="450" y="134" fill="#8cccff" font-family="sans-serif" font-size="12">Zone into Lower Jeuno</text>
+<text x="450" y="152" fill="#c9d1e0" font-family="sans-serif" font-size="12">5 zones to Southern San d'Oria</text>
+<rect x="450" y="158" width="50" height="20" rx="4" fill="#2c3448" stroke="#3d4763"/>
+<text x="461" y="172" fill="#cfd6e6" font-family="sans-serif" font-size="11">Done</text>
+<rect x="510" y="158" width="50" height="20" rx="4" fill="#2c3448" stroke="#3d4763"/>
+<text x="521" y="172" fill="#cfd6e6" font-family="sans-serif" font-size="11">Skip</text>
+<rect x="570" y="158" width="50" height="20" rx="4" fill="#2c3448" stroke="#3d4763"/>
+<text x="581" y="172" fill="#cfd6e6" font-family="sans-serif" font-size="11">Back</text>
+<rect x="630" y="158" width="64" height="20" rx="4" fill="#2c3448" stroke="#3d4763"/>
+<text x="641" y="172" fill="#cfd6e6" font-family="sans-serif" font-size="11">Guides</text>
+<line x1="448" y1="196" x2="832" y2="196" stroke="#333a4d"/>
+<text x="450" y="210" fill="#c9d1e0" font-family="sans-serif" font-size="12">Next:</text>
+<text x="450" y="228" fill="#c9d1e0" font-family="sans-serif" font-size="12">Do Mission 1-2: Bat Hunt. Collect the bat wings in Kings</text>
+<text x="450" y="245" fill="#c9d1e0" font-family="sans-serif" font-size="12">    Ranperre's Tomb.</text>
+<text x="450" y="263" fill="#c9d1e0" font-family="sans-serif" font-size="12">Turn in Report back to the Gate Guard.</text>
+<text x="450" y="281" fill="#c9d1e0" font-family="sans-serif" font-size="12">Talk Take Mission 1-3 from the Gate Guard.</text>
+<text x="450" y="299" fill="#c9d1e0" font-family="sans-serif" font-size="12">Do Mission 1-3: The Rescue. Fort Ghelsba.</text>
+</svg>

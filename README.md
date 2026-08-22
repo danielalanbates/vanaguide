@@ -31,6 +31,20 @@ Vanaguide is on nobody's list yet. On HorizonXI, CatsEyeXI and FFEra it is *not 
 Run it on your own LandSandBoat world, or ask the server first. This is not a formality —
 people lose accounts over it.
 
+## What it looks like
+
+The guide window, drawn from the widget calls the real `ui/window.lua` makes — on the left
+the step is in this zone, on the right it is a continent away and the router has taken over:
+
+![the guide window in two states](docs/window-layout.svg)
+
+The arrow, at five bearings (`tools/render_arrow.lua`):
+
+![the arrow](docs/arrow-geometry.svg)
+
+Neither is a screenshot of the game — see [docs/VERIFICATION.md](docs/VERIFICATION.md) for
+exactly what that does and does not prove.
+
 ## Commands
 
 | | |

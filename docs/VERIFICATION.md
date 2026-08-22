@@ -12,6 +12,7 @@ Written 2026-08-22. Be suspicious of anything not in the first table.
 | Progress cursor: ticking, skipping, back, walking over already-finished steps | same |
 | Router: Dijkstra finds San d'Oria → Port Jeuno, prefers the airship where it is cheaper, returns nil rather than a wrong answer, and opens a route once a zone line is learned | same |
 | The arrow's screen geometry and rotation sense | `tools/render_arrow.lua` renders the real drawing code to `docs/arrow-geometry.svg`; the harness asserts up/left/right |
+| What the guide window says, for a given world state | `tools/render_window.lua` records the widget calls the real `ui/window.lua` makes and draws them to `docs/window-layout.svg` |
 | Every shipped guide parses with zero errors and names only real zones | same |
 | All 300 zone ids and names | generated from LandSandBoat `zone_settings.sql` by `tools/gen_zones.py` |
 
