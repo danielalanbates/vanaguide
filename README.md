@@ -14,7 +14,7 @@ in-game yet.** Read [docs/VERIFICATION.md](docs/VERIFICATION.md) before you trus
 | Waypoint arrow with distance | ✅ `ui/arrow.lua`, drawn on ImGui's foreground list so it works under DXVK on the Mac port |
 | Travel routing (flight paths, boats) | ✅ `routing/zonegraph.lua` — Dijkstra over the zone graph, with airships and the Selbina/Mhaura ferry as real edges |
 | A travel graph that is actually complete | ⚠️ partly. The seed graph covers the base world; **the addon learns every zone line you walk through** and saves it, so it fills itself in from play instead of from guesswork |
-| Guide library | 3 seed guides in `Vanaguide/guides/`, plain-text format, community-editable |
+| Guide library | **506 quests across 10 areas**, generated from server data into one guide per area ([docs/QUEST_DATABASE.md](docs/QUEST_DATABASE.md)), plus hand-written guides in `Vanaguide/guides/` |
 | Guide editor | ❌ — but `/vg mark` writes a paste-ready guide line for wherever you are standing |
 
 ## Install
@@ -74,7 +74,7 @@ docs/         format, routing, packets, arrow calibration, verification, pathway
 ## Testing
 
 ```sh
-luajit tools/test_offline.lua      # 60 assertions, no game required
+luajit tools/test_offline.lua      # 456 assertions, no game required
 ```
 
 The harness fakes Ashita's globals (`tools/stubs.lua`), so the parser, the completion
@@ -83,6 +83,7 @@ launching anything.
 
 ## Documentation
 
+* [docs/QUEST_DATABASE.md](docs/QUEST_DATABASE.md) — the 506-quest database, and why it comes from server code rather than a wiki
 * [docs/GUIDE_FORMAT.md](docs/GUIDE_FORMAT.md) — how to write a guide
 * [docs/ROUTING.md](docs/ROUTING.md) — the travel graph and how it learns
 * [docs/PACKETS.md](docs/PACKETS.md) — how quest and mission completion is read

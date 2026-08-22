@@ -199,5 +199,62 @@ do
     _G.imgui = nil
 end
 
+-- ---- the generated quest database ----------------------------------------------
+local QDB = require('data.quests')
+do
+    local total, positioned, bad_zone, bad_id = 0, 0, 0, 0
+    for area, quests in pairs(QDB.quests) do
+        for id, q in pairs(quests) do
+            total = total + 1
+            if q.zone ~= nil then
+                positioned = positioned + 1
+                if zones.name[q.zone] == nil then bad_zone = bad_zone + 1 end
+            end
+            -- The quest log is 256 flags per area; an id outside that could never be read
+            -- back out of packet 0x056, so it would be a silently dead step.
+            if id < 0 or id > 255 then bad_id = bad_id + 1 end
+        end
+    end
+    ok(total >= 500, ('the quest database has every quest (%d)'):format(total))
+    ok(positioned >= 300, ('most quests carry coordinates (%d)'):format(positioned))
+    eq(bad_zone, 0, 'every quest zone is a real zone')
+    eq(bad_id, 0, 'every quest id fits the 256-flag log')
+    local knights = QDB.get('sandoria', 29)
+    ok(knights ~= nil and knights.zone == 230, "A Knight's Test is taken in Southern San d'Oria")
+end
+
+-- ---- generated guides ------------------------------------------------------------
+do
+    local generated = 0
+    for _, g in ipairs(G.list()) do
+        if g.name:find('every quest') then
+            generated = generated + 1
+            eq(#g.errors, 0, ('%s parses cleanly'):format(g.name))
+            local seen, dup = {}, 0
+            for _, s in ipairs(g.steps) do
+                local key = s.quest and (s.quest.area .. s.quest.id) or s.text
+                if seen[key] then dup = dup + 1 end
+                seen[key] = true
+            end
+            eq(dup, 0, ('%s lists each quest once'):format(g.name))
+        end
+    end
+    ok(generated >= 10, ('a guide per quest area (%d)'):format(generated))
+
+    -- prerequisites come first
+    local sd = G.get("San d'Oria — every quest")
+    local pos = {}
+    for i, s in ipairs(sd.steps) do if s.quest then pos[s.quest.id] = i end end
+    local violations = 0
+    for id, i in pairs(pos) do
+        local q = QDB.get('sandoria', id)
+        if q ~= nil and q.prereq ~= nil and q.prereq[1] == 'sandoria' then
+            local pi = pos[q.prereq[2]]
+            if pi ~= nil and pi > i then violations = violations + 1 end
+        end
+    end
+    eq(violations, 0, 'a quest never comes before the quest it requires')
+end
+
 print(('\n%d passed, %d failed'):format(pass, fail))
 os.exit(fail == 0 and 0 or 1)
