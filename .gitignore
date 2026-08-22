@@ -1,0 +1,10 @@
+# Nothing personal belongs in this repository.
+marks.txt
+*.log
+logs/
+config/
+settings/
+.DS_Store
+# Ashita writes per-character settings next to the addon; those hold character names.
+Vanaguide/settings/
+Vanaguide/config/
