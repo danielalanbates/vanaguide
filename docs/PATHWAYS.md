@@ -79,8 +79,11 @@ stated in the scripts that implement them — `scripts/zones/*/npcs/`. That is t
 in routing, and it is readable, not guesswork.
 
 **Missions deserve the ledger too.** `data/missions.lua` now has 356 of 459 with coordinates,
-and every tool that checks a quest would check a mission unchanged; the ledger schema is
-quest-shaped and would need a `kind` column, not a rewrite.
+and every tool that checks a quest would check a mission unchanged. It is a `kind` column, not
+a rewrite — but it is not a one-line change either, and the trap is worth stating: quests and
+missions share area names (`sandoria` is both) with overlapping ids, so `kind` has to reach
+`checks`, `npc_match` and both views, or the two collide silently and a mission's verdict
+lands on a quest. Do it when nothing is mid-sweep.
 
 **The five quests with nothing to check** are mog-house moogles and scripts that state no
 place at all. A guide could still route to "your own Mog House", which is a real instruction
