@@ -58,6 +58,33 @@ be left alone while it works.
 In-game, the same check is one command: `/vg verify sandoria 29`, and `/vg nearby` prints
 what is loaded around you.
 
+## Two checks, answering different questions
+
+`tools/npc_positions.py` checks every quest against the server's own `npc_list` — 40,000-odd
+NPCs with the position the server spawns them at, the zone encoded in the id as
+`(npcid >> 12) & 0xFFF`. It takes about a second for all 505, needs no client, and is the only
+check available for a quest nobody has swept yet.
+
+`tools/verify_quests.py` stands a character on each coordinate and reads the entity table. It
+is thirty seconds a quest, it dies when the character does, and it is the only thing that can
+speak for a `???` or a door — `npc_list` is not a reliable witness for those, because the same
+`qm3` exists in a dozen zones and is missing from others.
+
+Together they make a miss readable:
+
+| the server says | the client says | what it means |
+| --- | --- | --- |
+| it is here | found it here | the guide is right |
+| it is here | saw nothing | a spawn condition, not a bad coordinate |
+| it is somewhere else | — | a real data error, and here is the correction |
+| it does not exist | — | nothing this server can ever prove |
+
+Where the two disagree by more than ten yalms, the generator takes the server's position: the
+header comment is prose somebody typed, `npc_list` is what actually spawns.
+
+`tools/ledger.py check` covers a third kind of fault entirely — a prerequisite naming a quest
+that is not in the database. No amount of standing on a coordinate would find one.
+
 ## Where the answers are kept
 
 Results go into a SQLite ledger, `data/verification.sqlite3` — one row per quest in `quests`,
