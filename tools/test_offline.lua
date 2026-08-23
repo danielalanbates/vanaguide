@@ -381,14 +381,17 @@ do
     Win.set_viewport(640, 480)
     local w, h, rows = Win.fit()
     ok(w <= 640 * 0.4, ('at 640x480 the window is a third of the width, not half (%d)'):format(w))
-    ok(h <= 480 * 0.4, ('and a third of the height (%d)'):format(h))
-    ok(rows >= 1, 'with at least one upcoming step visible')
+    -- Taller than a third on a short screen, on purpose: below ~190px the window clipped its
+    -- own buttons, and with no working mouse there is no way to scroll down to them.
+    ok(h >= 190 and h <= 480 * 0.5, ('tall enough to keep the buttons above the fold (%d)'):format(h))
+    ok(rows >= 0, 'even if that leaves no room for the upcoming list')
     ok(Win.refit == true, 'a resolution change re-fits once')
 
     Win.set_viewport(1920, 1080)
     local w2, h2, rows2 = Win.fit()
     ok(w2 > w and w2 <= 420, ('at 1920x1080 it grows, but stays capped (%d)'):format(w2))
     ok(rows2 >= rows, 'and shows at least as many upcoming steps')
+    ok(rows2 >= 1, 'a full-size screen always has room for what is next')
 
     -- an absurd viewport must not produce an absurd window
     Win.set_viewport(320, 200)

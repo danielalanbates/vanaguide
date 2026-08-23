@@ -51,6 +51,7 @@ local P      = require('core.progress');
 local graph  = require('routing.zonegraph');
 local R      = require('routing.router');
 local L      = require('core.lookup');
+local Verify = require('core.verify');
 local Arrow  = require('ui.arrow');
 local Window = require('ui.window');
 
@@ -330,6 +331,28 @@ ashita.events.register('command', 'vg_command', function (e)
         U.print(('story: seen=%s  quest areas=%d  completed quests=%d  nation=%s')
             :format(tostring(story.seen), areas, flags, tostring(story.nation)));
         U.print('current missions: ' .. (next(missions) and table.concat(missions, ' ') or '(none)'));
+        return;
+    end
+
+    -- Stand on a quest's coordinates and check the NPC is really there. Writes a CSV row to
+    -- addons/Vanaguide/verify.csv as well as printing, because a full sweep is hundreds of
+    -- these and they are read by a script.  See docs/QUEST_VERIFICATION.md.
+    if (sub == 'verify' and #args > 3) then
+        local r = Verify.quest(args[3]:lower(), tonumber(args[4]) or -1);
+        Verify.log('verify.csv', Verify.row(r));
+        U.print(('verify %s %s: %s — %s'):format(r.area, tostring(r.id),
+            r.ok and 'ok' or 'MISS', r.why));
+        return;
+    end
+
+    -- What is loaded around me right now: the raw material the check above works from.
+    if (sub == 'nearby') then
+        local x, z = U.position();
+        local list = Verify.nearby(x, z);
+        U.print(('%d entities loaded here'):format(#list));
+        for i = 1, math.min(8, #list) do
+            U.print(('  %-24s %5.1f yalms'):format(list[i].name, list[i].dist or -1));
+        end
         return;
     end
 

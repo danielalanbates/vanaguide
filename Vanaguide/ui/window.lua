@@ -34,10 +34,13 @@ end
 --- client. Returns width, height, and how many upcoming steps will fit.
 function W.fit()
     local w = math.max(240, math.min(420, W.screen.w * 0.32))
-    local h = math.max(150, math.min(320, W.screen.h * 0.34))
-    -- Each upcoming line is about 18px; the fixed part of the window is about 130.
-    local rows = math.floor((h - 130) / 18)
-    return math.floor(w), math.floor(h), math.max(1, math.min(4, rows))
+    -- The floor is 190, not 150: at 640x480 a 163px window clipped its own buttons below the
+    -- fold, and with no working mouse there is no way to scroll to them. Seen in-game.
+    local h = math.max(190, math.min(340, W.screen.h * 0.42))
+    -- Each upcoming line is about 18px; the fixed part of the window is about 150 once the
+    -- step text has wrapped to two lines, which it does on a narrow window.
+    local rows = math.floor((h - 150) / 18)
+    return math.floor(w), math.floor(h), math.max(0, math.min(4, rows))
 end
 
 --- See ui/arrow.lua: ImGui is `require('imgui')` in Ashita v4, not a global.
@@ -99,9 +102,19 @@ function W.draw(w, on_pick)
             imgui.Text('No guide loaded.')
             if imgui.Button('Choose a guide') then W.picker[1] = true end
         else
-            text_colored({ 1.0, 0.82, 0.2, 1.0 }, guide.name)
-            imgui.SameLine()
-            imgui.Text(('(%d/%d)'):format(math.min(P.index, P.count()), P.count()))
+            -- On a narrow window the name wraps, and a SameLine counter then lands in the
+            -- middle of the wrapped line ("San d'Oria missions - (3 / in order)"). Seen at
+            -- 640x480, which is what the local test world runs at. Below 320px the counter
+            -- goes on the name's own line instead.
+            local narrow = fw < 320
+            if narrow then
+                text_colored({ 1.0, 0.82, 0.2, 1.0 },
+                    ('%s  (%d/%d)'):format(guide.name, math.min(P.index, P.count()), P.count()))
+            else
+                text_colored({ 1.0, 0.82, 0.2, 1.0 }, guide.name)
+                imgui.SameLine()
+                imgui.Text(('(%d/%d)'):format(math.min(P.index, P.count()), P.count()))
+            end
 
             local step = P.step()
             if step == nil then
@@ -110,7 +123,10 @@ function W.draw(w, on_pick)
                 imgui.Separator()
                 text_colored({ 0.9, 0.9, 1.0, 1.0 },
                     ('%s: %s'):format(VERB_LABEL[step.kind] or '?', step.text))
-                if step.note ~= nil and step.note ~= '' then
+                -- The note is the first thing to go when the window is small: the buttons
+                -- have to stay above the fold, because clicking them is the only way to move
+                -- the guide by hand and this client cannot scroll an ImGui window.
+                if step.note ~= nil and step.note ~= '' and not narrow then
                     text_colored({ 0.7, 0.7, 0.7, 1.0 }, step.note)
                 end
 
@@ -128,12 +144,16 @@ function W.draw(w, on_pick)
                 imgui.SameLine()
                 if imgui.Button('Guides') then W.picker[1] = true end
 
-                imgui.Separator()
-                imgui.Text('Next:')
-                local next_steps = P.upcoming(W.upcoming + 1, w)
-                for i = 2, #next_steps do
-                    local s = next_steps[i]
-                    wrapped((' %s %s'):format(VERB_LABEL[s.kind] or '-', s.text))
+                -- No early return here, ever: Begin/End must pair or ImGui's window stack
+                -- unwinds into the next addon's frame.
+                if W.upcoming >= 1 then
+                    imgui.Separator()
+                    imgui.Text('Next:')
+                    local next_steps = P.upcoming(W.upcoming + 1, w)
+                    for i = 2, #next_steps do
+                        local s = next_steps[i]
+                        wrapped((' %s %s'):format(VERB_LABEL[s.kind] or '-', s.text))
+                    end
                 end
             end
         end
