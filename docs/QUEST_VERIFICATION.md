@@ -19,9 +19,26 @@ tools/client.sh start     # launch, then log in through the cmd.txt channel
 tools/client.sh rescue    # put a stuck character somewhere safe and restart
 ```
 
-Ashita's own `autologin` addon accepts the licence screen and picks the character slot;
-`scripts/lsb.txt` loads it and `/autologin 0` is sent through `cmd.txt`. Everything after that
-is file-driven. Verified: the client got itself in-world with the screen locked.
+Ashita's own `autologin` addon accepts the licence screen and picks the character slot — but
+**the slot is a load argument, not a command**. `autologin.lua` registers `load` and `unload`
+and nothing else: it reads the slot out of `e:args()[4]` and starts its login coroutine right
+there. There is no `/autologin` handler, so
+
+```
+/addon load autologin      # loads it
+/autologin 0               # does absolutely nothing
+```
+
+leaves the client sitting on the licence agreement forever, while the addon happily answers
+`/vg verify` with the stale login position. The correct line, in `scripts/lsb.txt` and in
+`client.sh`, is one:
+
+```
+/addon load autologin 0
+```
+
+Everything after that is file-driven. Verified 2026-08-23: the client accepted the licence,
+picked slot 0 and stood up in Southern San d'Oria with no keyboard involved.
 
 ## Running it
 
@@ -48,24 +65,41 @@ area,id,ok|MISS,"quest name","npc",want_zone,want_x,want_z,zone,x,z,dist,"why"
 sandoria,29,ok,"A Knight's Test","Balasiel",230,-136.0,64.0,230,-136.0,64.0,2.9,"found Balasiel at 2.9 yalms"
 ```
 
-## When the character gets stuck
+## When the character gets stuck: it is dead
 
-The first full sweep teleported into **the Shrine of Ru'Avitau (zone 178) and never came
-out**. Every later `!pos` and `!zone` was refused silently, so 245 consecutive checks
-dutifully reported "standing in 178, quest is in …" — rows that look like data errors and are
-nothing of the kind. Nothing in the game would move the character.
+The first full sweep filled 245 consecutive rows with "standing in 178, quest is in …" and
+the obvious conclusion — the Shrine of Ru'Avitau swallows characters — was wrong. Zone 178 is
+innocent. **The character had died.**
 
-Three things came out of that:
+LandSandBoat answers every GM command from a KO'd player with
 
-* The driver watches for it. A row that says "standing in" means the teleport did not take;
-  five in a row and the run stops rather than filling the file with nonsense.
-* `tools/client.sh rescue` writes the position straight into the character row in the
-  database and logs in again. That is the only thing that worked.
-* Zone 178 is skipped by default (`--skip-zones`). Whatever it is about that zone, going
-  around it costs one quest and saves a run.
+```
+You cannot use that command while unconscious.
+```
 
-The report counts those rows separately, as "not checked": they are the harness failing, not
-evidence about the guide.
+and that message goes to the game's chat log, where no script is looking. Nothing appears in
+`xi_map.log`; `cmd.txt` is still consumed on schedule, because the addon really is running the
+line; `/vg verify` still answers, because reading the entity table needs no permission at all.
+Every symptom points at the teleport being ignored, and the true cause is one screenshot away
+and nowhere else. A level 75 character dropped into several hundred zones back to back gets
+killed eventually — this is the normal end of a long unattended run, not an exotic one.
+
+What that changed:
+
+* **`!hide` at login.** `setGMHidden` takes the character out of every mob's aggro check and
+  the `GMHidden` charVar survives zoning, so it holds for the whole sweep. It is a *toggle*:
+  `client.sh` reads `char_vars` first, because issuing it twice turns it off again.
+* **`rescue` revives.** `char_stats.hp`, `.mp` and the `death` timestamp, then the position.
+  It also waits for `accounts_sessions` to drop the character first — the map server writes
+  hp and death back out when the session closes, so a revive done too early is quietly
+  overwritten by the corpse, which looks exactly like the revive not working.
+* **The driver rescues itself.** Five refusals in a row is the death signature; the run now
+  calls `client.sh rescue` and carries on from where it stopped, up to `--max-rescues` times,
+  instead of ending the sweep.
+* **Nothing is skipped.** `--skip-zones` still exists and now defaults to empty.
+
+Rows that say "standing in" are still counted separately, as "not checked" — they are the
+harness failing, not evidence about the guide.
 
 ## What a miss means — read this before believing one
 

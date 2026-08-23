@@ -62,11 +62,18 @@ def main():
     # in the table.
     ap.add_argument('--zone-wait', type=float, default=20.0)
     ap.add_argument('--step-wait', type=float, default=6.0)
-    # Zone 178 (the Shrine of Ru'Avitau) swallowed the first sweep: once the character was
-    # inside, every !pos and !zone was refused and 245 later checks reported the same stale
-    # zone. Until something is known about why, the sweep goes around it.
-    ap.add_argument('--skip-zones', default='178',
+    # Zone 178 (the Shrine of Ru'Avitau) was blamed for the first sweep's collapse and was
+    # innocent: the character had died, and a KO'd character is refused every GM command with
+    # "You cannot use that command while unconscious" -- so the last zone it reached, which
+    # happened to be 178, was repeated for all 245 remaining rows. Nothing is skipped by
+    # default any more.
+    ap.add_argument('--skip-zones', default='',
                     help='comma-separated zone ids to leave alone')
+    # A wedge is now recoverable without a person: tools/client.sh rescue revives the
+    # character in the database, puts it back in San d'Oria and logs it in again.
+    ap.add_argument('--rescue', default=os.path.join(HERE, 'client.sh'),
+                    help='script to run to un-wedge the client ("" to just stop)')
+    ap.add_argument('--max-rescues', type=int, default=4)
     ap.add_argument('--recheck', action='store_true',
                     help='re-run only the quests that missed, with a longer settle')
     args = ap.parse_args()
@@ -124,10 +131,9 @@ def main():
     def teleport(q, settle):
         """Cross-zone moves go through `!zone` first.
 
-        `!pos x y z <zone>` alone stopped working part-way through the first full sweep: the
-        character reached the Shrine of Ru'Avitau and stayed there while 245 later checks
-        dutifully reported "standing in 178". Whatever refuses a cross-zone !pos in that
-        state, the dedicated zone command does not care about.
+        A cross-zone `!pos` is not reliable on its own -- the dedicated zone command is, and
+        it costs one extra line per zone change in a sweep that is dominated by zone loads
+        anyway.
         """
         if q['zone'] != current_zone:
             send('!zone %d' % q['zone'])
@@ -136,7 +142,22 @@ def main():
         send('!pos %.3f %.3f %.3f %d' % (q['x'], q['y'] or 0, q['z'], q['zone']))
         return consumed()
 
-    stuck = 0
+    stuck, rescues = 0, 0
+
+    def rescue():
+        """Revive and restart, and report whether the sweep can carry on."""
+        nonlocal rescues, current_zone
+        if not args.rescue or rescues >= args.max_rescues:
+            return False
+        rescues += 1
+        print(f'!! wedged — rescue {rescues}/{args.max_rescues}', flush=True)
+        r = subprocess.run([args.rescue, 'rescue'], capture_output=True, text=True)
+        if r.returncode != 0:
+            print('   rescue failed: ' + (r.stderr or r.stdout).strip()[:200], flush=True)
+            return False
+        current_zone = None
+        return True
+
     for n, q in enumerate(todo, 1):
         if not teleport(q, args.zone_wait):
             print('!! the client stopped consuming commands — stopping', flush=True)
@@ -158,7 +179,9 @@ def main():
             print(f'   no result for {q["area"]} {q["id"]}', flush=True)
             if misses >= 10:
                 print('!! ten silent checks in a row — the client is probably gone', flush=True)
-                break
+                if not rescue():
+                    break
+                misses = 0
             continue
         misses = 0
         # Did the character actually arrive? A row that says "standing in" means the teleport
@@ -169,9 +192,12 @@ def main():
             stuck += 1
             current_zone = None
             if stuck >= 5:
-                print('!! five teleports in a row did not take — the client is wedged, stopping',
-                      flush=True)
-                break
+                # Five refusals in a row is the death signature. Revive and carry on: the
+                # quests already in the CSV are kept, and the run resumes where it stopped.
+                if not rescue():
+                    print('!! wedged and out of rescues — stopping', flush=True)
+                    break
+                stuck = 0
         else:
             stuck = 0
         if n % 10 == 0:
