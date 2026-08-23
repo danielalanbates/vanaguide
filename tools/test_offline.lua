@@ -95,6 +95,27 @@ story.on_packet(0x056, mission, #mission)
 ok(story.mission_done('sandoria', 2), 'mission 2 done when current is 3')
 ok(not story.mission_done('sandoria', 3), 'the current mission is not done')
 
+-- 65535 means "no mission active", not "past every mission". A fresh character reports it
+-- for every storyline, and reading it as progress marked all 24 San d'Oria missions done.
+local none = string.char(0, 0, 0, 0)
+    .. string.char(0, 0, 0, 0)          -- nation 0
+    .. string.char(0xFF, 0xFF, 0, 0)    -- current nation mission = 65535
+    .. string.rep('\0', 0x24 - 0x0C)
+    .. string.char(0xFF, 0xFF, 0, 0)
+    .. string.rep('\0', 8)
+story.on_packet(0x056, none, #none)
+ok(not story.mission_done('sandoria', 0), 'no mission active does not complete mission 0')
+ok(not story.mission_done('sandoria', 23), 'nor the last one')
+eq(story.mission_current('sandoria'), nil, 'and the current mission reads as nothing')
+story.on_packet(0x056, mission, #mission)   -- put the world back for the tests below
+
+-- The nation storyline's completed bitset, page 0x00D0, identified in-game: completing a
+-- mission clears the current number back to 65535, so this page is the only evidence left.
+story.on_packet(0x056, packet_0056(0x00D0, { 0, 1 }), 48)
+ok(story.mission_done('sandoria', 0), 'a completed nation mission is read from page 0x00D0')
+ok(story.mission_done('sandoria', 1), 'and the second one')
+ok(not story.mission_done('sandoria', 9), 'but not one that is still to do')
+
 -- ---- progress -----------------------------------------------------------------
 local guide = G.register({ name = 'Test guide', steps = steps })
 P.set_guide(guide)
@@ -242,7 +263,7 @@ do
     ok(generated >= 10, ('a guide per quest area (%d)'):format(generated))
 
     -- prerequisites come first
-    local sd = G.get("San d'Oria — every quest")
+    local sd = G.get("San d'Oria - every quest")
     local pos = {}
     for i, s in ipairs(sd.steps) do if s.quest then pos[s.quest.id] = i end end
     local violations = 0
@@ -275,7 +296,7 @@ do
        "San d'Oria mission 0 is Smash the Orcish Scouts, not mission 1")
     ok(MDB.get('sandoria', 1).name:find('Bat Hunt') ~= nil, "mission 1 is Bat Hunt")
 
-    local g = G.get("San d'Oria missions — in order")
+    local g = G.get("San d'Oria missions - in order")
     ok(g ~= nil, 'the storyline guide is registered')
     eq(#g.errors, 0, 'and parses cleanly')
     eq(g.steps[1].mission.id, 0, 'its first step waits on mission 0')

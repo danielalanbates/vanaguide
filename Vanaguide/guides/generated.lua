@@ -1,5 +1,5 @@
 -- Vanaguide :: guides/generated.lua
--- One guide per quest-log area, built at load time from data/quests.lua — every quest the
+-- One guide per quest-log area, built at load time from data/quests.lua - every quest the
 -- server implements, in an order you can actually follow.
 --
 -- Ordering: a quest never appears before the quest it requires (a topological sort over the
@@ -80,7 +80,7 @@ local function build(area)
     end
 
     return G.register({
-        name = ('%s — every quest'):format(AREA_TITLE[area] or area),
+        name = ('%s - every quest'):format(AREA_TITLE[area] or area),
         author = 'generated from server data',
         desc = ('All %d quests in the %s log, prerequisites first.'):format(#entries, AREA_TITLE[area] or area),
         steps = table.concat(steps, '\n'),
@@ -117,7 +117,7 @@ local function build_missions(area)
         steps[#steps + 1] = table.concat(line)
     end
     return G.register({
-        name = ('%s — in order'):format(STORY_TITLE[area] or area),
+        name = ('%s - in order'):format(STORY_TITLE[area] or area),
         author = 'generated from server data',
         desc = ('All %d missions in the %s storyline.'):format(#entries, STORY_TITLE[area] or area),
         steps = table.concat(steps, '\n'),
@@ -139,7 +139,7 @@ local function build_nms(zone, list)
     end
     if #steps == 0 then return nil end
     return G.register({
-        name = ('Notorious monsters — %s'):format(require('core.util').zone_name(zone)),
+        name = ('Notorious monsters - %s'):format(require('core.util').zone_name(zone)),
         author = 'generated from server data',
         desc = ('%d notorious monsters with a known spawn in this zone.'):format(#steps),
         steps = table.concat(steps, '\n'),

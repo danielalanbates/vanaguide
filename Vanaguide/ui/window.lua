@@ -10,6 +10,16 @@ local R = require('routing.router')
 
 local W = { open = { true }, picker = { false }, upcoming = 4 }
 
+--- See ui/arrow.lua: ImGui is `require('imgui')` in Ashita v4, not a global.
+local cached
+local function imgui_module()
+    if cached ~= nil then return cached end
+    if _G.imgui ~= nil then cached = _G.imgui; return cached end
+    local ok, m = pcall(require, 'imgui')
+    if ok then cached = m end
+    return cached
+end
+
 local VERB_LABEL = {
     accept = 'Accept', turnin = 'Turn in', complete = 'Do', kill = 'Kill', buy = 'Buy',
     talk = 'Talk', run = 'Go to', use = 'Use', travel = 'Travel', note = 'Note',
@@ -20,12 +30,12 @@ local VERB_LABEL = {
 -- the edge of the window otherwise.  TextWrapped is used where it exists, and the coloured
 -- lines set a wrap position around the plain coloured call, which has no wrapped variant.
 local function wrapped(s)
-    local imgui = _G.imgui
+    local imgui = imgui_module()
     if imgui.TextWrapped ~= nil then imgui.TextWrapped(s) else imgui.Text(s) end
 end
 
 local function text_colored(colour, s)
-    local imgui = _G.imgui
+    local imgui = imgui_module()
     if imgui.TextColored == nil then return wrapped(s) end
     if imgui.PushTextWrapPos ~= nil then
         imgui.PushTextWrapPos(0)
@@ -38,7 +48,7 @@ end
 
 --- One frame.  `w` is a world snapshot; `on_pick` is called with a guide name.
 function W.draw(w, on_pick)
-    local imgui = _G.imgui
+    local imgui = imgui_module()
     if imgui == nil or not W.open[1] then return end
 
     imgui.SetNextWindowSize({ 380, 260 }, ImGuiCond_FirstUseEver)

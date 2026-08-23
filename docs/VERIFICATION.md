@@ -1,63 +1,76 @@
 # What is proven, and what is not
 
-Written 2026-08-22. Be suspicious of anything not in the first table.
+Updated 2026-08-22, **after a full run on a live LandSandBoat server**. Everything in the
+first section was watched happening in the game; everything in the second is still open.
 
-## Verified
+![Vanaguide running in FINAL FANTASY XI](ingame-2026-08-22.png)
+
+*Southern San d'Oria, character on a local LandSandBoat world: the guide window on step 3 of
+24, the arrow in the world with the step under it, 161 yalms to the NPC who starts it.*
+
+## Verified in the game
 
 | | how |
 | --- | --- |
-| Guide parser: verbs, every tag, zone names, error reporting | `tools/test_offline.lua`, 60 assertions, `luajit tools/test_offline.lua` |
-| Completion conditions: item counts, levels, arrival radius, manual-only steps | same |
-| Packet `0x056` bit maths — quest flags in, quest flags out; current-mission decode | same, against synthetic packets built to the layout in [PACKETS.md](PACKETS.md) |
-| Progress cursor: ticking, skipping, back, walking over already-finished steps | same |
-| Router: Dijkstra finds San d'Oria → Port Jeuno, prefers the airship where it is cheaper, returns nil rather than a wrong answer, and opens a route once a zone line is learned | same |
-| The arrow's screen geometry and rotation sense | `tools/render_arrow.lua` renders the real drawing code to `docs/arrow-geometry.svg`; the harness asserts up/left/right |
-| What the guide window says, for a given world state | `tools/render_window.lua` records the widget calls the real `ui/window.lua` makes and draws them to `docs/window-layout.svg` |
-| Every shipped guide parses with zero errors and names only real zones | same |
-| All 300 zone ids and names | generated from LandSandBoat `zone_settings.sql` by `tools/gen_zones.py` |
+| The addon loads | `/addon list` reports `Vanaguide 0.1.0 — State: Ok` |
+| The guide window draws, with the step, the distance, the buttons and the next four steps | screenshot above |
+| The arrow draws in the world, coloured, labelled with the step | screenshot above |
+| `/vg guides` lists all 38 guides, numbered | in-game chat |
+| `/vg load <n>` loads by number and reports the step it resumed on | in-game chat |
+| **Quest and mission flags arrive and parse** — 28 `0x056` packets at login, all ten quest areas, the current mission of every storyline | `/vg story` |
+| **A step completes itself when the server says so** — `!addmission 0 0` + `!completemission 0 0` on the live server moved the guide from step 1 to step 2 without touching the addon; completing mission 1 moved it to step 3 | `/vg status` before and after |
+| Progress persists across a client restart | reloaded on the right step after a relaunch |
+| `/vg find <item>` returns real vendors, prices, cities and quest sources | in-game chat |
+| `/vg nm <name>` and `/vg track <n>` find a monster and make it the arrow's target | in-game chat |
+| Position, zone and heading are read correctly | `/vg status` against known coordinates |
+| The router's distance is right | 161 yalms to Ambrotien, matching the generated data |
 
-## NOT verified — nobody has run this inside the game
+## Five bugs the in-game run found, all fixed
 
-1. **That the addon loads at all.** It has never been in an `addons/` folder on a running
-   client. Syntax is checked (`luajit -bl`), the module graph resolves offline, but Ashita's
-   `require` path, the `settings` library's per-character behaviour and the `d3d_present`
-   hook are all untested here.
-2. **Which way FFXI's yaw grows.** The arrow's screen rotation is proven (above); whether
-   the game's heading value has the sign this code assumes is not. See [ARROW.md](ARROW.md);
-   if it is mirrored, `/vg arrow flip` fixes it and the default should then change.
-3. **`0x056` against a real server.** The bit maths is proven; the *page ids* come from a
-   third-party reading of the protocol. A wrong page id shows up as a quest area that never
-   updates.
-4. **Mission ids in `guides/sandoria_rank1.lua`.** Seed content. If a step ticks itself at
-   the wrong moment, the id is off by one.
-5. **Item ids** in guide steps. None have been checked against the client's item table.
+1. **ImGui is a module, not a global.** `_G.imgui` is nil in Ashita v4; it is
+   `require('imgui')`. The window and arrow silently never drew while every command worked.
+2. **65535 means "no mission active", not "past every mission".** A fresh character reports
+   it for every storyline, and `current > id` then marked all 24 San d'Oria missions
+   complete — the guide jumped straight to the end. Now anything ≥ 65535 is "not started".
+3. **Completed nation missions live on packet page `0x00D0`.** Completing a mission clears
+   the current number back to 65535, so without this page a finished mission leaves no trace.
+   Identified by watching bit 0 turn on after `!completemission 0 0`, then bits 0,1 after
+   mission 1 — not from anyone's table.
+4. **The horizontal axes are X and Y; Z is height.** Ashita's `position_t` names them
+   X, Z, Y, and reading `.Z` as the second horizontal number made every distance wrong.
+   Standing on the flat plaza reported Z = 0.0, which is the height.
+5. **ImGui packs colour as `0xAABBGGRR`.** Written as ARGB, the "far" blue drew orange.
 
-## Installed, but not yet run
+Plus two things that were not code: the FFXI chat font has no em dash (guide names printed
+garbage — now plain hyphens), and `/addon load` placed **before** `/load Addons` in a boot
+script is silently ignored, which is why `winecursor` did not load until the line moved below
+the plugin block.
 
-As of 2026-08-22 the addon **is** installed in the live client and wired to load only for the
-local LandSandBoat world — see [INSTALL_MAC.md](INSTALL_MAC.md). It has still never been
-loaded by a running client: the attempt stopped because HorizonXI was being played at the
-time, and testing would have meant a second client and taking the screen mid-session.
+## Verified without the game
 
-## Why it was not verified
+`luajit tools/test_offline.lua` — 1,224 assertions covering the parser, the completion
+conditions, the `0x056` bit maths (including the two packet shapes above), the progress
+cursor, the router, the generated databases and the arrow's rotation.
 
-The machine this was written on cannot read the volume the game is installed on: macOS TCC
-denies `/Volumes/Games` and `/Volumes/x10` to the terminal until Terminal.app is quit and
-reopened, and quitting it was not an option during this session. The addon was therefore
-built to be testable without the game — which is why the offline harness exists and why
-every risky assumption above has a runtime knob rather than a hard-coded constant.
+## Still not verified
 
-## The five-minute in-game check, for whoever gets there first
+1. **Quest completion flags.** Missions are proven end to end; the `Q` tag's page ids
+   (`0x0090` and friends) were parsed from a live server but the character had zero completed
+   quests, so nothing has been watched turning on. `!completequest 0 <id>` would settle it.
+2. **Travel routing across zones.** Everything so far happened inside Southern San d'Oria.
+   `/vg route` has not been run against a step in another zone with a real walk to follow.
+3. **Zone-line learning.** The character has not crossed a zone line yet.
+4. **`/vg mark`.** Not run in this session.
+5. **The arrow's *direction*** is consistent with the maths and with observed movement
+   (walking away increased the distance, and the bearing changed as the heading did), but
+   nobody has followed it to a target and arrived.
+6. **Anything on a real server.** This was a private LandSandBoat world. See
+   [SERVERS.md](SERVERS.md): Vanaguide is on no public server's allowlist.
 
-```
-tools/install.sh "/path/to/FFXI"
-/addon load vanaguide
-/vg                     window appears?
-/vg guides              three guides listed?
-/vg load Starting out
-/vg mark test           marks.txt written with plausible coordinates?
-                        walk to another zone, then /vg route — does it name the way back?
-```
+## How this run was driven
 
-Record what happened in this file. Anything that fails here is worth more than any new
-feature.
+The client cannot be typed into reliably from a script — Return opens the chat line only when
+nothing is targeted, so a stray target turns every command into "Target out of range". The
+addon therefore reads `addons/Vanaguide/cmd.txt` once a frame and runs each line, which is how
+every command above was sent. Write a line, wait a second, screenshot. It executes only what a
+player could type.

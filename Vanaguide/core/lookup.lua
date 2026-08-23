@@ -42,8 +42,10 @@ function L.sources(item_id)
         out[#out + 1] = {
             kind = 'quest', name = q.quest.name, zone = q.quest.zone,
             x = q.quest.x, z = q.quest.z, quest = { area = q.area, id = q.id },
+            -- Plain hyphen, not an em dash: FFXI's chat font has no glyph for it and prints
+            -- a pair of garbage characters instead (seen in-game 2026-08-22).
             text = ('quest "%s"%s'):format(q.quest.name,
-                q.quest.zone and (' — starts in ' .. U.zone_name(q.quest.zone)) or ''),
+                q.quest.zone and (' - starts in ' .. U.zone_name(q.quest.zone)) or ''),
         }
     end
 

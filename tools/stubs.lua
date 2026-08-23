@@ -26,7 +26,9 @@ end
 
 function GetPlayerEntity()
     return {
-        Movement = { LocalPosition = { X = WORLD.x, Z = WORLD.z, Y = WORLD.y, Yaw = WORLD.yaw } },
+        -- Ashita's struct, with the game's real axis order: X and Y are horizontal, Z is
+        -- height. WORLD.z is the guide-space second horizontal number, so it goes in Y.
+        Movement = { LocalPosition = { X = WORLD.x, Y = WORLD.z, Z = WORLD.y, Yaw = WORLD.yaw } },
         Heading = WORLD.yaw,
         Name = 'Tester',
     }

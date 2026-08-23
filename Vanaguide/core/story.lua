@@ -18,6 +18,11 @@ local S = {
     quest = { current = {}, completed = {} },
     mission = { current = {}, completed = {} },
     seen = false,
+    -- Counters, so "no quest data" can be told apart from "the packet never arrived" without
+    -- guessing. `/vg story` prints them.
+    packets = 0,
+    pages = {},
+    unknown_pages = {},
 }
 
 -- log page id -> what it is
@@ -45,6 +50,16 @@ local PAGES = {
     [0x0030] = { 'mission', 'completed', 'campaign'   },
     [0x0038] = { 'mission', 'completed', 'campaign_2' },
 }
+
+--- The nation storyline's *completed* bitset.
+---
+--- Identified in-game 2026-08-22 rather than taken from anyone's table: with a fresh
+--- character, `!addmission 0 0` + `!completemission 0 0` turned bit 0 of page 0x00D0 on, and
+--- doing the same for mission 1 turned on bits 0,1.  It has to be handled separately from
+--- PAGES because the page does not say *which* nation it is -- that comes from the 0xFFFF
+--- packet -- and because completing a mission clears the current-mission number back to
+--- 65535, so this bitset is the only evidence left that it was ever done.
+local NATION_COMPLETED_PAGE = 0x00D0
 
 local NATION_AREA = { [0] = 'sandoria', [1] = 'bastok', [2] = 'windurst' }
 
@@ -77,12 +92,23 @@ end
 --- Feed one incoming packet.  Anything that is not 0x056 is ignored cheaply.
 function S.on_packet(id, data, size)
     if id ~= 0x056 or data == nil or (size or #data) < 40 then return end
+    S.packets = S.packets + 1
     local page = u32(data, 0x24)
     if page == nil then return end
+    S.pages[page] = (S.pages[page] or 0) + 1
 
     local p = PAGES[page]
     if p ~= nil then
         S[p[1]][p[2]][p[3]] = flags(data, 0x04, 32)
+        S.seen = true
+        return
+    end
+
+    if page == NATION_COMPLETED_PAGE then
+        local set = flags(data, 0x04, 32)
+        S.mission.completed.nation = set
+        local area = NATION_AREA[S.nation]
+        if area ~= nil then S.mission.completed[area] = set end
         S.seen = true
         return
     end
@@ -105,9 +131,23 @@ function S.on_packet(id, data, size)
         cur.adoulin = i32(data, 0x1C)
         cur.rov     = i32(data, 0x20)
         local area = NATION_AREA[nation]
-        if area ~= nil then cur[area] = cur.nation end
+        if area ~= nil then
+            cur[area] = cur.nation
+            -- The completed bitset may have arrived before we knew which nation this is.
+            if S.mission.completed.nation ~= nil then
+                S.mission.completed[area] = S.mission.completed.nation
+            end
+        end
         S.seen = true
         return
+    end
+
+    if PAGES[page] == nil and page ~= 0xFFFF and page ~= 0xFFFE and page ~= NATION_COMPLETED_PAGE then
+        S.unknown_pages[page] = (S.unknown_pages[page] or 0) + 1
+        -- Keep the bits as well as the count. A page id means nothing on its own; a page
+        -- whose bit 0 turns on exactly when you finish mission 0 identifies itself.
+        S.unknown_sets = S.unknown_sets or {}
+        S.unknown_sets[page] = flags(data, 0x04, 32)
     end
 
     -- 0xFFFE: the "treasures of Aht Urhgan" counter, negative when nothing is active.
@@ -130,17 +170,25 @@ function S.quest_active(area, id)
     return set ~= nil and set[id] == true
 end
 
---- Is this mission finished?  Storylines are linear, so "the current mission is past it"
---- is the completion test; the nation storylines also set the completed flag page.
+--- 65535 is "no mission active in this storyline" -- LandSandBoat's `xi.mission.id.*.NONE`,
+--- and what a fresh character reports for every line.  Read as a number it is larger than
+--- every real mission id, so a naive `current > id` marks the entire game finished: measured
+--- in-game on a brand-new character, which walked a 24-step guide straight to "complete".
+local NO_MISSION = 65535
+
+--- Is this mission finished?  Storylines are linear, so "the current mission is past it" is
+--- the completion test; the nation storylines also set the completed flag page.
 function S.mission_done(area, id)
     local cur = S.mission.current[area]
-    if cur ~= nil and cur > id then return true end
+    if cur ~= nil and cur < NO_MISSION and cur > id then return true end
     local set = S.mission.completed[area]
     return set ~= nil and set[id] == true
 end
 
 function S.mission_current(area)
-    return S.mission.current[area]
+    local cur = S.mission.current[area]
+    if cur == NO_MISSION then return nil end
+    return cur
 end
 
 --- Forget everything.  Called on zone-out to a new character / logout, because the flags
@@ -150,6 +198,9 @@ function S.reset()
     S.mission = { current = {}, completed = {} }
     S.nation = nil
     S.seen = false
+    S.packets = 0
+    S.pages = {}
+    S.unknown_pages = {}
 end
 
 return S

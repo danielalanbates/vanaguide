@@ -272,6 +272,63 @@ ashita.events.register('command', 'vg_command', function (e)
         return;
     end
 
+    -- What the addon can actually see. The first thing to ask when nothing is drawing.
+    if (sub == 'status') then
+        local x, z, y = U.position();
+        U.print(('login=%s zone=%s (%s) pos=%s,%s,%s yaw=%s')
+            :format(tostring(U.logged_in()), tostring(U.zone()), U.zone_name(U.zone()),
+                    x and ('%.1f'):format(x) or '?', z and ('%.1f'):format(z) or '?',
+                    y and ('%.1f'):format(y) or '?',
+                    U.heading() and ('%.2f'):format(U.heading()) or '?'));
+        local step = P.step();
+        if (step ~= nil) then
+            local w = C.world(); w.yaw = U.heading();
+            local rec = R.recommend(step, w);
+            U.print(('step="%s" mode=%s dist=%s bearing=%s deg  %s')
+                :format(step.text, rec.mode,
+                        rec.distance and ('%.1f'):format(rec.distance) or '-',
+                        rec.bearing and ('%.0f'):format(math.deg(rec.bearing)) or '-',
+                        rec.text or ''));
+        end
+        U.print(('window=%s arrow=%s guide=%s step=%d/%d imgui=%s')
+            :format(tostring(Window.open[1]), tostring(vg.settings.arrow.visible ~= false),
+                    P.guide and P.guide.name or 'none', P.index, P.count(),
+                    tostring((pcall(require, 'imgui')))));
+        return;
+    end
+
+    -- What the server has actually told us about this character's log. This is the only
+    -- source for quest and mission completion (docs/PACKETS.md), so if it is empty, every
+    -- `Q` and `M` step in every guide is waiting on nothing.
+    if (sub == 'story') then
+        local areas, flags = 0, 0;
+        for area, set in pairs(story.quest.completed) do
+            areas = areas + 1;
+            for _ in pairs(set) do flags = flags + 1; end
+        end
+        local missions = {};
+        for area, id in pairs(story.mission.current) do
+            missions[#missions + 1] = ('%s=%s'):format(area, tostring(id));
+        end
+        table.sort(missions);
+        local pages, unknown = 0, {};
+        for _ in pairs(story.pages) do pages = pages + 1; end
+        for page in pairs(story.unknown_pages) do unknown[#unknown + 1] = ('0x%04X'):format(page); end
+        U.print(('story: 0x056 packets=%d  distinct pages=%d  unknown pages=%s')
+            :format(story.packets, pages, next(unknown) and table.concat(unknown, ',') or 'none'));
+        for page, set in pairs(story.unknown_sets or {}) do
+            local bits = {};
+            for id in pairs(set) do bits[#bits + 1] = id; end
+            table.sort(bits);
+            U.print(('story: page 0x%04X has bits: %s'):format(page,
+                next(bits) and table.concat(bits, ',') or '(none set)'));
+        end
+        U.print(('story: seen=%s  quest areas=%d  completed quests=%d  nation=%s')
+            :format(tostring(story.seen), areas, flags, tostring(story.nation)));
+        U.print('current missions: ' .. (next(missions) and table.concat(missions, ' ') or '(none)'));
+        return;
+    end
+
     if (sub == 'route') then
         local step = P.step();
         if (step == nil or step.zone == nil) then U.print('the current step has no place'); return; end
@@ -308,8 +365,43 @@ ashita.events.register('command', 'vg_command', function (e)
     U.print('lookups:  find <item>, gear <slot>, nm [name], track <n>');
 end);
 
+--- A file the shell can write to run commands in the game.
+---
+--- Driving this client from outside is otherwise a keyboard-simulation problem, and a fragile
+--- one: Return opens the chat line only when nothing is targeted, so a stray target turns
+--- every scripted command into "Target out of range". Ashita's own idea -- the same trick
+--- `mousediag` used -- is a file poll. Write one command per line into
+--- `<install>\addons\Vanaguide\cmd.txt`; each is run once and the file is emptied.
+---
+--- It executes only what a player could type. It is here for verification and for people
+--- driving a client they own; it sends nothing to the server on its own.
+local function pump_commands()
+    local path = ('%s\\addons\\Vanaguide\\cmd.txt')
+        :format(AshitaCore:GetInstallPath():gsub('[\\/]$', ''));
+    local f = io.open(path, 'r');
+    if (f == nil) then return; end
+    local lines = {};
+    for line in f:lines() do
+        line = line:gsub('^%s+', ''):gsub('%s+$', '');
+        if (line ~= '') then lines[#lines + 1] = line; end
+    end
+    f:close();
+    if (#lines == 0) then return; end
+    -- Emptied before running: a command that reloads this addon would otherwise re-read the
+    -- same file after the reload and run everything again, forever.
+    local w = io.open(path, 'w');
+    if (w ~= nil) then w:close(); end
+    for _, line in ipairs(lines) do
+        AshitaCore:GetChatManager():QueueCommand(-1, line);
+    end
+end
+
 ashita.events.register('d3d_present', 'vg_present', function ()
-    if (not U.logged_in()) then
+    pump_commands();
+    -- Gate on being in a zone, not on GetLoginStatus(). Measured in-game 2026-08-22: the
+    -- status word is not 2 on this client while standing in Southern San d'Oria, so gating on
+    -- it drew nothing at all -- the commands worked and the window never appeared.
+    if (U.zone() == nil) then
         -- Back at the character select.  The quest flags belong to whoever was logged in,
         -- and keeping them would silently mark the next character's steps done.
         if (vg.was_logged_in) then

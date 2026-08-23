@@ -9,15 +9,30 @@
 --
 -- Copyright (c) 2026 Bates LLC.  All rights reserved.
 
+--- Ashita v4 exposes ImGui as a *module*, not a global: `require('imgui')`. Reading _G.imgui
+--- gave nil in-game, so the window and the arrow silently never drew while every command
+--- worked — measured 2026-08-22, `/vg status` reporting `imgui=false`. Cached on first use so
+--- the offline harness can still inject a fake by setting `A.imgui_module`.
+local function imgui_module()
+    if A_imgui ~= nil then return A_imgui end
+    if _G.imgui ~= nil then A_imgui = _G.imgui; return A_imgui end
+    local ok, m = pcall(require, 'imgui')
+    if ok then A_imgui = m end
+    return A_imgui
+end
+
+local A_imgui
 local A = {
     screen = { w = 1280, h = 720 },
     calibration = 1,     -- see docs/ARROW.md: +1 or -1, whichever makes it point right
     offset = 0,          -- radians added to the bearing, for the same reason
 }
 
-local COL_NEAR  = 0xFF33DD33
-local COL_MID   = 0xFF33DDDD
-local COL_FAR   = 0xFF3399FF
+-- ImGui packs colours as 0xAABBGGRR -- alpha, blue, green, red -- not ARGB. Written the
+-- other way round, the "far" blue came out orange in-game (measured 2026-08-22).
+local COL_NEAR  = 0xFF33DD33   -- green
+local COL_MID   = 0xFF33DDDD   -- yellow-ish
+local COL_FAR   = 0xFFFF9933   -- blue
 local COL_SHELL = 0x88000000
 
 local function colour_for(distance)
@@ -35,7 +50,7 @@ end
 --- Draw the arrow.  `bearing` is radians relative to the way the player faces, 0 = ahead.
 --- Returns false when it could not draw, so the caller can stop asking.
 function A.draw(bearing, distance, label, sub)
-    local imgui = _G.imgui
+    local imgui = imgui_module()
     if imgui == nil or imgui.GetForegroundDrawList == nil then return false end
 
     local ok = pcall(function()

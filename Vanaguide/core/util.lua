@@ -10,8 +10,12 @@ local zones = require('data.zone_names')
 
 local U = {}
 
---- FFXI's world axes: X is east/west, Z is north/south, Y is height.  Every distance in
---- this addon is horizontal, because guides care about where you stand, not how high.
+--- FFXI's world axes, as Ashita names them: X and **Y** are the horizontal pair, **Z** is
+--- height.  Not what the names suggest, and not what LandSandBoat's `!pos x y z` comments
+--- use (there the middle number is the height).  Measured in-game 2026-08-22: standing on
+--- the flat plaza of Southern San d'Oria reported X=108.8, Z=0.0, Y=95.5 — the zero is the
+--- height.  Everything below returns (x, z, y) in *guide* terms: two horizontal numbers
+--- first, height last, matching the data files.
 function U.dist2(x1, z1, x2, z2)
     local dx, dz = x1 - x2, z1 - z2
     return dx * dx + dz * dz
@@ -37,7 +41,7 @@ function U.position()
     local e = U.entity()
     if e == nil or e.Movement == nil or e.Movement.LocalPosition == nil then return nil end
     local p = e.Movement.LocalPosition
-    return p.X, p.Z, p.Y
+    return p.X, p.Y, p.Z
 end
 
 --- Facing, in radians, measured the way FFXI measures it (0 = east, counter-clockwise).
