@@ -33,6 +33,17 @@ code:
 
 Both are saved per character.
 
+## Moving it
+
+`/vg arrow move 50 28` — across, then down, as percentages of the screen. `/vg arrow reset`
+puts it back.
+
+There is no dragging, and that is not an oversight: Ashita receives no mouse **button**
+messages in this wrapper at all, so nothing on screen can be picked up (HorizonXI-on-Mac
+`docs/MOUSE.md`). The position is stored as a fraction rather than pixels, so an arrow placed
+on a 640x480 local test world is in the same place on a 4K one, and a resolution change can
+never leave it off the edge.
+
 ## How to check it properly
 
 1. Stand somewhere open with a landmark you can see.

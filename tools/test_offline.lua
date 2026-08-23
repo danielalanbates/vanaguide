@@ -396,5 +396,29 @@ do
     ok(w3 >= 240 and h3 >= 150, 'a tiny screen still gets a readable window')
 end
 
+-- ---- moving the arrow ------------------------------------------------------------
+do
+    local A = require('ui.arrow')
+    A.set_viewport(1920, 1080)
+    local x, y = A.move(0.5, 0.28)
+    eq(A.pos_x, 960, 'the default arrow sits across the middle')
+    ok(math.abs(A.pos_y - 302.4) < 1, 'and a bit above centre')
+
+    A.move(0.25, 0.75)
+    eq(A.pos_x, 480, 'moving it left puts it at a quarter of the width')
+    eq(A.pos_y, 810, 'and three quarters down')
+
+    -- the position is a fraction, so a resolution change keeps it in the same *place*
+    A.set_viewport(640, 480)
+    eq(A.pos_x, 160, 'at 640x480 it is still a quarter across')
+    eq(A.pos_y, 360, 'and still three quarters down')
+
+    -- and it can never be pushed off the screen
+    A.move(-5, 12)
+    ok(A.pos_x > 0 and A.pos_x < 640, 'an absurd position is clamped onto the screen')
+    ok(A.pos_y > 0 and A.pos_y < 480, 'in both directions')
+    A.move(0.5, 0.28)
+end
+
 print(('\n%d passed, %d failed'):format(pass, fail))
 os.exit(fail == 0 and 0 or 1)

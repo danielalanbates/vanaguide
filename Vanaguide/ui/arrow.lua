@@ -87,11 +87,24 @@ function A.draw(bearing, distance, label, sub)
 end
 
 --- Remember the viewport so the arrow sits in the same place at any resolution.
+---
+--- Position is stored as a *fraction* of the screen, not pixels: the same 0.5, 0.28 puts the
+--- arrow in the same place on a 640x480 test world and a 4K one, and a resolution change
+--- cannot leave it off the edge.
 function A.set_viewport(w, h)
     if w ~= nil and w > 0 then A.screen.w = w end
     if h ~= nil and h > 0 then A.screen.h = h end
-    A.pos_x = A.rel_x and (A.rel_x * A.screen.w) or (A.screen.w / 2)
-    A.pos_y = A.rel_y and (A.rel_y * A.screen.h) or (A.screen.h * 0.28)
+    A.pos_x = (A.rel_x or 0.5) * A.screen.w
+    A.pos_y = (A.rel_y or 0.28) * A.screen.h
+end
+
+--- Move the arrow. `x` and `y` are fractions of the screen (0.5, 0.28 is the default), so a
+--- position set at one resolution still makes sense at another.
+function A.move(x, y)
+    if x ~= nil then A.rel_x = math.max(0.02, math.min(0.98, x)) end
+    if y ~= nil then A.rel_y = math.max(0.02, math.min(0.98, y)) end
+    A.set_viewport(A.screen.w, A.screen.h)
+    return A.rel_x or 0.5, A.rel_y or 0.28
 end
 
 return A

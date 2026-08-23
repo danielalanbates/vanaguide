@@ -60,7 +60,9 @@ exactly what that does and does not prove.
 | `/vg nm [name]` | notorious monsters here, or by name |
 | `/vg track <n>` | point the arrow at a lookup result |
 | `/vg mark <name>` | write a guide line for where you stand into `marks.txt` |
+| `/vg arrow move <across%> <down%>` | put the arrow where you want it (dragging is impossible — this client gives Ashita no mouse buttons) |
 | `/vg arrow flip` · `nudge <deg>` | fix the arrow if it points the wrong way ([docs/ARROW.md](docs/ARROW.md)) |
+| `/vg status` · `/vg story` | what the addon can see, and what the server has told it |
 | `/vg reset` | start the current guide again |
 
 ## Layout
@@ -80,7 +82,7 @@ docs/         format, routing, packets, arrow calibration, verification, pathway
 ## Testing
 
 ```sh
-luajit tools/test_offline.lua      # 1218 assertions, no game required
+luajit tools/test_offline.lua      # 1239 assertions, no game required
 ```
 
 The harness fakes Ashita's globals (`tools/stubs.lua`), so the parser, the completion

@@ -60,7 +60,7 @@ local default_settings = T{
     guide = '',
     progress = T{},          -- [guide name] = { index, checked, skipped }
     learned = T{},           -- zone lines this character has crossed
-    arrow = T{ visible = true, calibration = 1, offset = 0 },
+    arrow = T{ visible = true, calibration = 1, offset = 0, x = 0.5, y = 0.28 },
     window = T{ visible = true },
 };
 
@@ -98,6 +98,7 @@ local function apply_settings(s)
     graph.load_learned(vg.settings.learned);
     Arrow.calibration = vg.settings.arrow.calibration or 1;
     Arrow.offset = vg.settings.arrow.offset or 0;
+    Arrow.move(vg.settings.arrow.x or 0.5, vg.settings.arrow.y or 0.28);
     Window.open[1] = vg.settings.window.visible ~= false;
     if (vg.settings.guide ~= nil and vg.settings.guide ~= '') then
         load_guide(vg.settings.guide);
@@ -356,11 +357,28 @@ ashita.events.register('command', 'vg_command', function (e)
             vg.settings.arrow.offset = Arrow.offset;
         elseif (what == 'on' or what == 'off') then
             vg.settings.arrow.visible = (what == 'on');
+        elseif (what == 'move' or what == 'pos') then
+            -- Dragging is not available: this client gives Ashita no mouse button messages at
+            -- all (HorizonXI-on-Mac docs/MOUSE.md), so the arrow is moved by saying where it
+            -- goes. Percentages of the screen, so it survives a resolution change.
+            local px = tonumber(args[4]);
+            local py = tonumber(args[5]);
+            if (px == nil or py == nil) then
+                U.print('/vg arrow move <across%> <down%>   e.g. /vg arrow move 50 28');
+                return;
+            end
+            local rx, ry = Arrow.move(px / 100, py / 100);
+            vg.settings.arrow.x, vg.settings.arrow.y = rx, ry;
+        elseif (what == 'reset') then
+            local rx, ry = Arrow.move(0.5, 0.28);
+            vg.settings.arrow.x, vg.settings.arrow.y = rx, ry;
         end
         settings.save();
-        U.print(('arrow: %s, calibration %d, offset %.0f degrees')
+        U.print(('arrow: %s, at %.0f%% across and %.0f%% down, calibration %d, offset %.0f degrees')
             :format(vg.settings.arrow.visible and 'on' or 'off',
+                    (vg.settings.arrow.x or 0.5) * 100, (vg.settings.arrow.y or 0.28) * 100,
                     Arrow.calibration, math.deg(Arrow.offset)));
+        U.print('/vg arrow move <across%> <down%> | reset | flip | nudge <deg> | on | off');
         return;
     end
 
