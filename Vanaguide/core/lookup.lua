@@ -14,6 +14,7 @@ local gear   = require('data.gear')
 local drops  = require('data.drops')
 local vendors = require('data.vendors')
 local nm     = require('data.nm')
+local quests = require('data.quests')
 
 local L = { last = {} }
 
@@ -35,8 +36,19 @@ function L.sources(item_id)
             text = ('%s in %s (%d gil)'):format(v.npc, U.zone_name(v.zone), v.price),
         }
     end
+    -- A quest reward is a source too, and often the only one: nothing drops or sells the
+    -- artifact pieces, and "do this quest" is a better answer than "no source known".
+    for _, q in ipairs(quests.awarding(item_id)) do
+        out[#out + 1] = {
+            kind = 'quest', name = q.quest.name, zone = q.quest.zone,
+            x = q.quest.x, z = q.quest.z, quest = { area = q.area, id = q.id },
+            text = ('quest "%s"%s'):format(q.quest.name,
+                q.quest.zone and (' — starts in ' .. U.zone_name(q.quest.zone)) or ''),
+        }
+    end
+
     table.sort(out, function(a, b)
-        local rank = { nm = 1, drop = 2, vendor = 3 }
+        local rank = { nm = 1, drop = 2, quest = 3, vendor = 4 }
         if rank[a.kind] ~= rank[b.kind] then return rank[a.kind] < rank[b.kind] end
         return (a.rate or 0) > (b.rate or 0)
     end)

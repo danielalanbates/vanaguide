@@ -258,6 +258,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('root')
     ap.add_argument('--outdir', default='Vanaguide/data')
+    ap.add_argument('--quests', default='Vanaguide/data/quests.lua',
+                    help='the file tools/gen_quests.py wrote; its reward items count as a '
+                         'source, so quest gear appears in the gear finder')
     args = ap.parse_args()
     sql = os.path.join(args.root, 'sql')
 
@@ -361,6 +364,16 @@ def main():
             })
 
     nms.sort(key=lambda n: (n['zone'], n['name']))
+
+    # ---- quest rewards ---------------------------------------------------------
+    # Read back what gen_quests.py already worked out rather than parsing the quest scripts a
+    # second time: one source of truth, and the two generators stay independent.
+    quest_rewards = set()
+    if os.path.exists(args.quests):
+        text = open(args.quests, encoding='utf-8').read()
+        for m in re.finditer(r"rewards\s*=\s*\{([^}]*)\}", text):
+            for n in re.finditer(r"\d+", m.group(1)):
+                quest_rewards.add(int(n.group(0)))
 
     # ---- vendors ---------------------------------------------------------------
     vendors = parse_vendors(args.root, parse_item_enum(args.root), parse_npcs(sql),
@@ -475,7 +488,7 @@ return V
 G.items = {
 """)
         for iid, eq in sorted(equipment.items()):
-            if iid not in drops and iid not in vendors:
+            if iid not in drops and iid not in vendors and iid not in quest_rewards:
                 continue                      # no source we can name: nothing to point at
             item = items.get(iid)
             if item is None:
@@ -530,8 +543,8 @@ return G
 """)
 
     print('%d notorious monsters (%d with real coordinates), %d items dropped by something, %d items sold by somebody, '
-          '%d equipment pieces you can be pointed at'
-          % (len(nms), placed, kept, len(vendors), gear_rows))
+          '%d equipment pieces you can be pointed at (%d of them quest rewards)'
+          % (len(nms), placed, kept, len(vendors), gear_rows, len(quest_rewards)))
 
 
 if __name__ == '__main__':

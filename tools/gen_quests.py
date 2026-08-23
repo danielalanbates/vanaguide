@@ -57,7 +57,21 @@ def parse_key_items(root):
     return out
 
 
-def parse_quest(path, ids, key_items):
+def parse_items(root):
+    """scripts/enum/item.lua -> {NAME: id}, so a quest's `item = xi.item.HORN_RING` reward
+    becomes something the gear finder can point at."""
+    out = {}
+    path = os.path.join(root, 'scripts/enum/item.lua')
+    if not os.path.exists(path):
+        return out
+    for line in open(path, encoding='utf-8', errors='replace'):
+        m = re.match(r"\s*([A-Z][A-Z0-9_]*)\s*=\s*(\d+)", line)
+        if m:
+            out[m.group(1)] = int(m.group(2))
+    return out
+
+
+def parse_quest(path, ids, key_items, item_ids):
     text = open(path, encoding='utf-8', errors='replace').read()
 
     m = re.search(r"Quest:new\(\s*xi\.questLog\.(\w+)\s*,\s*xi\.quest\.id\.(\w+)\.([A-Z0-9_]+)", text)
@@ -95,6 +109,20 @@ def parse_quest(path, ids, key_items):
     if m:
         reward_ki = key_items.get(m.group(1))
 
+    # Reward items: `item = xi.item.HORN_RING`, or a list of them. These are the other half of
+    # "where does this gear come from" -- a quest reward is a source you can be routed to, and
+    # nothing drops or sells it.
+    reward_items = []
+    for m in re.finditer(r"item\s*=\s*xi\.item\.([A-Z0-9_]+)", text):
+        iid = item_ids.get(m.group(1))
+        if iid is not None and iid not in reward_items:
+            reward_items.append(iid)
+    for m in re.finditer(r"item\s*=\s*\{([^}]*)\}", text):
+        for n in re.finditer(r"xi\.item\.([A-Z0-9_]+)", m.group(1)):
+            iid = item_ids.get(n.group(1))
+            if iid is not None and iid not in reward_items:
+                reward_items.append(iid)
+
     level = None
     m = re.search(r"getMainLvl\(\)\s*>=\s*(\d+)", text)
     if m:
@@ -114,6 +142,7 @@ def parse_quest(path, ids, key_items):
         'name': title,
         'npc': npc,
         'key_item': reward_ki,
+        'items': reward_items,
         'level': level,
         'prereq': prereq,
     }
@@ -131,6 +160,7 @@ def main():
 
     ids = parse_ids(args.root)
     key_items = parse_key_items(args.root)
+    item_ids = parse_items(args.root)
 
     quests, skipped = defaultdict(dict), 0
     qdir = os.path.join(args.root, 'scripts/quests')
@@ -138,7 +168,7 @@ def main():
         for f in sorted(files):
             if not f.endswith('.lua'):
                 continue
-            q = parse_quest(os.path.join(dirpath, f), ids, key_items)
+            q = parse_quest(os.path.join(dirpath, f), ids, key_items, item_ids)
             if q is None:
                 skipped += 1
                 continue
@@ -187,6 +217,8 @@ local Q = {}
                     bits.append('level = %d' % q['level'])
                 if q['prereq']:
                     bits.append("prereq = { %s, %d }" % (lua_str(q['prereq'][0]), q['prereq'][1]))
+                if q['items']:
+                    bits.append('rewards = { %s }' % ', '.join(str(i) for i in q['items']))
                 fh.write('        [%d] = { %s },\n' % (qid, ', '.join(bits)))
             fh.write('    },\n')
         fh.write('}\n\n')
@@ -194,6 +226,19 @@ local Q = {}
 function Q.get(area, id)
     local a = Q.quests[area]
     return a ~= nil and a[id] or nil
+end
+
+--- Which quests award this item?  Returns { area, id, quest } for each.
+function Q.awarding(item_id)
+    local out = {}
+    for area, quests in pairs(Q.quests) do
+        for id, q in pairs(quests) do
+            for _, r in ipairs(q.rewards or {}) do
+                if r == item_id then out[#out + 1] = { area = area, id = id, quest = q } end
+            end
+        end
+    end
+    return out
 end
 
 --- Every quest in an area, sorted by id.
@@ -209,8 +254,9 @@ end
 return Q
 """)
 
-    print('%d quests in %d areas (%d with coordinates); %d files skipped'
-          % (total, len(quests), with_pos, skipped))
+    rewarded = sum(1 for a in quests.values() for q in a.values() if q['items'])
+    print('%d quests in %d areas (%d with coordinates, %d awarding an item); %d files skipped'
+          % (total, len(quests), with_pos, rewarded, skipped))
 
 
 if __name__ == '__main__':
