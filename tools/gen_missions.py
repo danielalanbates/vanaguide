@@ -18,6 +18,8 @@ import re
 import sys
 from collections import defaultdict
 
+import lsbdata
+
 # LandSandBoat's log names -> the names core/story.lua uses for packet 0x056 areas.
 AREA_LOG = {
     'sandoria': 'sandoria', 'bastok': 'bastok', 'windurst': 'windurst',
@@ -46,7 +48,7 @@ def parse_ids(root):
     return out
 
 
-def parse_mission(path, ids):
+def parse_mission(path, ids, zone_ids=None, npc_list=None):
     text = open(path, encoding='utf-8', errors='replace').read()
     m = re.search(r"Mission:new\(\s*xi\.mission\.log_id\.(\w+)\s*,\s*xi\.mission\.id\.(\w+)\.([A-Z0-9_]+)", text)
     if not m:
@@ -68,13 +70,7 @@ def parse_mission(path, ids):
         if m2:
             label = m2.group(1).strip()
 
-    npc = None
-    for line in lines[:40]:
-        m2 = re.match(r"--\s*(.+?)\s*:\s*!pos\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(\d+)", line)
-        if m2:
-            npc = {'name': m2.group(1).strip(), 'x': float(m2.group(2)),
-                   'y': float(m2.group(3)), 'z': float(m2.group(4)), 'zone': int(m2.group(5))}
-            break
+    npc = lsbdata.find_npc(text, lines, title, zone_ids, npc_list)
 
     return {'area': area, 'id': mid, 'name': title, 'label': label, 'npc': npc}
 
@@ -90,12 +86,14 @@ def main():
     args = ap.parse_args()
 
     ids = parse_ids(args.root)
+    zone_ids = lsbdata.parse_zone_ids(args.root)
+    npc_list = lsbdata.parse_npc_list(args.root)
     missions, skipped = defaultdict(dict), 0
     for dirpath, _, files in os.walk(os.path.join(args.root, 'scripts/missions')):
         for f in sorted(files):
             if not f.endswith('.lua'):
                 continue
-            m = parse_mission(os.path.join(dirpath, f), ids)
+            m = parse_mission(os.path.join(dirpath, f), ids, zone_ids, npc_list)
             if m is None:
                 skipped += 1
                 continue
