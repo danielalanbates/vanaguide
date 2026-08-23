@@ -31,6 +31,18 @@ AREA_LOG = {
     'adoulin': 'adoulin', 'coalition': 'coalition',
 }
 
+# A quest states its own area as the directory name (`crystalWar`) and its prerequisite's as
+# the questLog constant (`CRYSTAL_WAR`). Squashing case and underscores makes them the same
+# key -- without it, every cross-referenced prerequisite in Aht Urhgan, the Crystal War and
+# "other areas" pointed at an area that does not exist, and 44 of the 48 dangling
+# prerequisites in the database were this one line.
+AREA_ANY = {k.lower().replace('_', ''): v for k, v in AREA_LOG.items()}
+
+
+def area_key(name):
+    flat = (name or '').lower().replace('_', '')
+    return AREA_ANY.get(flat, flat)
+
 
 def parse_ids(root):
     """scripts/globals/quests.lua -> {lsb area: {CONST: id}}"""
@@ -301,10 +313,10 @@ def parse_quest(path, ids, key_items, item_ids, zone_ids=None, npc_list=None):
         p_log, _, p_const = m.groups()
         p_id = ids.get(p_log, {}).get(p_const)
         if p_id is not None:
-            prereq = (AREA_LOG.get(p_log.lower().replace('_', ''), p_log.lower()), p_id)
+            prereq = (area_key(p_log), p_id)
 
     return {
-        'area': AREA_LOG.get(id_area, id_area.lower()),
+        'area': area_key(id_area),
         'id': qid,
         'name': title,
         'npc': npc,

@@ -15,6 +15,7 @@ So the state lives in SQLite instead, and the questions that matter are queries:
     tools/ledger.py ingest verify.csv    fold a sweep's rows in
     tools/ledger.py status               how far along, and what is left
     tools/ledger.py todo [--limit N]     the quests still owed a check, in sweep order
+    tools/ledger.py check                structural faults: prerequisites that go nowhere
     tools/ledger.py export -o out.csv    the whole ledger, one row per quest
 
 The database is `data/verification.sqlite3`. It is derived data -- `init` can rebuild the
@@ -67,6 +68,16 @@ CREATE TABLE IF NOT EXISTS checks (
 );
 
 CREATE INDEX IF NOT EXISTS checks_verdict ON checks(verdict);
+
+-- Faults in the shape of the data rather than in a coordinate: a prerequisite naming a quest
+-- that is not there, a zone id no zone has. Rewritten every `check`.
+CREATE TABLE IF NOT EXISTS issues (
+    area    TEXT NOT NULL,
+    id      INTEGER NOT NULL,
+    kind    TEXT NOT NULL,
+    detail  TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (area, id, kind)
+);
 
 -- The current answer for each quest: the newest check, with the ones that say nothing
 -- (`unchecked` -- the character never arrived) ignored, because they are the harness failing
@@ -139,9 +150,11 @@ local Q = require('data.quests')
 local rows = {}
 for area, quests in pairs(Q.quests) do
     for id, q in pairs(quests) do
-        rows[#rows+1] = string.format('{"area":"%s","id":%d,"name":%q,"zone":%s,"x":%s,"z":%s,"y":%s,"npc":%q}',
+        local pre = 'null'
+        if q.prereq then pre = string.format('["%s",%d]', q.prereq[1], q.prereq[2]) end
+        rows[#rows+1] = string.format('{"area":"%s","id":%d,"name":%q,"zone":%s,"x":%s,"z":%s,"y":%s,"npc":%q,"prereq":%s}',
             area, id, q.name or '', tostring(q.zone or 'null'),
-            tostring(q.x or 'null'), tostring(q.z or 'null'), tostring(q.y or 'null'), q.npc or '')
+            tostring(q.x or 'null'), tostring(q.z or 'null'), tostring(q.y or 'null'), q.npc or '', pre)
     end
 end
 print('[' .. table.concat(rows, ',') .. ']')
@@ -296,6 +309,34 @@ def cmd_todo(args):
     print(f'{len(rows)} to check', file=sys.stderr)
 
 
+def cmd_check(args):
+    """Faults in the shape of the data, which no amount of standing on a spot would find.
+
+    A guide that requires a quest the database does not contain sends the player to look for
+    something that is not there. Most of these were one bug -- a quest states its own area as
+    a directory name (`crystalWar`) and its prerequisite's as a questLog constant
+    (`CRYSTAL_WAR`), and only one of the two was being normalized, so 44 cross-referenced
+    prerequisites pointed at areas that do not exist. What is left is honest: LandSandBoat
+    has no script for those quests, so nothing on this server can require them.
+    """
+    db = connect(args.db)
+    quests = {(r['area'], r['id']): r for r in db.execute('SELECT * FROM quests')}
+    rows = quest_table()
+    found = []
+    for r in rows:
+        pre = r.get('prereq')
+        if pre and (pre[0], pre[1]) not in quests:
+            found.append((r['area'], r['id'], 'prerequisite missing',
+                          'requires %s %s, which is not in the database -- this server has '
+                          'no script for it' % (pre[0], pre[1])))
+    with db:
+        db.execute('DELETE FROM issues')
+        db.executemany('INSERT OR REPLACE INTO issues VALUES (?,?,?,?)', found)
+    print(f'{len(found)} structural issues')
+    for a, i, kind, detail in found:
+        print(f'   {a:<11} {i:>4}  {kind}: {detail}')
+
+
 def cmd_export(args):
     db = connect(args.db)
     rows = db.execute('SELECT * FROM quest_state ORDER BY area, id').fetchall()
@@ -322,6 +363,7 @@ def main():
     p.set_defaults(fn=cmd_ingest)
 
     sub.add_parser('status').set_defaults(fn=cmd_status)
+    sub.add_parser('check').set_defaults(fn=cmd_check)
 
     p = sub.add_parser('todo')
     p.add_argument('--limit', type=int, default=0)
