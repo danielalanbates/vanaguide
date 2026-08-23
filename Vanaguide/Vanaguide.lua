@@ -116,7 +116,10 @@ local function mark(name)
     local line = ('%s|Z|%d|POS|%.1f,%.1f,10|N|%s, y=%.1f|')
         :format(name or 'mark', zone, x, z, U.zone_name(zone), y or 0);
     local path = ('%s\\addons\\Vanaguide\\marks.txt'):format(AshitaCore:GetInstallPath():gsub('[\\/]$', ''));
-    local f = io.open(path, 'a');
+    -- Binary mode on purpose. Lua on Windows opens files in text mode and rewrites every
+    -- \n as \r\n, and marks.txt is meant to be read on the Mac side; a sibling project lost
+    -- whole multi-line bursts to exactly that (VanaVoice, 2026-08-22).
+    local f = io.open(path, 'ab');
     if (f ~= nil) then f:write(line, '\n'); f:close(); end
     U.print(line);
 end
