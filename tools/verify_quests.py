@@ -62,6 +62,11 @@ def main():
     # in the table.
     ap.add_argument('--zone-wait', type=float, default=20.0)
     ap.add_argument('--step-wait', type=float, default=6.0)
+    # Zone 178 (the Shrine of Ru'Avitau) swallowed the first sweep: once the character was
+    # inside, every !pos and !zone was refused and 245 later checks reported the same stale
+    # zone. Until something is known about why, the sweep goes around it.
+    ap.add_argument('--skip-zones', default='178',
+                    help='comma-separated zone ids to leave alone')
     ap.add_argument('--recheck', action='store_true',
                     help='re-run only the quests that missed, with a longer settle')
     args = ap.parse_args()
@@ -101,7 +106,9 @@ def main():
     if args.recheck:
         done -= missed
 
-    quests = [q for q in quest_table() if q['zone'] and q['x'] is not None]
+    skip = {int(z) for z in args.skip_zones.split(',') if z.strip().isdigit()}
+    quests = [q for q in quest_table()
+              if q['zone'] and q['x'] is not None and q['zone'] not in skip]
     if args.area:
         quests = [q for q in quests if q['area'] == args.area]
     # Zone order: every zone change costs a load, and there are far fewer zones than quests.
@@ -114,12 +121,27 @@ def main():
     current_zone = None
     misses = 0
 
-    for n, q in enumerate(todo, 1):
+    def teleport(q, settle):
+        """Cross-zone moves go through `!zone` first.
+
+        `!pos x y z <zone>` alone stopped working part-way through the first full sweep: the
+        character reached the Shrine of Ru'Avitau and stayed there while 245 later checks
+        dutifully reported "standing in 178". Whatever refuses a cross-zone !pos in that
+        state, the dedicated zone command does not care about.
+        """
+        if q['zone'] != current_zone:
+            send('!zone %d' % q['zone'])
+            consumed()
+            time.sleep(settle)
         send('!pos %.3f %.3f %.3f %d' % (q['x'], q['y'] or 0, q['z'], q['zone']))
-        if not consumed():
+        return consumed()
+
+    stuck = 0
+    for n, q in enumerate(todo, 1):
+        if not teleport(q, args.zone_wait):
             print('!! the client stopped consuming commands — stopping', flush=True)
             break
-        time.sleep(args.zone_wait if q['zone'] != current_zone else args.step_wait)
+        time.sleep(args.step_wait if q['zone'] == current_zone else args.zone_wait)
         current_zone = q['zone']
 
         before = os.path.getsize(csv) if os.path.exists(csv) else 0
@@ -139,6 +161,19 @@ def main():
                 break
             continue
         misses = 0
+        # Did the character actually arrive? A row that says "standing in" means the teleport
+        # did not take, and every later check inherits the mistake -- 245 rows of it, the
+        # first time. One retry, then give up on that quest rather than poison the run.
+        last = open(csv, encoding='utf-8', errors='replace').read().strip().splitlines()[-1]
+        if 'standing in' in last:
+            stuck += 1
+            current_zone = None
+            if stuck >= 5:
+                print('!! five teleports in a row did not take — the client is wedged, stopping',
+                      flush=True)
+                break
+        else:
+            stuck = 0
         if n % 10 == 0:
             print(f'   {n}/{len(todo)} …', flush=True)
 

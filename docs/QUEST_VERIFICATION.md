@@ -9,6 +9,20 @@ This exists because [the database is generated](QUEST_DATABASE.md), and a genera
 confidently wrong: a stale header comment, a mis-parsed line, an NPC that moved between eras.
 Nothing about reading server scripts proves the coordinates are where the NPC stands today.
 
+## Running it unattended
+
+The Mac locks its screen, and a locked Mac cannot be typed into — so a sweep that needs a
+keyboard dies the moment the screensaver comes on. It does not need one:
+
+```sh
+tools/client.sh start     # launch, then log in through the cmd.txt channel
+tools/client.sh rescue    # put a stuck character somewhere safe and restart
+```
+
+Ashita's own `autologin` addon accepts the licence screen and picks the character slot;
+`scripts/lsb.txt` loads it and `/autologin 0` is sent through `cmd.txt`. Everything after that
+is file-driven. Verified: the client got itself in-world with the screen locked.
+
 ## Running it
 
 ```sh
@@ -33,6 +47,25 @@ what is loaded around you.
 area,id,ok|MISS,"quest name","npc",want_zone,want_x,want_z,zone,x,z,dist,"why"
 sandoria,29,ok,"A Knight's Test","Balasiel",230,-136.0,64.0,230,-136.0,64.0,2.9,"found Balasiel at 2.9 yalms"
 ```
+
+## When the character gets stuck
+
+The first full sweep teleported into **the Shrine of Ru'Avitau (zone 178) and never came
+out**. Every later `!pos` and `!zone` was refused silently, so 245 consecutive checks
+dutifully reported "standing in 178, quest is in …" — rows that look like data errors and are
+nothing of the kind. Nothing in the game would move the character.
+
+Three things came out of that:
+
+* The driver watches for it. A row that says "standing in" means the teleport did not take;
+  five in a row and the run stops rather than filling the file with nonsense.
+* `tools/client.sh rescue` writes the position straight into the character row in the
+  database and logs in again. That is the only thing that worked.
+* Zone 178 is skipped by default (`--skip-zones`). Whatever it is about that zone, going
+  around it costs one quest and saves a run.
+
+The report counts those rows separately, as "not checked": they are the harness failing, not
+evidence about the guide.
 
 ## What a miss means — read this before believing one
 

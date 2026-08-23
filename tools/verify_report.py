@@ -22,12 +22,15 @@ def classify(row):
     npc = row['npc']
     if row['ok'] == 'ok':
         return 'ok'
+    # "standing in X, quest is in Y" is the harness failing, not the data: the teleport did
+    # not take. The first full sweep wedged in the Shrine of Ru'Avitau and produced 245 of
+    # these in a row. They are not evidence of anything and are counted separately.
+    if 'standing in' in row['why']:
+        return 'not checked'
     if npc.startswith('qm') or npc.startswith('_') or '???' in npc:
         return 'marker'
     if not npc:
         return 'unnamed'
-    if 'standing in' in row['why']:
-        return 'wrong zone'
     return 'absent'
 
 
@@ -52,7 +55,8 @@ def main():
     for r in rows.values():
         buckets[classify(r)].append(r)
 
-    total = len(rows)
+    unchecked = len(buckets['not checked'])
+    total = len(rows) - unchecked
     ok = len(buckets['ok'])
     dists = sorted(float(r['dist']) for r in buckets['ok'] if r['dist'])
 
@@ -67,19 +71,17 @@ def main():
     out.append(f'| **NPC found where the guide points** | {ok} ({ok * 100 // max(total,1)}%) |')
     out.append(f'| marker quest (the "NPC" is a door or a ???) | {len(buckets["marker"])} |')
     out.append(f'| NPC not spawned by this server | {len(buckets["absent"])} |')
-    out.append(f'| wrong zone — a real data error | {len(buckets["wrong zone"])} |')
+    out.append(f'| teleport did not take — nothing learned, re-run these | {unchecked} |')
     out.append(f'| no NPC named in the database | {len(buckets["unnamed"])} |')
     if dists:
         mid = dists[len(dists) // 2]
         out.append(f'\nOf the ones found, half were within **{mid:.1f} yalms** of the '
                    f'coordinate the guide gives, and the worst was {dists[-1]:.1f}.\n')
 
-    if buckets['wrong zone']:
-        out.append('\n## Wrong zone — fix these\n')
-        out.append('| quest | says | actually |')
-        out.append('| --- | --- | --- |')
-        for r in sorted(buckets['wrong zone'], key=lambda r: r['name']):
-            out.append(f'| {r["name"]} ({r["area"]} {r["id"]}) | zone {r["want_zone"]} | {r["why"]} |')
+    if unchecked:
+        out.append(f'\n## Not checked ({unchecked})\n')
+        out.append('The character never arrived, so these rows say nothing about the data. '
+                   'Re-run with `--recheck`.\n')
 
     if buckets['absent']:
         out.append('\n## Not spawned by this server\n')
@@ -105,7 +107,7 @@ def main():
     os.makedirs(os.path.dirname(args.out) or '.', exist_ok=True)
     open(args.out, 'w', encoding='utf-8').write(text)
     print(f'{total} checked, {ok} found, {len(buckets["absent"])} absent, '
-          f'{len(buckets["marker"])} markers, {len(buckets["wrong zone"])} wrong zone '
+          f'{len(buckets["marker"])} markers, {unchecked} not checked '
           f'-> {args.out}')
 
 
