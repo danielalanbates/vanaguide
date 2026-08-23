@@ -23,8 +23,9 @@ def classify(row):
     if row['ok'] == 'ok':
         return 'ok'
     # "standing in X, quest is in Y" is the harness failing, not the data: the teleport did
-    # not take. The first full sweep wedged in the Shrine of Ru'Avitau and produced 245 of
-    # these in a row. They are not evidence of anything and are counted separately.
+    # not take. The first full sweep produced 245 of these in a row because the character had
+    # died -- LandSandBoat refuses every GM command from a KO'd player, in the chat log where
+    # no script is looking. They are not evidence of anything and are counted separately.
     if 'standing in' in row['why']:
         return 'not checked'
     if npc.startswith('qm') or npc.startswith('_') or '???' in npc:

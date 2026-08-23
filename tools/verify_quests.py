@@ -160,8 +160,14 @@ def main():
 
     for n, q in enumerate(todo, 1):
         if not teleport(q, args.zone_wait):
-            print('!! the client stopped consuming commands — stopping', flush=True)
-            break
+            # cmd.txt stops emptying when the addon is gone -- it is the addon that polls the
+            # file. A blocking menu (an expansion prompt, a cutscene) does the same thing by
+            # swallowing what the queued command turns into. Restarting the client clears
+            # both, and the boot script reloads the addon.
+            print('!! the client stopped consuming commands', flush=True)
+            if not rescue():
+                break
+            continue
         time.sleep(args.step_wait if q['zone'] == current_zone else args.zone_wait)
         current_zone = q['zone']
 
