@@ -15,7 +15,7 @@ in-game yet.** Read [docs/VERIFICATION.md](docs/VERIFICATION.md) before you trus
 | Travel routing (flight paths, boats) | ✅ `routing/zonegraph.lua` — Dijkstra over the zone graph, with airships and the Selbina/Mhaura ferry as real edges |
 | A travel graph that is actually complete | ⚠️ partly. The seed graph covers the base world; **the addon learns every zone line you walk through** and saves it, so it fills itself in from play instead of from guesswork |
 | Gear finder / "where does this drop?" | ✅ `/vg find`, `/vg gear <slot>`, `/vg nm` over 365 notorious monsters, 1,167 purchasable items and 485 sourced equipment pieces ([docs/LOOT_AND_HUNTING.md](docs/LOOT_AND_HUNTING.md)) |
-| Guide library | **506 quests and 459 missions**, generated from server data into 25 guides — one per quest area, one per storyline ([docs/QUEST_DATABASE.md](docs/QUEST_DATABASE.md)) — plus hand-written guides in `Vanaguide/guides/` |
+| Guide library | **505 quests and 459 missions**, generated from server data into 25 guides — one per quest area, one per storyline ([docs/QUEST_DATABASE.md](docs/QUEST_DATABASE.md)) — plus hand-written guides in `Vanaguide/guides/` |
 | Guide editor | ❌ — but `/vg mark` writes a paste-ready guide line for wherever you are standing |
 
 ## Install

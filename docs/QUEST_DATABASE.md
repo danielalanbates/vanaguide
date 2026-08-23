@@ -1,7 +1,13 @@
 # The quest database
 
-`Vanaguide/data/quests.lua` holds **506 quests across 10 log areas, 346 of them with the
+`Vanaguide/data/quests.lua` holds **505 quests across 10 log areas, 500 of them with the
 coordinates of the NPC who gives them** — generated, not typed, by `tools/gen_quests.py`.
+
+It was 346 until the headers were read properly. The scripts state who to talk to in six
+dialects, and reading one of them left 155 quests with nobody named and nowhere to go; the
+zone comes from each script's own `xi.zone` references and the position from the server's
+`npc_list` when the comment omits them. [QUEST_VERIFICATION.md](QUEST_VERIFICATION.md) has
+the detail, and how the result is checked.
 
 ## Where it comes from, and why not a wiki
 
@@ -30,7 +36,7 @@ A wiki would have been the obvious source and is the wrong one, for three reason
    completes on the flag the server sets is right by construction; a step transcribed from
    retail prose can be wrong on a server that implements the quest differently, and you
    cannot tell which without playing it.
-3. **It is machine-readable.** 506 quests took one afternoon and re-running the generator
+3. **It is machine-readable.** 505 quests took one afternoon and re-running the generator
    against a newer checkout takes seconds.
 
 What the wiki has that this does not is the *middle* of a quest — the walkthrough between
