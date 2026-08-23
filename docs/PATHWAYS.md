@@ -63,3 +63,25 @@ zone" is most of the win.
   an addon a server might approve and one that gets you banned ([SERVERS.md](SERVERS.md)).
 * **No coordinates written from memory.** A wrong `POS` is worse than none: it points the
   arrow confidently at the wrong place. Hence `/vg mark`.
+
+## Next, for whoever picks this up
+
+**Finish the in-client sweep.** 445 quests are confirmed by the server's data and have not had
+a character stood on them. `tools/verify_quests.py --game "<dir>"` does it unattended and
+resumes from the ledger; it is about an hour for the lot. That converts *server confirmed*
+into *verified*, which is the stronger claim.
+
+**The 28 unreachable zones.** Abyssea, the Crystal War cities, Adoulin and Tavnazia are
+entered through Cavernous Maws and event NPCs rather than zone lines or ferries, so
+`sql/zonelines.sql` and `sql/transport.sql` say nothing about them and the router cannot get
+there. The maws are real NPCs in `npc_list` (`Cavernous Maw`), and which one leads where is
+stated in the scripts that implement them — `scripts/zones/*/npcs/`. That is the last big gap
+in routing, and it is readable, not guesswork.
+
+**Missions deserve the ledger too.** `data/missions.lua` now has 356 of 459 with coordinates,
+and every tool that checks a quest would check a mission unchanged; the ledger schema is
+quest-shaped and would need a `kind` column, not a rewrite.
+
+**The five quests with nothing to check** are mog-house moogles and scripts that state no
+place at all. A guide could still route to "your own Mog House", which is a real instruction
+even though it is not a coordinate.

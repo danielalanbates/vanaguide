@@ -82,17 +82,32 @@ docs/         format, routing, packets, arrow calibration, verification, pathway
 ## Testing
 
 ```sh
-luajit tools/test_offline.lua      # 1239 assertions, no game required
+luajit tools/test_offline.lua      # 1423 assertions, no game required
 ```
 
 The harness fakes Ashita's globals (`tools/stubs.lua`), so the parser, the completion
 conditions, the packet reader, the progress cursor and the router are all exercised without
 launching anything.
 
+Beyond the unit tests, every quest in the database is checked twice — against the server's own
+`npc_list`, and by standing a character on the coordinate in a running client:
+
+```sh
+tools/npc_positions.py             # all 505 against the server data, about a second
+tools/verify_quests.py --game …    # stand on each one; resumable, unattended
+tools/ledger.py status             # where it stands
+```
+
+**494 of 505 quests are confirmed correct.** What each check can and cannot prove — and why a
+miss is usually not a bad coordinate — is in
+[docs/QUEST_VERIFICATION.md](docs/QUEST_VERIFICATION.md); the current results are in
+[docs/QUEST_VERIFICATION_RESULTS.md](docs/QUEST_VERIFICATION_RESULTS.md).
+
 ## Documentation
 
 * [docs/LOOT_AND_HUNTING.md](docs/LOOT_AND_HUNTING.md) — gear, drops and notorious monsters, and how thin the open drop data really is
-* [docs/QUEST_DATABASE.md](docs/QUEST_DATABASE.md) — the 506-quest database, and why it comes from server code rather than a wiki
+* [docs/QUEST_DATABASE.md](docs/QUEST_DATABASE.md) — the 505-quest database, and why it comes from server code rather than a wiki
+* [docs/QUEST_VERIFICATION.md](docs/QUEST_VERIFICATION.md) — two checks, what each proves, and the ledger that tracks them
 * [docs/GUIDE_FORMAT.md](docs/GUIDE_FORMAT.md) — how to write a guide
 * [docs/ROUTING.md](docs/ROUTING.md) — the travel graph and how it learns
 * [docs/PACKETS.md](docs/PACKETS.md) — how quest and mission completion is read
