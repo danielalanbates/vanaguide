@@ -63,6 +63,8 @@ def main():
     ap.add_argument('--max-rescues', type=int, default=4)
     ap.add_argument('--db', default=ledger.DB)
     ap.add_argument('--run', default='', help='a name for this sweep in the ledger')
+    ap.add_argument('--plan', action='store_true',
+                    help='print what the sweep would do and how long it would take')
     ap.add_argument('--retry-absent', action='store_true',
                     help='also re-check the ones no NPC answered for (a short settle looks '
                          'exactly like an NPC this server does not spawn)')
@@ -176,6 +178,24 @@ def main():
         else:
             stops.append([q])
     print(f'   {len(stops)} places to stand', flush=True)
+
+    if args.plan:
+        # A sweep is an hour of somebody's machine. Being able to read what it intends to do,
+        # before it starts doing it, is cheap.
+        zone, seconds = None, 0.0
+        for stop in stops:
+            seconds += (args.zone_wait * 2 if stop[0]['zone'] != zone
+                        else args.step_wait) + 2.0 * len(stop)
+            zone = stop[0]['zone']
+        zones = len({s[0]['zone'] for s in stops})
+        print(f'   {zones} zones, about {seconds / 60:.0f} minutes')
+        for stop in stops[:20]:
+            names = ', '.join(q['name'] for q in stop)
+            print(f'   zone {stop[0]["zone"]:>3} ({stop[0]["x"]:.0f}, {stop[0]["z"]:.0f})  '
+                  f'{names[:70]}')
+        if len(stops) > 20:
+            print(f'   … and {len(stops) - 20} more stops')
+        return
 
     n = 0
     for stop in stops:
