@@ -164,7 +164,22 @@ def main():
         current_zone = None
         return True
 
-    for n, q in enumerate(todo, 1):
+    # Quests share coordinates constantly -- a chain of five all taken from one NPC is five
+    # rows and one place to stand. Grouping by the exact coordinate turns 429 teleports into
+    # 263 without weakening anything: every quest in a group is checked from the spot its own
+    # data names, so the distance the check reports is still that quest's distance.
+    stops = []
+    for q in todo:
+        if stops and (stops[-1][0]['zone'], stops[-1][0]['x'], stops[-1][0]['z']) == \
+                (q['zone'], q['x'], q['z']):
+            stops[-1].append(q)
+        else:
+            stops.append([q])
+    print(f'   {len(stops)} places to stand', flush=True)
+
+    n = 0
+    for stop in stops:
+        q = stop[0]
         if not teleport(q, args.zone_wait):
             # cmd.txt stops emptying when the addon is gone -- it is the addon that polls the
             # file. A blocking menu (an expansion prompt, a cutscene) does the same thing by
@@ -177,43 +192,49 @@ def main():
         time.sleep(args.step_wait if q['zone'] == current_zone else args.zone_wait)
         current_zone = q['zone']
 
-        before = os.path.getsize(csv) if os.path.exists(csv) else 0
-        send('/vg verify %s %d' % (q['area'], q['id']))
-        consumed()
-        # Wait for the row rather than a fixed sleep: a zone that is still loading takes longer.
-        end = time.time() + 8
-        while time.time() < end:
-            if os.path.exists(csv) and os.path.getsize(csv) > before:
+        silent = False
+        for q in stop:
+            n += 1
+            before = os.path.getsize(csv) if os.path.exists(csv) else 0
+            send('/vg verify %s %d' % (q['area'], q['id']))
+            consumed()
+            # Wait for the row rather than a fixed sleep: a zone still loading takes longer.
+            end = time.time() + 8
+            while time.time() < end:
+                if os.path.exists(csv) and os.path.getsize(csv) > before:
+                    break
+                time.sleep(0.3)
+            else:
+                misses += 1
+                silent = True
+                print(f'   no result for {q["area"]} {q["id"]}', flush=True)
                 break
-            time.sleep(0.3)
-        else:
-            misses += 1
-            print(f'   no result for {q["area"]} {q["id"]}', flush=True)
-            if misses >= 10:
-                print('!! ten silent checks in a row — the client is probably gone', flush=True)
-                if not rescue():
-                    break
-                misses = 0
-            continue
-        misses = 0
-        # Did the character actually arrive? A row that says "standing in" means the teleport
-        # did not take, and every later check inherits the mistake -- 245 rows of it, the
-        # first time. One retry, then give up on that quest rather than poison the run.
-        last = open(csv, encoding='utf-8', errors='replace').read().strip().splitlines()[-1]
-        record(last, q)
-        if 'standing in' in last:
-            stuck += 1
-            current_zone = None
-            if stuck >= 5:
-                # Five refusals in a row is the death signature. Revive and carry on: the
-                # quests already in the CSV are kept, and the run resumes where it stopped.
-                if not rescue():
-                    print('!! wedged and out of rescues — stopping', flush=True)
-                    break
-                stuck = 0
-        else:
+            misses = 0
+            last = open(csv, encoding='utf-8', errors='replace')\
+                .read().strip().splitlines()[-1]
+            record(last, q)
+            # Did the character actually arrive? A row that says "standing in" means the
+            # teleport did not take, and every later check inherits the mistake -- 245 rows
+            # of it, the first time.
+            if 'standing in' in last:
+                stuck += 1
+                current_zone = None
+                break
             stuck = 0
-        if n % 10 == 0:
+
+        if silent and misses >= 10:
+            print('!! ten silent checks in a row — the client is probably gone', flush=True)
+            if not rescue():
+                break
+            misses = 0
+        if stuck >= 5:
+            # Five refusals in a row is the death signature. Revive and carry on: everything
+            # already in the ledger is kept, and the run resumes where it stopped.
+            if not rescue():
+                print('!! wedged and out of rescues — stopping', flush=True)
+                break
+            stuck = 0
+        if n % 25 < len(stop):
             print(f'   {n}/{len(todo)} …', flush=True)
 
     ledger.cmd_status(argparse.Namespace(db=args.db))

@@ -274,11 +274,12 @@ def cmd_status(args):
 def todo_rows(db, retry_absent=False, limit=0):
     """Quests still owed a check, in the order a sweep should walk them.
 
-    Zone order, because every zone change costs a load and there are far fewer zones than
-    quests.
+    Zone first, because every zone change costs a load and there are far fewer zones than
+    quests; then by coordinate, so the quests that share a place end up next to each other and
+    can be checked from one stop.
     """
     wanted = ['pending'] + (['absent'] if retry_absent else [])
-    q = ('SELECT * FROM quest_state WHERE verdict IN (%s) ORDER BY zone, id'
+    q = ('SELECT * FROM quest_state WHERE verdict IN (%s) ORDER BY zone, x, z, id'
          % ','.join('?' * len(wanted)))
     rows = db.execute(q, wanted).fetchall()
     return rows[:limit] if limit else rows
