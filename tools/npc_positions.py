@@ -91,6 +91,20 @@ def positioned(n):
     return not (n['x'] == 0.0 and n['y'] == 0.0 and n['z'] == 0.0)
 
 
+MARKER = re.compile(r'^(?:qm\d*|_\w+|\?\?\?)$', re.I)
+
+
+def is_marker(name):
+    """A `???`, a door, a dig point: a real entity, named the way the server tracks it.
+
+    These are not people and npc_list is not a reliable witness for them -- the same `qm3`
+    exists in a dozen zones and is absent from others entirely, so matching by name produces
+    confident nonsense ("the guide says zone 102, the server has it in 238"). The client
+    sweep is the only thing that can speak to a marker, and it does.
+    """
+    return bool(MARKER.match((name or '').strip()))
+
+
 def normalize(s):
     return re.sub(r'[^a-z0-9]', '', (s or '').lower())
 
@@ -135,6 +149,11 @@ def match_all(db):
     quests = db.execute('SELECT * FROM quests').fetchall()
     out = []
     for q in quests:
+        if is_marker(q['npc']):
+            out.append((q['area'], q['id'], 'marker', None, q['zone'], None, None, None, 0,
+                        'a ???, a door or a dig point -- only the client can check this'))
+            continue
+
         npc = normalize(q['npc'])
         if not npc:
             out.append((q['area'], q['id'], 'no npc named', None, None, None, None, None, 0,
@@ -192,8 +211,9 @@ def match_all(db):
 
 
 def report(db):
-    order = ['confirmed', 'moved', 'wrong zone', 'placed at runtime', 'position recoverable',
-             'position ambiguous', 'not on this server', 'no npc named']
+    order = ['confirmed', 'moved', 'wrong zone', 'placed at runtime', 'marker',
+             'position recoverable', 'position ambiguous', 'not on this server',
+             'no npc named']
     counts = {r['verdict']: r['n'] for r in db.execute(
         'SELECT verdict, COUNT(*) n FROM npc_match GROUP BY verdict')}
     total = sum(counts.values())

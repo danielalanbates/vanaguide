@@ -89,6 +89,29 @@ SELECT q.area, q.id, q.name, q.npc, q.zone, q.x, q.y, q.z,
 FROM quests q;
 """
 
+# The npc_match table is written by tools/npc_positions.py, which may not have run. The view
+# is created separately so the ledger still works without it.
+COMBINED = """
+CREATE VIEW IF NOT EXISTS quest_verdict AS
+SELECT s.area, s.id, s.name, s.npc, s.zone, s.x, s.z,
+       s.verdict AS client, COALESCE(m.verdict, 'not checked') AS server, s.dist,
+       CASE
+           -- Standing on it and finding the NPC is the whole point; nothing outranks it.
+           WHEN s.verdict = 'found' THEN 'verified'
+           -- The server data is a real check on its own, and it is the only one available for
+           -- an NPC this server will not spawn for a character with no quest flags set.
+           WHEN m.verdict = 'confirmed' THEN 'server confirmed'
+           WHEN m.verdict IN ('moved', 'wrong zone') THEN 'data error'
+           WHEN m.verdict = 'marker' OR s.verdict IN ('marker', 'unnamed')
+                THEN 'only the client can check this'
+           WHEN m.verdict = 'not on this server' THEN 'not on this server'
+           WHEN s.verdict = 'no coordinates' OR m.verdict = 'no npc named'
+                THEN 'nothing to check'
+           ELSE 'pending'
+       END AS verdict
+FROM quest_state s LEFT JOIN npc_match m ON m.area = s.area AND m.id = s.id;
+"""
+
 # Terminal verdicts: nothing is learned by standing on the spot a second time. `absent` is
 # deliberately NOT one of them -- an NPC missing at a short settle and present at a longer one
 # is the single most common false miss this sweep produces.
@@ -100,6 +123,10 @@ def connect(path=DB):
     db = sqlite3.connect(path)
     db.row_factory = sqlite3.Row
     db.executescript(SCHEMA)
+    try:
+        db.executescript(COMBINED)
+    except sqlite3.OperationalError:
+        pass            # npc_positions.py has not run yet; quest_state still works
     return db
 
 
@@ -215,6 +242,20 @@ def counts(db):
 
 def cmd_status(args):
     db = connect(args.db)
+    try:
+        rows = list(db.execute('SELECT verdict, COUNT(*) n FROM quest_verdict '
+                               'GROUP BY verdict ORDER BY n DESC'))
+        total = sum(r['n'] for r in rows)
+        print(f'{total} quests, by strongest evidence available:')
+        for r in rows:
+            print(f'   {r["verdict"]:<22} {r["n"]:>4}')
+        good = sum(r['n'] for r in rows
+                   if r['verdict'] in ('verified', 'server confirmed'))
+        print(f'{good}/{total} confirmed correct '
+              f'({good * 100 // max(total, 1)}%)\n')
+    except sqlite3.OperationalError:
+        pass
+
     c = counts(db)
     total = sum(c.values())
     checkable = total - c.get('no coordinates', 0)
