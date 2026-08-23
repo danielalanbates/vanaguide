@@ -186,6 +186,22 @@ def classify(verdict_col, npc, why):
 def cmd_init(args):
     db = connect(args.db)
     rows = quest_table()
+
+    # A check is evidence about a coordinate, not about a quest. When the generator moves a
+    # quest -- and it moved nine of them the day npc_list was first consulted -- every earlier
+    # check of it was made somewhere else and says nothing about where it points now. Those
+    # get dropped rather than left standing as a verdict about the wrong place.
+    old = {(r['area'], r['id']): (r['zone'], r['x'], r['z'])
+           for r in db.execute('SELECT area, id, zone, x, z FROM quests')}
+    moved = [(r['area'], r['id']) for r in rows
+             if (r['area'], r['id']) in old
+             and old[(r['area'], r['id'])] != (r['zone'], r['x'], r['z'])]
+    if moved:
+        with db:
+            db.executemany('DELETE FROM checks WHERE area = ? AND id = ?', moved)
+        print(f'{len(moved)} quests have moved since they were last checked; '
+              f'their old results are dropped')
+
     with db:
         db.executemany(
             """INSERT INTO quests (area, id, name, npc, zone, x, y, z)
