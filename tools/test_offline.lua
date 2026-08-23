@@ -375,5 +375,26 @@ do
     ok(nm_guides >= 5, ('a hunting guide per zone that has notorious monsters (%d)'):format(nm_guides))
 end
 
+-- ---- the window fits the screen it is drawn on ---------------------------------
+do
+    local Win = require('ui.window')
+    Win.set_viewport(640, 480)
+    local w, h, rows = Win.fit()
+    ok(w <= 640 * 0.4, ('at 640x480 the window is a third of the width, not half (%d)'):format(w))
+    ok(h <= 480 * 0.4, ('and a third of the height (%d)'):format(h))
+    ok(rows >= 1, 'with at least one upcoming step visible')
+    ok(Win.refit == true, 'a resolution change re-fits once')
+
+    Win.set_viewport(1920, 1080)
+    local w2, h2, rows2 = Win.fit()
+    ok(w2 > w and w2 <= 420, ('at 1920x1080 it grows, but stays capped (%d)'):format(w2))
+    ok(rows2 >= rows, 'and shows at least as many upcoming steps')
+
+    -- an absurd viewport must not produce an absurd window
+    Win.set_viewport(320, 200)
+    local w3, h3 = Win.fit()
+    ok(w3 >= 240 and h3 >= 150, 'a tiny screen still gets a readable window')
+end
+
 print(('\n%d passed, %d failed'):format(pass, fail))
 os.exit(fail == 0 and 0 or 1)

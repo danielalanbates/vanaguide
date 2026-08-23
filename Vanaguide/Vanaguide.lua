@@ -435,20 +435,26 @@ ashita.events.register('d3d_present', 'vg_present', function ()
         if (P.advance(w) > 0) then save_progress(); end
     end
 
+    -- The viewport, before anything is drawn: the window sizes itself against the screen, so
+    -- it has to know the screen even when there is no guide loaded and no arrow to place.
+    -- (The local test world runs at 640x480; a window sized for 1920 covers half of it.)
+    local ok, vp = pcall(function ()
+        if (vg.d3d8 == nil) then vg.d3d8 = require('d3d8'); end
+        local res, v = vg.d3d8.get_device():GetViewport();
+        if (res == 0) then return v; end
+        return nil;
+    end);
+    if (ok and vp ~= nil) then
+        Arrow.set_viewport(vp.Width, vp.Height);
+        Window.set_viewport(vp.Width, vp.Height);
+    end
+
     Window.draw(w, function (name) load_guide(name); end);
 
     if (vg.settings.arrow.visible ~= false and P.guide ~= nil) then
         local step = P.step();
         if (step ~= nil) then
             local rec = R.recommend(step, w);
-            local ok, vp = pcall(function ()
-                if (vg.d3d8 == nil) then vg.d3d8 = require('d3d8'); end
-                local res, v = vg.d3d8.get_device():GetViewport();
-                if (res == 0) then return v; end
-                return nil;
-            end);
-            if (ok and vp ~= nil) then Arrow.set_viewport(vp.Width, vp.Height); end
-
             if (rec.mode == 'here' and rec.bearing ~= nil) then
                 Arrow.draw(rec.bearing, rec.distance,
                     ('%.0f yalms'):format(rec.distance or 0), step.text);
