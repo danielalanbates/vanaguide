@@ -86,12 +86,25 @@ function V.quest(area, id)
         return r
     end
 
+    -- Some quests are started at a "???" marker or a door rather than by talking to anybody.
+    -- The database carries the server's internal name for those — `qm6 (H-10/Boat)`, `_0id`,
+    -- `_iya` — and the client never calls them that, so matching by name is impossible. For
+    -- those, the question is only whether *something* is standing where the guide points.
+    local marker = q.npc ~= nil and (q.npc:match('^qm') ~= nil or q.npc:match('^_') ~= nil
+                                     or q.npc:find('%?%?%?') ~= nil)
     local want = normalize(q.npc)
     local list = V.nearby(px, pz)
     r.nearest = (#list > 0) and list[1].name or ''
-    if want == '' then
-        r.why = 'the database names no NPC'
-        r.ok = #list > 0
+    if want == '' or marker then
+        -- Within ten yalms is the same "you are in the right place" the arrow uses.
+        local near = list[1]
+        r.ok = near ~= nil and (near.dist or 1e9) <= 10
+        r.dist = near and near.dist or nil
+        r.why = marker
+            and (r.ok and ('marker quest: %s is here at %.1f yalms'):format(near.name, near.dist or -1)
+                       or ('marker quest: nothing within 10 yalms (%d loaded)'):format(#list))
+            or  (r.ok and ('no NPC named; %s is here'):format(near.name)
+                       or 'no NPC named and nothing is loaded here')
         return r
     end
     for _, e in ipairs(list) do
