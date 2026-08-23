@@ -77,6 +77,23 @@ def main():
                    f'**{d[len(d) // 2]:.1f} yalms** of the coordinate the guide gives, and '
                    f'the worst was {d[-1]:.1f}.\n')
 
+    # The interesting half of "server confirmed": a character stood there and saw nothing.
+    # That is not a bad coordinate -- npc_list has the NPC, at that spot, in that zone -- it is
+    # an NPC the server spawns only under a condition a blank character does not meet. Nearly
+    # all of them are Crystal War and Abyssea, where the NPC exists only once the storyline
+    # has been started.
+    looked = [r for r in by.get('server confirmed', []) if r['client'] == 'absent']
+    if looked:
+        out.append(f'\n## Confirmed by the server, absent in the client ({len(looked)})\n')
+        out.append('`npc_list` places the NPC exactly where the guide points, and a character '
+                   'standing on the spot saw nothing loaded. That is a spawn condition, not a '
+                   'wrong coordinate: these NPCs appear once the storyline that owns them has '
+                   'begun, and the character sweeping has begun nothing.\n')
+        out.append('| quest | NPC | zone |')
+        out.append('| --- | --- | ---: |')
+        for r in sorted(looked, key=lambda r: (r['area'], r['id'])):
+            out.append(f'| {r["name"]} | `{r["npc"]}` | {r["zone"]} |')
+
     for v in ('data error', 'not on this server', 'nothing to check',
               'only the client can check this'):
         if not by.get(v):
