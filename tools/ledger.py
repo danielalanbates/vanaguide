@@ -154,6 +154,18 @@ def cmd_init(args):
                    x=excluded.x, y=excluded.y, z=excluded.z""",
             [{k: r.get(k) for k in ('area', 'id', 'name', 'npc', 'zone', 'x', 'y', 'z')}
              for r in rows])
+    # A quest that has left data/quests.lua should leave the ledger too, or its last verdict
+    # sits in the totals forever claiming to be about something that exists.
+    live = {(r['area'], r['id']) for r in rows}
+    with db:
+        gone = [k for k in db.execute('SELECT area, id FROM quests')
+                if (k['area'], k['id']) not in live]
+        for k in gone:
+            db.execute('DELETE FROM quests WHERE area = ? AND id = ?', (k['area'], k['id']))
+            db.execute('DELETE FROM checks WHERE area = ? AND id = ?', (k['area'], k['id']))
+    if gone:
+        print(f'{len(gone)} quests no longer in data/quests.lua, dropped')
+
     n = db.execute('SELECT COUNT(*) FROM quests').fetchone()[0]
     c = db.execute('SELECT COUNT(*) FROM quests WHERE zone IS NOT NULL AND x IS NOT NULL')\
           .fetchone()[0]
