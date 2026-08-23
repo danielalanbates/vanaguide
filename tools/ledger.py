@@ -95,6 +95,7 @@ COMBINED = """
 CREATE VIEW IF NOT EXISTS quest_verdict AS
 SELECT s.area, s.id, s.name, s.npc, s.zone, s.x, s.z,
        s.verdict AS client, COALESCE(m.verdict, 'not checked') AS server, s.dist,
+       COALESCE(NULLIF(m.note, ''), s.why, '') AS why,
        CASE
            -- Standing on it and finding the NPC is the whole point; nothing outranks it.
            WHEN s.verdict = 'found' THEN 'verified'
