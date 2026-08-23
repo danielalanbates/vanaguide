@@ -8,3 +8,5 @@ settings/
 # Ashita writes per-character settings next to the addon; those hold character names.
 Vanaguide/settings/
 Vanaguide/config/
+__pycache__/
+*.pyc

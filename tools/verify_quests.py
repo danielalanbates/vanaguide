@@ -12,6 +12,10 @@ It drives the client through `addons/Vanaguide/cmd.txt` (the addon runs each lin
 reads results out of `addons/Vanaguide/verify.csv`, which the addon appends to. No keyboard
 simulation, no screenshots, no window focus: it can run for an hour unattended.
 
+What is left to check comes from the ledger (`tools/ledger.py`, `data/verification.sqlite3`)
+and every result goes straight back into it, row by row -- so a run that dies halfway, or is
+handed the client back after somebody else borrows it, resumes exactly where it stopped.
+
 Requires: a client logged in, GM level 1+ on the character (for `!pos`), and the local
 LandSandBoat server. Resumable — quests already in verify.csv are skipped.
 
@@ -20,35 +24,18 @@ LandSandBoat server. Resumable — quests already in verify.csv are skipped.
 Copyright (c) 2026 Bates LLC.  All rights reserved.
 """
 import argparse
-import json
+import csv as csvlib
+import datetime
 import os
 import subprocess
 import sys
 import time
 
+import ledger
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 
-
-def quest_table():
-    """Ask luajit for the generated table, rather than re-parsing Lua here."""
-    lua = """
-package.path = 'Vanaguide/?.lua;' .. package.path
-local Q = require('data.quests')
-local rows = {}
-for area, quests in pairs(Q.quests) do
-    for id, q in pairs(quests) do
-        rows[#rows+1] = string.format('{"area":"%s","id":%d,"name":%q,"zone":%s,"x":%s,"z":%s,"y":%s,"npc":%q}',
-            area, id, q.name or '', tostring(q.zone or 'null'),
-            tostring(q.x or 'null'), tostring(q.z or 'null'), tostring(q.y or 'null'), q.npc or '')
-    end
-end
-print('[' .. table.concat(rows, ',') .. ']')
-"""
-    out = subprocess.run(['luajit', '-e', lua], cwd=REPO, capture_output=True, text=True)
-    if out.returncode != 0:
-        sys.exit('could not read the quest table: ' + out.stderr.strip())
-    return json.loads(out.stdout)
 
 
 def main():
@@ -74,8 +61,11 @@ def main():
     ap.add_argument('--rescue', default=os.path.join(HERE, 'client.sh'),
                     help='script to run to un-wedge the client ("" to just stop)')
     ap.add_argument('--max-rescues', type=int, default=4)
-    ap.add_argument('--recheck', action='store_true',
-                    help='re-run only the quests that missed, with a longer settle')
+    ap.add_argument('--db', default=ledger.DB)
+    ap.add_argument('--run', default='', help='a name for this sweep in the ledger')
+    ap.add_argument('--retry-absent', action='store_true',
+                    help='also re-check the ones no NPC answered for (a short settle looks '
+                         'exactly like an NPC this server does not spawn)')
     args = ap.parse_args()
 
     addon = os.path.join(args.game, 'addons', 'Vanaguide')
@@ -100,31 +90,47 @@ def main():
             time.sleep(0.3)
         return False
 
-    done, missed = set(), set()
-    if os.path.exists(csv):
-        for line in open(csv, encoding='utf-8', errors='replace'):
-            bits = line.split(',')
-            if len(bits) > 2:
-                done.add((bits[0], bits[1]))
-                if bits[2] == 'MISS':
-                    missed.add((bits[0], bits[1]))
-                else:
-                    missed.discard((bits[0], bits[1]))
-    if args.recheck:
-        done -= missed
+    db = ledger.connect(args.db)
+    run = args.run or datetime.datetime.now().strftime('%Y-%m-%d-%H%M')
+    seq = db.execute('SELECT COALESCE(MAX(seq), 0) FROM checks WHERE run = ?',
+                     (run,)).fetchone()[0]
 
     skip = {int(z) for z in args.skip_zones.split(',') if z.strip().isdigit()}
-    quests = [q for q in quest_table()
-              if q['zone'] and q['x'] is not None and q['zone'] not in skip]
+    todo = [dict(r) for r in ledger.todo_rows(db, args.retry_absent)
+            if r['zone'] not in skip]
     if args.area:
-        quests = [q for q in quests if q['area'] == args.area]
-    # Zone order: every zone change costs a load, and there are far fewer zones than quests.
-    quests.sort(key=lambda q: (q['zone'], q['id']))
-    todo = [q for q in quests if (q['area'], str(q['id'])) not in done]
+        todo = [q for q in todo if q['area'] == args.area]
     if args.limit:
         todo = todo[:args.limit]
 
-    print(f'{len(quests)} quests with coordinates, {len(todo)} left to check', flush=True)
+    checkable = db.execute('SELECT COUNT(*) FROM quest_state '
+                           "WHERE verdict <> 'no coordinates'").fetchone()[0]
+    print(f'{checkable} quests can be checked, {len(todo)} left in this pass '
+          f'(ledger run "{run}")', flush=True)
+
+    def record(row, q):
+        """Fold one CSV line into the ledger as it arrives.
+
+        Per row rather than per run: a sweep that dies -- or hands the client back to somebody
+        else halfway through -- keeps everything it learned up to that point.
+        """
+        nonlocal seq
+        bits = next(csvlib.reader([row]))
+        bits += [''] * (13 - len(bits))
+        def num(v):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return None
+        seq += 1
+        with db:
+            db.execute('INSERT OR REPLACE INTO checks '
+                       '(area, id, run, seq, verdict, zone_seen, x, z, dist, why) '
+                       'VALUES (?,?,?,?,?,?,?,?,?,?)',
+                       (q['area'], q['id'], run, seq,
+                        ledger.classify(bits[2], bits[4], bits[12]),
+                        int(num(bits[8]) or 0) or None, num(bits[9]), num(bits[10]),
+                        num(bits[11]), bits[12]))
     current_zone = None
     misses = 0
 
@@ -194,6 +200,7 @@ def main():
         # did not take, and every later check inherits the mistake -- 245 rows of it, the
         # first time. One retry, then give up on that quest rather than poison the run.
         last = open(csv, encoding='utf-8', errors='replace').read().strip().splitlines()[-1]
+        record(last, q)
         if 'standing in' in last:
             stuck += 1
             current_zone = None
@@ -209,6 +216,7 @@ def main():
         if n % 10 == 0:
             print(f'   {n}/{len(todo)} …', flush=True)
 
+    ledger.cmd_status(argparse.Namespace(db=args.db))
     print('done', flush=True)
 
 

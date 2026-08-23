@@ -44,8 +44,8 @@ picked slot 0 and stood up in Southern San d'Oria with no keyboard involved.
 
 ```sh
 # a client logged in, GM level 1+ on the character (for !pos), local server up
-tools/verify_quests.py --game "<game dir>"            # the whole database, resumable
-tools/verify_quests.py --game "<game dir>" --recheck  # re-run only what missed
+tools/verify_quests.py --game "<game dir>"                  # everything still owed a check
+tools/verify_quests.py --game "<game dir>" --retry-absent   # and the ones nobody answered for
 tools/verify_quests.py --game "<game dir>" --area jeuno --limit 20
 ```
 
@@ -57,6 +57,29 @@ be left alone while it works.
 
 In-game, the same check is one command: `/vg verify sandoria 29`, and `/vg nearby` prints
 what is loaded around you.
+
+## Where the answers are kept
+
+Results go into a SQLite ledger, `data/verification.sqlite3` — one row per quest in `quests`,
+one row per check ever run in `checks`, and a `quest_state` view that says what each quest's
+current answer is. `tools/verify_quests.py` takes its work list from the ledger and writes
+each result back as it arrives, so a run that dies, or that has to hand the client back to
+somebody else halfway through, resumes exactly where it stopped.
+
+```sh
+tools/ledger.py init                 # build/refresh the quest list from data/quests.lua
+tools/ledger.py status               # how far along, and what is left
+tools/ledger.py todo --limit 20      # what a sweep would do next
+tools/ledger.py ingest verify.csv --run 2026-08-23-a
+tools/ledger.py export -o quests.csv
+```
+
+Two design decisions worth knowing. `unchecked` rows — the character never arrived — are
+recorded but excluded from `quest_state`, because they are the harness failing and would
+otherwise overwrite a real answer from an earlier run. And `absent` is *not* treated as
+settled: an NPC missing at a short settle and present at a longer one is the most common false
+miss this sweep produces, so `--retry-absent` can sweep them again without touching the
+quests that are genuinely finished.
 
 ## The result format
 
@@ -110,7 +133,7 @@ equally interesting:
    player, and entities keep streaming in *after* the zone itself has finished loading. At a
    twelve-second settle this sweep reported "1 entity loaded" and missed Waoud in Aht Urhgan;
    the same spot at twenty-two seconds found him at 0.4 yalms. The default settle is now
-   twenty seconds, and `--recheck` exists because the first run was wrong about this.
+   twenty seconds, and `--retry-absent` exists because the first run was wrong about this.
 2. **The server does not spawn that NPC.** LandSandBoat implements a subset of the game, and
    an NPC that no script spawns will never appear no matter how long you wait. That is a fact
    about the server, not about the guide — the coordinate may be perfectly right for retail.
