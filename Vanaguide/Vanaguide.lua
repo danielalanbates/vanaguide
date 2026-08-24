@@ -386,6 +386,19 @@ ashita.events.register('command', 'vg_command', function (e)
     -- graph records every crossing (docs/ROUTING.md) and until now nothing could read the
     -- result back, so "zone-line learning works" was an untested claim in the docs.
     if (sub == 'graph') then
+        -- `/vg graph <a> <b>` answers about one pair. The count on its own cannot tell you
+        -- whether a crossing was recorded, because Z.learn refuses to record a pair it
+        -- already knows -- so warping between two zones the sweep has visited a hundred
+        -- times leaves the total unchanged and looks exactly like learning being broken.
+        if (#args > 3) then
+            local a, b = tonumber(args[3]), tonumber(args[4]);
+            local key = ('%d-%d'):format(math.min(a, b), math.max(a, b));
+            local set = graph.save_learned() or {};
+            U.print(('graph: %s learned = %s'):format(key,
+                (set[key] or set[('%d-%d'):format(a, b)] or set[('%d-%d'):format(b, a)])
+                and 'yes' or 'no'));
+            return;
+        end
         local learned, seed = {}, 0;
         for key in pairs(graph.save_learned() or {}) do learned[#learned + 1] = key; end
         for _ in pairs(graph.adj or {}) do seed = seed + 1; end

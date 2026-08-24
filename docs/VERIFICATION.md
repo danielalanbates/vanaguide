@@ -52,27 +52,28 @@ the plugin block.
 conditions, the `0x056` bit maths (including the two packet shapes above), the progress
 cursor, the router, the generated databases and the arrow's rotation.
 
-## Still not verified
+## Answered on 2026-08-24
 
 Five of the six below were open for the same reason and it was not the interesting one: every
 `/vg` command answers into the game's chat log, and a script driving the client through
 `cmd.txt` cannot read chat. `/vg tee <file>` copies printed lines to a file, `/vg graph` reads
-the learned zone graph back, and `tools/capability_check.py` walks the list. The sixth needs
-somebody to walk.
+the learned zone graph back, and `tools/capability_check.py` walks the list.
 
+| | answer |
+| --- | --- |
+| **Quest completion flags** | **Yes.** `!completequest 0 1` on the live server, and `/vg story` went from 1 completed quest to 2. Missions were proven end to end in August and quests never were, because the test character had never finished one. The `Q` page ids parse. |
+| **Travel routing across zones** | **Yes.** Standing in West Ronfaure with a step in Southern San d'Oria, `/vg route` answers `West Ronfaure -> Southern San d'Oria`. Everything before this had happened inside one zone. |
+| **Zone-line learning** | **No, and that is the finding.** A GM `!zone` is not recorded as a crossing: the pair 102–103 was unknown to the graph before two warps between them and unknown after. The graph learns from walking through a zone line, not from being teleported across one. Two consequences, both good — thousands of sweep warps have not polluted the learned graph, and nobody has yet proved learning works, because nobody has walked. |
+| **`/vg mark`** | **Yes.** It writes `marks.txt`. |
+| **The arrow's direction** | **Still open, and it needs a person.** The maths is consistent and the bearing changes with the heading, but nobody has followed the arrow to a target and arrived. No script can answer this one. |
+| **Anything on a real server** | **Still open by choice.** This is a private LandSandBoat world. Vanaguide is on no public server's allowlist — see [SERVERS.md](SERVERS.md). |
 
-1. **Quest completion flags.** Missions are proven end to end; the `Q` tag's page ids
-   (`0x0090` and friends) were parsed from a live server but the character had zero completed
-   quests, so nothing has been watched turning on. `!completequest 0 <id>` would settle it.
-2. **Travel routing across zones.** Everything so far happened inside Southern San d'Oria.
-   `/vg route` has not been run against a step in another zone with a real walk to follow.
-3. **Zone-line learning.** The character has not crossed a zone line yet.
-4. **`/vg mark`.** Not run in this session.
-5. **The arrow's *direction*** is consistent with the maths and with observed movement
-   (walking away increased the distance, and the bearing changed as the heading did), but
-   nobody has followed it to a target and arrived.
-6. **Anything on a real server.** This was a private LandSandBoat world. See
-   [SERVERS.md](SERVERS.md): Vanaguide is on no public server's allowlist.
+Two traps in writing checks like these, both of which produced a wrong answer before they were
+noticed. `!completequest` on a quest already finished changes nothing and reads exactly like
+the flag never arriving — the check now tries several ids. `Z.learn` refuses to record a pair
+it already knows, so warping between two zones the sweep has been through a hundred times
+leaves the total unchanged and reads exactly like learning being broken — the check now asks
+about one pair rather than counting.
 
 ## How this run was driven
 

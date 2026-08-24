@@ -89,19 +89,29 @@ The harness fakes Ashita's globals (`tools/stubs.lua`), so the parser, the compl
 conditions, the packet reader, the progress cursor and the router are all exercised without
 launching anything.
 
-Beyond the unit tests, every quest in the database is checked twice — against the server's own
-`npc_list`, and by standing a character on the coordinate in a running client:
+Beyond the unit tests, every quest and every mission is checked twice — against the server's
+own `npc_list`, and by standing a character on the coordinate in a running client:
 
 ```sh
-tools/npc_positions.py             # all 505 against the server data, about a second
-tools/verify_quests.py --game …    # stand on each one; resumable, unattended
-tools/ledger.py status             # where it stands
+tools/npc_positions.py --kind quest    # all 505 against the server data, about a second
+tools/verify_quests.py --game …        # stand on each one; resumable, unattended
+tools/settle_probe.py --game …         # how long a zone really takes to load
+tools/capability_check.py --game …     # the things only a live client can answer
+tools/ledger.py status                 # where it stands
 ```
 
-**494 of 505 quests are confirmed correct.** What each check can and cannot prove — and why a
-miss is usually not a bad coordinate — is in
+**501 of 505 quests and 357 of 459 missions are confirmed correct**, and every entry that
+carries a place has been stood on. What each check can and cannot prove — and why a miss is
+usually not a bad coordinate — is in
 [docs/QUEST_VERIFICATION.md](docs/QUEST_VERIFICATION.md); the current results are in
-[docs/QUEST_VERIFICATION_RESULTS.md](docs/QUEST_VERIFICATION_RESULTS.md).
+[docs/QUEST_VERIFICATION_RESULTS.md](docs/QUEST_VERIFICATION_RESULTS.md) and
+[docs/MISSION_VERIFICATION_RESULTS.md](docs/MISSION_VERIFICATION_RESULTS.md).
+
+The sweep waits for the world instead of guessing at it. A teleport empties the client's
+entity table and it refills all at once about seventeen seconds later, so a check made too
+early sees nothing and cannot tell that it is early — which is how hundreds of NPCs came to be
+recorded as missing from a server that spawns them perfectly well. It is measured, not
+assumed: `data/settle_probe.csv`.
 
 ## Documentation
 

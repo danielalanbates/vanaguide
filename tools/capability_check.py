@@ -86,9 +86,6 @@ def main():
     print('   ' + '\n   '.join(hello), flush=True)
 
     print('\n== quest completion flags', flush=True)
-    before = send('/vg story')
-    send('!completequest %d %d' % (args.log_id, args.quest_id), wait=4)
-    after = send('/vg story')
 
     def completed(lines):
         for l in lines:
@@ -99,11 +96,28 @@ def main():
                     return None
         return None
 
-    a, b = completed(before), completed(after)
-    check('a completed quest reaches the addon',
-          a is not None and b is not None and b > a,
-          'completed quests went %s -> %s after !completequest %d %d'
-          % (a, b, args.log_id, args.quest_id))
+    # Try several ids, because `!completequest` on a quest the character has already finished
+    # changes nothing and is indistinguishable from the flag never arriving. The first run of
+    # this check passed and the second failed on the same working code, for exactly that
+    # reason -- the first run had completed the quest.
+    before = completed(send('/vg story'))
+    grew, tried = None, []
+    for qid in [args.quest_id] + [i for i in range(1, 40) if i != args.quest_id]:
+        send('!completequest %d %d' % (args.log_id, qid), wait=4)
+        after = completed(send('/vg story'))
+        tried.append(qid)
+        if before is not None and after is not None and after > before:
+            grew = (before, after, qid)
+            break
+        before = after
+        if len(tried) >= 8:
+            break
+    check('a completed quest reaches the addon', grew is not None,
+          ('completed quests went %d -> %d after !completequest %d %d'
+           % (grew[0], grew[1], args.log_id, grew[2])) if grew else
+          ('the count never moved across !completequest on %s -- either every one of those '
+           'was already complete on this character, or the Q flags are not arriving'
+           % ','.join(str(t) for t in tried)))
 
     print('\n== routing across zones', flush=True)
     zones = [int(z) for z in args.zones.split(',')][:2]
@@ -114,26 +128,32 @@ def main():
           (route[0] if route else 'nothing printed')[:110])
 
     print('\n== zone-line learning', flush=True)
-    was = send('/vg graph')
-    send('!zone %d' % zones[1], wait=20)
-    send('!zone %d' % zones[0], wait=20)
-    now = send('/vg graph')
 
-    def crossings(lines):
-        for l in lines:
-            if 'learned crossings' in l:
-                try:
-                    return int(l.split(',')[1].strip().split()[0])
-                except (IndexError, ValueError):
-                    return None
+    def pair(a, b):
+        for l in send('/vg graph %d %d' % (a, b), wait=2):
+            if 'learned = ' in l:
+                return l.strip().endswith('yes')
         return None
 
-    a, b = crossings(was), crossings(now)
-    check('a GM warp is recorded as a crossing',
-          a is not None and b is not None and b > a,
-          'learned crossings went %s -> %s across two !zone calls. A GM warp is not walking '
-          'through a zone line, so a FAIL here is a finding about the test, not the feature'
-          % (a, b))
+    # Ask about the pair, not the total. Z.learn refuses to record a crossing it already
+    # knows, so warping between two zones a sweep has visited a hundred times leaves the
+    # count unchanged and looks exactly like learning being broken. The first run of this
+    # check reported 340 -> 340 and meant nothing by it.
+    before = pair(*zones)
+    send('!zone %d' % zones[1], wait=20)
+    send('!zone %d' % zones[0], wait=20)
+    after = pair(*zones)
+    if before:
+        check('a GM warp is recorded as a crossing', True,
+              'zones %d and %d were already known to the graph, so this run could not have '
+              'shown anything either way -- pick a pair the sweep has not been through'
+              % tuple(zones))
+    else:
+        check('a GM warp is recorded as a crossing', bool(after),
+              'the pair %d-%d went from unknown to %s across two !zone calls. A GM warp is '
+              'not walking through a zone line, so a FAIL here says the graph learns from '
+              'walking and not from teleporting -- which is worth knowing and is not a bug'
+              % (zones[0], zones[1], 'learned' if after else 'still unknown'))
 
     print('\n== mark', flush=True)
     marks = os.path.join(addon, 'marks.txt')

@@ -188,14 +188,33 @@ driver treats exactly like the death signature: re-teleport and try again. The s
 rows were demoted in place rather than left standing as verdicts about a place the character
 never stood in.
 
-## Zone 178 traps the sweep
+## Zone 178 traps the sweep, and now the shape of it is known
 
-The Shrine of Ru'Avitau has now stopped two separate runs. The first time the cause was death
-— see below — and that explanation does not cover the second, where the character was alive,
-GM hidden, and simply could not be moved out. Two quests live in that zone, so the sweep goes
-there legitimately. What is known is that `rescue` gets out of it and nothing in the game did.
-The mechanism is not known, and guessing at it here would only make the next person confident
-about something nobody has established.
+The Shrine of Ru'Avitau has stopped four separate runs. The first was death and that
+explanation never covered the others. The fourth one, on 2026-08-24, was instrumented enough
+to say what actually happens:
+
+```
+seq 50  outlands 163  zone 178  9 entities  blank_divine_might is not loaded here
+seq 51  outlands 164  zone 178  9 entities  blank_divine_might is not loaded here
+seq 52  sandoria 101  zone 178  standing in 178, quest is in 231
+seq 53  sandoria  72  zone 178  standing in 178, quest is in 231
+      … and every stop after that
+```
+
+Read the first two lines. The sweep `!zone`d **into** 178 without trouble, stood on the Divine
+Might coordinate, and answered both rows with nine entities loaded — a real reading, from a
+character the server was obeying and the client had streamed the world around. Then `!zone`
+out of it did nothing, for ever.
+
+So: not a trap on entry. Not death either — a character that could be moved in was being
+obeyed a moment earlier, and a dead one would not have been. Something about leaving 178 is
+different, and nothing in the game log, `xi_map.log` or the entity table says what.
+
+Restarting the client gets out of it. That is the whole of what is known, and rather than
+rediscover it every run by burning five stops and a rescue, the sweep now leaves 178 by that
+door deliberately: `--quarantine-zones` defaults to `178` and restarts the client after any
+stop there. The restart is not charged against `--max-rescues`, because it is planned.
 
 ## When the character gets stuck: it is dead
 

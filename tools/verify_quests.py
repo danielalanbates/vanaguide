@@ -70,6 +70,18 @@ def main():
     # default any more.
     ap.add_argument('--skip-zones', default='',
                     help='comma-separated zone ids to leave alone')
+    # Zone 178 has now stopped four separate runs and this one finally showed the shape of
+    # it. The sweep `!zone`d INTO the Shrine of Ru'Avitau without trouble, stood on the Divine
+    # Might coordinate and answered both rows with nine entities loaded -- a real reading from
+    # a live, obedient character. Every stop after that said "standing in 178". It is not a
+    # trap on entry and it is not death: a character that could be moved in was being obeyed,
+    # and one that answers `/vg verify` with nine entities is loaded and in the world. `!zone`
+    # out of 178 simply does nothing, and nothing in the game says why.
+    #
+    # Restarting the client gets out of it, so the sweep leaves by that door on purpose rather
+    # than by burning five stops and a rescue discovering the same thing again.
+    ap.add_argument('--quarantine-zones', default='178',
+                    help='zones to restart the client after visiting; "" to disable')
     # A wedge is now recoverable without a person: tools/client.sh rescue revives the
     # character in the database, puts it back in San d'Oria and logs it in again.
     ap.add_argument('--rescue', default=os.path.join(HERE, 'client.sh'),
@@ -114,6 +126,7 @@ def main():
                      (run,)).fetchone()[0]
 
     skip = {int(z) for z in args.skip_zones.split(',') if z.strip().isdigit()}
+    quarantine = {int(z) for z in args.quarantine_zones.split(',') if z.strip().isdigit()}
     todo = [dict(r) for r in ledger.todo_rows(db, args.retry_absent, kind=args.kind)
             if r['zone'] not in skip]
     if args.area:
@@ -376,6 +389,13 @@ def main():
                 break
             misses = 0
             record(got[0], q)
+
+        if q['zone'] in quarantine:
+            print(f'   leaving zone {q["zone"]} the only way that works', flush=True)
+            if not rescue():
+                print('!! could not restart after a quarantined zone — stopping', flush=True)
+                break
+            rescues -= 1        # this one is planned, not a failure; do not spend the budget
 
         if silent and misses >= 10:
             print('!! ten silent checks in a row — the client is probably gone', flush=True)
