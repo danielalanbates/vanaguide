@@ -115,6 +115,27 @@ area,id,ok|MISS,"quest name","npc",want_zone,want_x,want_z,zone,x,z,dist,"why"
 sandoria,29,ok,"A Knight's Test","Balasiel",230,-136.0,64.0,230,-136.0,64.0,2.9,"found Balasiel at 2.9 yalms"
 ```
 
+## Settle time is the single biggest source of false misses
+
+The first full sweep answered after twenty seconds in the zone and called 151 quests absent.
+A second pass at thirty-two seconds found 38 of them, several at 0.0 yalms — the NPC was
+exactly where the guide said, and the check had simply asked before the zone finished
+arriving. A dense city streams entities for a long time.
+
+What is left absent still clusters in cities (Northern San d'Oria 13, Port Jeuno 12, Bastok
+Markets [S] 12, Bastok Mines 9, Mhaura 9), so thirty-two seconds is probably still not
+enough. Treat an absent result as "nobody has waited long enough yet" until a longer settle
+has been tried, not as a fact about the server.
+
+## Zone 178 traps the sweep
+
+The Shrine of Ru'Avitau has now stopped two separate runs. The first time the cause was death
+— see below — and that explanation does not cover the second, where the character was alive,
+GM hidden, and simply could not be moved out. Two quests live in that zone, so the sweep goes
+there legitimately. What is known is that `rescue` gets out of it and nothing in the game did.
+The mechanism is not known, and guessing at it here would only make the next person confident
+about something nobody has established.
+
 ## When the character gets stuck: it is dead
 
 The first full sweep filled 245 consecutive rows with "standing in 178, quest is in …" and

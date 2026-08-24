@@ -84,6 +84,12 @@ CREATE TABLE IF NOT EXISTS issues (
 -- The current answer for each quest: the newest check, with the ones that say nothing
 -- (`unchecked` -- the character never arrived) ignored, because they are the harness failing
 -- rather than evidence.
+--
+-- "Newest" is insertion order, not run name. Ordering by run name looked right while runs
+-- were called 2026-08-22-first and 2026-08-23-a, and silently inverted the moment one was
+-- called `retry-long-settle` and another `xi_map-1648-...`: r sorts before x, so a re-check
+-- run to correct an earlier answer was outranked by the answer it corrected, and 39 quests
+-- found on the second pass went on being reported absent.
 CREATE VIEW IF NOT EXISTS quest_state AS
 SELECT q.kind, q.area, q.id, q.name, q.npc, q.zone, q.x, q.y, q.z,
        CASE
@@ -91,14 +97,14 @@ SELECT q.kind, q.area, q.id, q.name, q.npc, q.zone, q.x, q.y, q.z,
            ELSE COALESCE((SELECT c.verdict FROM checks c
                           WHERE c.kind = q.kind AND c.area = q.area AND c.id = q.id
                             AND c.verdict <> 'unchecked'
-                          ORDER BY c.run DESC, c.seq DESC LIMIT 1), 'pending')
+                          ORDER BY c.rowid DESC LIMIT 1), 'pending')
        END AS verdict,
        (SELECT c.dist FROM checks c
         WHERE c.kind = q.kind AND c.area = q.area AND c.id = q.id AND c.verdict <> 'unchecked'
-        ORDER BY c.run DESC, c.seq DESC LIMIT 1) AS dist,
+        ORDER BY c.rowid DESC LIMIT 1) AS dist,
        (SELECT c.why FROM checks c
         WHERE c.kind = q.kind AND c.area = q.area AND c.id = q.id AND c.verdict <> 'unchecked'
-        ORDER BY c.run DESC, c.seq DESC LIMIT 1) AS why,
+        ORDER BY c.rowid DESC LIMIT 1) AS why,
        (SELECT COUNT(*) FROM checks c
         WHERE c.kind = q.kind AND c.area = q.area AND c.id = q.id) AS attempts
 FROM quests q;
