@@ -80,7 +80,7 @@ def parse_npc_list(root):
     return out
 
 
-def find_npc(text, lines, title, zone_ids, npc_list):
+def find_npc(text, lines, title, zone_ids, npc_list, allow_zone_only=False):
     """Who to talk to, and where they stand, from a quest or mission script.
 
     Six header dialects, then the script's own section tables, then a last pass that lets the
@@ -203,4 +203,25 @@ def find_npc(text, lines, title, zone_ids, npc_list):
         if pos and math.hypot(pos[0] - npc['x'], pos[2] - npc['z']) > 10.0:
             npc = dict(npc, x=pos[0], y=pos[1], z=pos[2], from_server=True)
 
-    return npc
+    if npc is not None:
+        return npc
+
+    # Nobody to talk to anywhere -- `allow_zone_only` decides whether that is worth a zone.
+    # Missions want it: many begin by walking into a place rather than by talking to somebody.
+    # Quests do not: a quest with no NPC and no coordinate is a quest with nothing to say, and
+    # naming a zone the script happens to mention would be a guess dressed as a fact.
+    # Nobody to talk to anywhere -- and for a whole class of missions that is the truth, not a
+    # gap. A Crystalline Prophecy begins by *walking into* Lower Jeuno: the section is keyed
+    # `[xi.zone.LOWER_JEUNO] = { onZoneIn = ... }` and names no NPC because none is involved.
+    # "Go to Lower Jeuno" is still the instruction a guide should give, so the zone is kept
+    # even though there is no coordinate to stand on. Twelve ACP missions and most of A
+    # Shantotto Ascension are this shape.
+    if not allow_zone_only:
+        return None
+
+    m = re.search(r"\[\s*xi\.zone\.([A-Z][A-Z0-9_]*)\s*\]\s*=", text)
+    zone = (zone_ids or {}).get(m.group(1)) if m else None
+    if zone:
+        return {'name': '', 'zone': zone, 'x': None, 'y': None, 'z': None, 'zone_only': True}
+
+    return None

@@ -70,7 +70,7 @@ def parse_mission(path, ids, zone_ids=None, npc_list=None):
         if m2:
             label = m2.group(1).strip()
 
-    npc = lsbdata.find_npc(text, lines, title, zone_ids, npc_list)
+    npc = lsbdata.find_npc(text, lines, title, zone_ids, npc_list, allow_zone_only=True)
 
     return {'area': area, 'id': mid, 'name': title, 'label': label, 'npc': npc}
 
@@ -104,7 +104,9 @@ def main():
                 missions[m['area']][m['id']] = m
 
     total = sum(len(v) for v in missions.values())
-    positioned = sum(1 for a in missions.values() for m in a.values() if m['npc'])
+    positioned = sum(1 for a in missions.values() for m in a.values()
+                     if m['npc'] and m['npc'].get('x') is not None)
+    placed = sum(1 for a in missions.values() for m in a.values() if m['npc'])
 
     with open(args.out, 'w', encoding='utf-8') as fh:
         fh.write("""-- Vanaguide :: data/missions.lua
@@ -129,9 +131,15 @@ local M = {}
                     bits.append('label = %s' % lua_str(m['label']))
                 if m['npc']:
                     n = m['npc']
-                    bits += ['zone = %d' % n['zone'], 'x = %.1f' % n['x'],
-                             'z = %.1f' % n['z'], 'y = %.1f' % n['y'],
-                             'npc = %s' % lua_str(n['name'])]
+                    bits.append('zone = %d' % n['zone'])
+                    # A mission that begins by zoning in has a place but no spot in it. The
+                    # guide can still say where to go, so the zone is written and the
+                    # coordinates are not invented.
+                    if n.get('x') is not None:
+                        bits += ['x = %.1f' % n['x'], 'z = %.1f' % n['z'],
+                                 'y = %.1f' % n['y']]
+                    if n['name']:
+                        bits.append('npc = %s' % lua_str(n['name']))
                 fh.write('        [%d] = { %s },\n' % (mid, ', '.join(bits)))
             fh.write('    },\n')
         fh.write('}\n\n')
@@ -150,8 +158,8 @@ end
 return M
 """)
 
-    print('%d missions in %d storylines (%d with coordinates); %d files skipped'
-          % (total, len(missions), positioned, skipped))
+    print('%d missions in %d storylines (%d with coordinates, %d with at least a zone); '
+          '%d files skipped' % (total, len(missions), positioned, placed, skipped))
 
 
 if __name__ == '__main__':
