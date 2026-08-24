@@ -252,7 +252,16 @@ def main():
     args = ap.parse_args()
 
     db = ledger.connect(args.db)
+    # npc_match predates missions and has no `kind`. It is a derived table -- every row is
+    # rebuilt from npc_list in about a second -- so it is dropped rather than migrated.
+    cols = [r[1] for r in db.execute('PRAGMA table_info(npc_match)')]
+    if cols and 'kind' not in cols:
+        db.execute('DROP TABLE npc_match')
+        db.execute('DROP VIEW IF EXISTS quest_verdict')
+        db.commit()
+        print('npc_match rebuilt for missions')
     db.executescript(SCHEMA)
+    ledger.connect(args.db)         # recreate the combined view against the new table
     if not args.report:
         n = load_npcs(db)
         m = match_all(db, args.kind)

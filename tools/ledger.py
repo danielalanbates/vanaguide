@@ -146,27 +146,26 @@ def migrate(db):
     have = [r[1] for r in db.execute('PRAGMA table_info(quests)')]
     if not have or 'kind' in have:
         return False
-    db.executescript("""
-        PRAGMA foreign_keys=off;
-        BEGIN;
-        ALTER TABLE quests RENAME TO quests_old;
-        ALTER TABLE checks RENAME TO checks_old;
-        DROP VIEW IF EXISTS quest_state;
-        DROP VIEW IF EXISTS quest_verdict;
-        DROP TABLE IF EXISTS issues;
-    """)
+    # Statement by statement, not executescript with a BEGIN in it: executescript commits
+    # whatever transaction is open before it runs a line, so an explicit BEGIN inside one is
+    # already gone by the time its COMMIT is reached, and the COMMIT fails with "no
+    # transaction is active" -- after the work has been done and committed piecemeal.
+    for stmt in ('ALTER TABLE quests RENAME TO quests_old',
+                 'ALTER TABLE checks RENAME TO checks_old',
+                 'DROP VIEW IF EXISTS quest_state',
+                 'DROP VIEW IF EXISTS quest_verdict',
+                 'DROP TABLE IF EXISTS issues'):
+        db.execute(stmt)
     db.executescript(SCHEMA)
-    db.executescript("""
-        INSERT INTO quests (kind, area, id, name, npc, zone, x, y, z)
-            SELECT 'quest', area, id, name, npc, zone, x, y, z FROM quests_old;
-        INSERT INTO checks (kind, area, id, run, seq, verdict, zone_seen, x, z, dist, why)
-            SELECT 'quest', area, id, run, seq, verdict, zone_seen, x, z, dist, why
-            FROM checks_old;
-        DROP TABLE quests_old;
-        DROP TABLE checks_old;
-        COMMIT;
-        PRAGMA foreign_keys=on;
-    """)
+    for stmt in ("INSERT INTO quests (kind, area, id, name, npc, zone, x, y, z) "
+                 "SELECT 'quest', area, id, name, npc, zone, x, y, z FROM quests_old",
+                 "INSERT INTO checks (kind, area, id, run, seq, verdict, zone_seen, x, z, "
+                 "dist, why) SELECT 'quest', area, id, run, seq, verdict, zone_seen, x, z, "
+                 "dist, why FROM checks_old",
+                 'DROP TABLE quests_old',
+                 'DROP TABLE checks_old'):
+        db.execute(stmt)
+    db.commit()
     return True
 
 
