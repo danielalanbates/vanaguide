@@ -364,6 +364,37 @@ ashita.events.register('command', 'vg_command', function (e)
         return;
     end
 
+    -- Copy everything printed to a file as well as to chat. A script driving the client
+    -- through cmd.txt has no way to read the game's chat log, so without this the only
+    -- commands it can check are the ones that happen to write a file of their own.
+    --   /vg tee answers.txt   -> addons/Vanaguide/answers.txt
+    --   /vg tee off
+    if (sub == 'tee') then
+        local name = (#args > 2) and args[3] or 'off';
+        if (name:lower() == 'off') then
+            U.tee = nil;
+            U.print('tee off');
+        else
+            local base = AshitaCore:GetInstallPath():gsub('[\\/]$', '');
+            U.tee = ('%s\\addons\\Vanaguide\\%s'):format(base, name);
+            U.print('tee -> ' .. name);
+        end
+        return;
+    end
+
+    -- What the zone graph has learned from play, and whether it is learning at all. The
+    -- graph records every crossing (docs/ROUTING.md) and until now nothing could read the
+    -- result back, so "zone-line learning works" was an untested claim in the docs.
+    if (sub == 'graph') then
+        local learned, seed = {}, 0;
+        for key in pairs(graph.save_learned() or {}) do learned[#learned + 1] = key; end
+        for _ in pairs(graph.adj or {}) do seed = seed + 1; end
+        table.sort(learned);
+        U.print(('graph: %d zones with edges, %d learned crossings'):format(seed, #learned));
+        for i = 1, math.min(20, #learned) do U.print('  learned ' .. learned[i]); end
+        return;
+    end
+
     if (sub == 'route') then
         local step = P.step();
         if (step == nil or step.zone == nil) then U.print('the current step has no place'); return; end

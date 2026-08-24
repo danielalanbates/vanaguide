@@ -165,9 +165,25 @@ function U.item_count(id)
 end
 
 --- Chat output, prefixed so it is findable in a busy log.
+--- Where to copy printed lines, if anywhere. Set by `/vg tee <name>`.
+---
+--- Every `/vg` command answers into the game's chat log, and a script driving the client
+--- through cmd.txt cannot read chat -- so half the addon was only testable by a person
+--- squinting at a screenshot. `verify` grew its own CSV for exactly this reason; rather than
+--- give every other command one too, the printing itself can be copied to a file. One switch,
+--- and `/vg story`, `/vg route`, `/vg status` and the rest all become readable by a script.
+U.tee = nil
+
 function U.print(msg)
     local line = '[Vanaguide] ' .. tostring(msg)
     if _G.print ~= nil then _G.print(line) end
+    if U.tee ~= nil then
+        local f = io.open(U.tee, 'ab')
+        if f ~= nil then
+            f:write(line, '\n')
+            f:close()
+        end
+    end
 end
 
 --- Clamp an angle to (-pi, pi].
