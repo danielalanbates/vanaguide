@@ -150,7 +150,7 @@ function V.row(r)
     }, ',')
 end
 
-return V
-
 --- Kept for anything that still asks for a quest by name.
 function V.quest(area, id) return V.entry('quest', area, id) end
+
+return V
