@@ -337,8 +337,16 @@ ashita.events.register('command', 'vg_command', function (e)
     -- Stand on a quest's coordinates and check the NPC is really there. Writes a CSV row to
     -- addons/Vanaguide/verify.csv as well as printing, because a full sweep is hundreds of
     -- these and they are read by a script.  See docs/QUEST_VERIFICATION.md.
+    -- `/vg verify <area> <id>` for a quest, `/vg verify m <area> <id>` for a mission.
+    if (sub == 'verify' and #args > 4 and args[3]:lower() == 'm') then
+        local r = Verify.entry('mission', args[4]:lower(), tonumber(args[5]) or -1);
+        Verify.log('verify.csv', Verify.row(r));
+        U.print(('verify mission %s %s: %s — %s'):format(r.area, tostring(r.id),
+            r.ok and 'ok' or 'MISS', r.why));
+        return;
+    end
     if (sub == 'verify' and #args > 3) then
-        local r = Verify.quest(args[3]:lower(), tonumber(args[4]) or -1);
+        local r = Verify.entry('quest', args[3]:lower(), tonumber(args[4]) or -1);
         Verify.log('verify.csv', Verify.row(r));
         U.print(('verify %s %s: %s — %s'):format(r.area, tostring(r.id),
             r.ok and 'ok' or 'MISS', r.why));

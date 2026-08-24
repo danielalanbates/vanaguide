@@ -38,6 +38,7 @@ DB = os.path.join(REPO, 'data', 'verification.sqlite3')
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS quests (
+    kind        TEXT NOT NULL DEFAULT 'quest',
     area        TEXT NOT NULL,
     id          INTEGER NOT NULL,
     name        TEXT NOT NULL,
@@ -46,13 +47,14 @@ CREATE TABLE IF NOT EXISTS quests (
     x           REAL,
     y           REAL,
     z           REAL,
-    PRIMARY KEY (area, id)
+    PRIMARY KEY (kind, area, id)
 );
 
 -- Every check ever run, not just the last one. A quest that missed at a twelve second settle
 -- and was found at twenty-two is the evidence that the settle was too short, and throwing the
 -- first row away throws that away too.
 CREATE TABLE IF NOT EXISTS checks (
+    kind        TEXT NOT NULL DEFAULT 'quest',
     area        TEXT NOT NULL,
     id          INTEGER NOT NULL,
     run         TEXT NOT NULL,          -- which sweep produced it
@@ -63,8 +65,7 @@ CREATE TABLE IF NOT EXISTS checks (
     z           REAL,
     dist        REAL,
     why         TEXT NOT NULL DEFAULT '',
-    PRIMARY KEY (area, id, run, seq),
-    FOREIGN KEY (area, id) REFERENCES quests(area, id)
+    PRIMARY KEY (kind, area, id, run, seq)
 );
 
 CREATE INDEX IF NOT EXISTS checks_verdict ON checks(verdict);
@@ -72,31 +73,34 @@ CREATE INDEX IF NOT EXISTS checks_verdict ON checks(verdict);
 -- Faults in the shape of the data rather than in a coordinate: a prerequisite naming a quest
 -- that is not there, a zone id no zone has. Rewritten every `check`.
 CREATE TABLE IF NOT EXISTS issues (
+    kind    TEXT NOT NULL DEFAULT 'quest',
     area    TEXT NOT NULL,
     id      INTEGER NOT NULL,
-    kind    TEXT NOT NULL,
+    fault   TEXT NOT NULL,
     detail  TEXT NOT NULL DEFAULT '',
-    PRIMARY KEY (area, id, kind)
+    PRIMARY KEY (kind, area, id, fault)
 );
 
 -- The current answer for each quest: the newest check, with the ones that say nothing
 -- (`unchecked` -- the character never arrived) ignored, because they are the harness failing
 -- rather than evidence.
 CREATE VIEW IF NOT EXISTS quest_state AS
-SELECT q.area, q.id, q.name, q.npc, q.zone, q.x, q.y, q.z,
+SELECT q.kind, q.area, q.id, q.name, q.npc, q.zone, q.x, q.y, q.z,
        CASE
            WHEN q.zone IS NULL OR q.x IS NULL THEN 'no coordinates'
            ELSE COALESCE((SELECT c.verdict FROM checks c
-                          WHERE c.area = q.area AND c.id = q.id AND c.verdict <> 'unchecked'
+                          WHERE c.kind = q.kind AND c.area = q.area AND c.id = q.id
+                            AND c.verdict <> 'unchecked'
                           ORDER BY c.run DESC, c.seq DESC LIMIT 1), 'pending')
        END AS verdict,
        (SELECT c.dist FROM checks c
-        WHERE c.area = q.area AND c.id = q.id AND c.verdict <> 'unchecked'
+        WHERE c.kind = q.kind AND c.area = q.area AND c.id = q.id AND c.verdict <> 'unchecked'
         ORDER BY c.run DESC, c.seq DESC LIMIT 1) AS dist,
        (SELECT c.why FROM checks c
-        WHERE c.area = q.area AND c.id = q.id AND c.verdict <> 'unchecked'
+        WHERE c.kind = q.kind AND c.area = q.area AND c.id = q.id AND c.verdict <> 'unchecked'
         ORDER BY c.run DESC, c.seq DESC LIMIT 1) AS why,
-       (SELECT COUNT(*) FROM checks c WHERE c.area = q.area AND c.id = q.id) AS attempts
+       (SELECT COUNT(*) FROM checks c
+        WHERE c.kind = q.kind AND c.area = q.area AND c.id = q.id) AS attempts
 FROM quests q;
 """
 
@@ -104,7 +108,7 @@ FROM quests q;
 # is created separately so the ledger still works without it.
 COMBINED = """
 CREATE VIEW IF NOT EXISTS quest_verdict AS
-SELECT s.area, s.id, s.name, s.npc, s.zone, s.x, s.z,
+SELECT s.kind, s.area, s.id, s.name, s.npc, s.zone, s.x, s.z,
        s.verdict AS client, COALESCE(m.verdict, 'not checked') AS server, s.dist,
        COALESCE(NULLIF(m.note, ''), s.why, '') AS why,
        CASE
@@ -121,7 +125,8 @@ SELECT s.area, s.id, s.name, s.npc, s.zone, s.x, s.z,
                 THEN 'nothing to check'
            ELSE 'pending'
        END AS verdict
-FROM quest_state s LEFT JOIN npc_match m ON m.area = s.area AND m.id = s.id;
+FROM quest_state s
+LEFT JOIN npc_match m ON m.kind = s.kind AND m.area = s.area AND m.id = s.id;
 """
 
 # Terminal verdicts: nothing is learned by standing on the spot a second time. `absent` is
@@ -130,10 +135,47 @@ FROM quest_state s LEFT JOIN npc_match m ON m.area = s.area AND m.id = s.id;
 SETTLED = ('found', 'marker', 'unnamed')
 
 
+def migrate(db):
+    """Add `kind` to a ledger written before missions existed.
+
+    SQLite cannot change a primary key in place, and this one has to change: quests and
+    missions share area names -- `sandoria` is both -- with ids that overlap, so (area, id) is
+    no longer unique. The tables are rebuilt rather than altered, in one transaction, with
+    every existing row declared a quest, which is what it was.
+    """
+    have = [r[1] for r in db.execute('PRAGMA table_info(quests)')]
+    if not have or 'kind' in have:
+        return False
+    db.executescript("""
+        PRAGMA foreign_keys=off;
+        BEGIN;
+        ALTER TABLE quests RENAME TO quests_old;
+        ALTER TABLE checks RENAME TO checks_old;
+        DROP VIEW IF EXISTS quest_state;
+        DROP VIEW IF EXISTS quest_verdict;
+        DROP TABLE IF EXISTS issues;
+    """)
+    db.executescript(SCHEMA)
+    db.executescript("""
+        INSERT INTO quests (kind, area, id, name, npc, zone, x, y, z)
+            SELECT 'quest', area, id, name, npc, zone, x, y, z FROM quests_old;
+        INSERT INTO checks (kind, area, id, run, seq, verdict, zone_seen, x, z, dist, why)
+            SELECT 'quest', area, id, run, seq, verdict, zone_seen, x, z, dist, why
+            FROM checks_old;
+        DROP TABLE quests_old;
+        DROP TABLE checks_old;
+        COMMIT;
+        PRAGMA foreign_keys=on;
+    """)
+    return True
+
+
 def connect(path=DB):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     db = sqlite3.connect(path)
     db.row_factory = sqlite3.Row
+    if migrate(db):
+        print('ledger migrated: every existing row is a quest')
     db.executescript(SCHEMA)
     try:
         db.executescript(COMBINED)
@@ -165,6 +207,33 @@ print('[' .. table.concat(rows, ',') .. ']')
     return json.loads(out.stdout)
 
 
+def mission_table():
+    """The same shape as quest_table, from data/missions.lua.
+
+    Missions that begin by walking into a place carry a zone and no coordinate; those come
+    through with x and z null, and everything downstream already understands that as "there is
+    nowhere to stand", because 160 quests were that shape first.
+    """
+    lua = """
+package.path = 'Vanaguide/?.lua;' .. package.path
+local M = require('data.missions')
+local rows = {}
+for area, ms in pairs(M.missions) do
+    for id, m in pairs(ms) do
+        rows[#rows+1] = string.format('{"kind":"mission","area":"%s","id":%d,"name":%q,"zone":%s,"x":%s,"z":%s,"y":%s,"npc":%q,"prereq":null}',
+            area, id, m.name or '', tostring(m.zone or 'null'),
+            tostring(m.x or 'null'), tostring(m.z or 'null'), tostring(m.y or 'null'),
+            m.npc or '')
+    end
+end
+print('[' .. table.concat(rows, ',') .. ']')
+"""
+    out = subprocess.run(['luajit', '-e', lua], cwd=REPO, capture_output=True, text=True)
+    if out.returncode != 0:
+        sys.exit('could not read the mission table: ' + out.stderr.strip())
+    return json.loads(out.stdout)
+
+
 def classify(verdict_col, npc, why):
     """Turn one CSV row into a verdict.
 
@@ -185,48 +254,54 @@ def classify(verdict_col, npc, why):
 
 def cmd_init(args):
     db = connect(args.db)
-    rows = quest_table()
+    rows = [dict(r, kind='quest') for r in quest_table()] + mission_table()
 
     # A check is evidence about a coordinate, not about a quest. When the generator moves a
     # quest -- and it moved nine of them the day npc_list was first consulted -- every earlier
     # check of it was made somewhere else and says nothing about where it points now. Those
     # get dropped rather than left standing as a verdict about the wrong place.
-    old = {(r['area'], r['id']): (r['zone'], r['x'], r['z'])
-           for r in db.execute('SELECT area, id, zone, x, z FROM quests')}
-    moved = [(r['area'], r['id']) for r in rows
-             if (r['area'], r['id']) in old
-             and old[(r['area'], r['id'])] != (r['zone'], r['x'], r['z'])]
+    old = {(r['kind'], r['area'], r['id']): (r['zone'], r['x'], r['z'])
+           for r in db.execute('SELECT kind, area, id, zone, x, z FROM quests')}
+    moved = [(r['kind'], r['area'], r['id']) for r in rows
+             if (r['kind'], r['area'], r['id']) in old
+             and old[(r['kind'], r['area'], r['id'])] != (r['zone'], r['x'], r['z'])]
     if moved:
         with db:
-            db.executemany('DELETE FROM checks WHERE area = ? AND id = ?', moved)
+            db.executemany('DELETE FROM checks WHERE kind = ? AND area = ? AND id = ?', moved)
         print(f'{len(moved)} quests have moved since they were last checked; '
               f'their old results are dropped')
 
     with db:
         db.executemany(
-            """INSERT INTO quests (area, id, name, npc, zone, x, y, z)
-               VALUES (:area, :id, :name, :npc, :zone, :x, :y, :z)
-               ON CONFLICT(area, id) DO UPDATE SET
+            """INSERT INTO quests (kind, area, id, name, npc, zone, x, y, z)
+               VALUES (:kind, :area, :id, :name, :npc, :zone, :x, :y, :z)
+               ON CONFLICT(kind, area, id) DO UPDATE SET
                    name=excluded.name, npc=excluded.npc, zone=excluded.zone,
                    x=excluded.x, y=excluded.y, z=excluded.z""",
-            [{k: r.get(k) for k in ('area', 'id', 'name', 'npc', 'zone', 'x', 'y', 'z')}
+            [{k: r.get(k) for k in
+              ('kind', 'area', 'id', 'name', 'npc', 'zone', 'x', 'y', 'z')}
              for r in rows])
     # A quest that has left data/quests.lua should leave the ledger too, or its last verdict
     # sits in the totals forever claiming to be about something that exists.
-    live = {(r['area'], r['id']) for r in rows}
+    live = {(r['kind'], r['area'], r['id']) for r in rows}
     with db:
-        gone = [k for k in db.execute('SELECT area, id FROM quests')
-                if (k['area'], k['id']) not in live]
+        gone = [k for k in db.execute('SELECT kind, area, id FROM quests')
+                if (k['kind'], k['area'], k['id']) not in live]
         for k in gone:
-            db.execute('DELETE FROM quests WHERE area = ? AND id = ?', (k['area'], k['id']))
-            db.execute('DELETE FROM checks WHERE area = ? AND id = ?', (k['area'], k['id']))
+            key = (k['kind'], k['area'], k['id'])
+            db.execute('DELETE FROM quests WHERE kind = ? AND area = ? AND id = ?', key)
+            db.execute('DELETE FROM checks WHERE kind = ? AND area = ? AND id = ?', key)
     if gone:
         print(f'{len(gone)} quests no longer in data/quests.lua, dropped')
 
-    n = db.execute('SELECT COUNT(*) FROM quests').fetchone()[0]
-    c = db.execute('SELECT COUNT(*) FROM quests WHERE zone IS NOT NULL AND x IS NOT NULL')\
-          .fetchone()[0]
-    print(f'{n} quests, {c} with coordinates -> {args.db}')
+    for kind in ('quest', 'mission'):
+        n = db.execute('SELECT COUNT(*) FROM quests WHERE kind = ?', (kind,)).fetchone()[0]
+        c = db.execute('SELECT COUNT(*) FROM quests WHERE kind = ? AND zone IS NOT NULL '
+                       'AND x IS NOT NULL', (kind,)).fetchone()[0]
+        z = db.execute('SELECT COUNT(*) FROM quests WHERE kind = ? AND zone IS NOT NULL',
+                       (kind,)).fetchone()[0]
+        print(f'{n} {kind}s, {c} with coordinates, {z} with at least a zone')
+    print('-> ' + args.db)
 
 
 def cmd_ingest(args):
@@ -265,18 +340,20 @@ def cmd_ingest(args):
     cmd_status(args)
 
 
-def counts(db):
+def counts(db, kind='quest'):
     return {r['verdict']: r['n'] for r in db.execute(
-        'SELECT verdict, COUNT(*) AS n FROM quest_state GROUP BY verdict')}
+        'SELECT verdict, COUNT(*) AS n FROM quest_state WHERE kind = ? GROUP BY verdict',
+        (kind,))}
 
 
 def cmd_status(args):
     db = connect(args.db)
     try:
         rows = list(db.execute('SELECT verdict, COUNT(*) n FROM quest_verdict '
-                               'GROUP BY verdict ORDER BY n DESC'))
+                               'WHERE kind = ? GROUP BY verdict ORDER BY n DESC',
+                               (args.kind,)))
         total = sum(r['n'] for r in rows)
-        print(f'{total} quests, by strongest evidence available:')
+        print(f'{total} {args.kind}s, by strongest evidence available:')
         for r in rows:
             print(f'   {r["verdict"]:<22} {r["n"]:>4}')
         good = sum(r['n'] for r in rows
@@ -286,11 +363,11 @@ def cmd_status(args):
     except sqlite3.OperationalError:
         pass
 
-    c = counts(db)
+    c = counts(db, args.kind)
     total = sum(c.values())
     checkable = total - c.get('no coordinates', 0)
     settled = sum(c.get(v, 0) for v in SETTLED)
-    print(f'{total} quests: {checkable} can be checked by standing on them, '
+    print(f'{total} {args.kind}s: {checkable} can be checked by standing on them, '
           f'{c.get("no coordinates", 0)} have no coordinates at all')
     for v in ('found', 'absent', 'marker', 'unnamed', 'pending'):
         if c.get(v):
@@ -300,7 +377,7 @@ def cmd_status(args):
           f'({done * 100 // max(checkable, 1)}%), {c.get("pending", 0)} still owed a check')
 
 
-def todo_rows(db, retry_absent=False, limit=0):
+def todo_rows(db, retry_absent=False, limit=0, kind='quest'):
     """Quests still owed a check, in the order a sweep should walk them.
 
     Zone first, because every zone change costs a load and there are far fewer zones than
@@ -308,15 +385,15 @@ def todo_rows(db, retry_absent=False, limit=0):
     can be checked from one stop.
     """
     wanted = ['pending'] + (['absent'] if retry_absent else [])
-    q = ('SELECT * FROM quest_state WHERE verdict IN (%s) ORDER BY zone, x, z, id'
-         % ','.join('?' * len(wanted)))
-    rows = db.execute(q, wanted).fetchall()
+    q = ('SELECT * FROM quest_state WHERE kind = ? AND verdict IN (%s) '
+         'ORDER BY zone, x, z, id' % ','.join('?' * len(wanted)))
+    rows = db.execute(q, [kind] + wanted).fetchall()
     return rows[:limit] if limit else rows
 
 
 def cmd_todo(args):
     db = connect(args.db)
-    rows = todo_rows(db, args.retry_absent, args.limit)
+    rows = todo_rows(db, args.retry_absent, args.limit, args.kind)
     if args.json:
         print(json.dumps([dict(r) for r in rows]))
         return
@@ -336,26 +413,27 @@ def cmd_check(args):
     has no script for those quests, so nothing on this server can require them.
     """
     db = connect(args.db)
-    quests = {(r['area'], r['id']): r for r in db.execute('SELECT * FROM quests')}
+    quests = {(r['area'], r['id']): r for r in
+              db.execute("SELECT * FROM quests WHERE kind = 'quest'")}
     rows = quest_table()
     found = []
     for r in rows:
         pre = r.get('prereq')
         if pre and (pre[0], pre[1]) not in quests:
-            found.append((r['area'], r['id'], 'prerequisite missing',
+            found.append((r.get('kind', 'quest'), r['area'], r['id'], 'prerequisite missing',
                           'requires %s %s, which is not in the database -- this server has '
                           'no script for it' % (pre[0], pre[1])))
     with db:
         db.execute('DELETE FROM issues')
-        db.executemany('INSERT OR REPLACE INTO issues VALUES (?,?,?,?)', found)
+        db.executemany('INSERT OR REPLACE INTO issues VALUES (?,?,?,?,?)', found)
     print(f'{len(found)} structural issues')
-    for a, i, kind, detail in found:
-        print(f'   {a:<11} {i:>4}  {kind}: {detail}')
+    for _kind, a, i, fault, detail in found:
+        print(f'   {a:<11} {i:>4}  {fault}: {detail}')
 
 
 def cmd_export(args):
     db = connect(args.db)
-    rows = db.execute('SELECT * FROM quest_state ORDER BY area, id').fetchall()
+    rows = db.execute('SELECT * FROM quest_state ORDER BY kind, area, id').fetchall()
     out = open(args.out, 'w', newline='', encoding='utf-8') if args.out else sys.stdout
     w = csv.writer(out)
     w.writerow(rows[0].keys() if rows else [])
@@ -369,6 +447,8 @@ def cmd_export(args):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[2])
     ap.add_argument('--db', default=DB)
+    ap.add_argument('--kind', default='quest', choices=('quest', 'mission'),
+                    help='quests and missions live in one ledger, told apart by this')
     sub = ap.add_subparsers(dest='cmd', required=True)
 
     sub.add_parser('init').set_defaults(fn=cmd_init)

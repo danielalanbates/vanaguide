@@ -63,6 +63,8 @@ def main():
     ap.add_argument('--max-rescues', type=int, default=4)
     ap.add_argument('--db', default=ledger.DB)
     ap.add_argument('--run', default='', help='a name for this sweep in the ledger')
+    ap.add_argument('--kind', default='quest', choices=('quest', 'mission'),
+                    help='sweep the quest database or the mission one')
     ap.add_argument('--plan', action='store_true',
                     help='print what the sweep would do and how long it would take')
     ap.add_argument('--retry-absent', action='store_true',
@@ -98,16 +100,16 @@ def main():
                      (run,)).fetchone()[0]
 
     skip = {int(z) for z in args.skip_zones.split(',') if z.strip().isdigit()}
-    todo = [dict(r) for r in ledger.todo_rows(db, args.retry_absent)
+    todo = [dict(r) for r in ledger.todo_rows(db, args.retry_absent, kind=args.kind)
             if r['zone'] not in skip]
     if args.area:
         todo = [q for q in todo if q['area'] == args.area]
     if args.limit:
         todo = todo[:args.limit]
 
-    checkable = db.execute('SELECT COUNT(*) FROM quest_state '
-                           "WHERE verdict <> 'no coordinates'").fetchone()[0]
-    print(f'{checkable} quests can be checked, {len(todo)} left in this pass '
+    checkable = db.execute('SELECT COUNT(*) FROM quest_state WHERE kind = ? '
+                           "AND verdict <> 'no coordinates'", (args.kind,)).fetchone()[0]
+    print(f'{checkable} {args.kind}s can be checked, {len(todo)} left in this pass '
           f'(ledger run "{run}")', flush=True)
 
     def record(row, q):
@@ -127,9 +129,9 @@ def main():
         seq += 1
         with db:
             db.execute('INSERT OR REPLACE INTO checks '
-                       '(area, id, run, seq, verdict, zone_seen, x, z, dist, why) '
-                       'VALUES (?,?,?,?,?,?,?,?,?,?)',
-                       (q['area'], q['id'], run, seq,
+                       '(kind, area, id, run, seq, verdict, zone_seen, x, z, dist, why) '
+                       'VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+                       (args.kind, q['area'], q['id'], run, seq,
                         ledger.classify(bits[2], bits[4], bits[12]),
                         int(num(bits[8]) or 0) or None, num(bits[9]), num(bits[10]),
                         num(bits[11]), bits[12]))
@@ -147,6 +149,10 @@ def main():
             send('!zone %d' % q['zone'])
             consumed()
             time.sleep(settle)
+        # Missions that begin by walking into a place have a zone and no spot in it. Being in
+        # the zone is the whole of what there is to check, so there is nowhere to !pos to.
+        if q['x'] is None:
+            return True
         send('!pos %.3f %.3f %.3f %d' % (q['x'], q['y'] or 0, q['z'], q['zone']))
         return consumed()
 
@@ -191,8 +197,9 @@ def main():
         print(f'   {zones} zones, about {seconds / 60:.0f} minutes')
         for stop in stops[:20]:
             names = ', '.join(q['name'] for q in stop)
-            print(f'   zone {stop[0]["zone"]:>3} ({stop[0]["x"]:.0f}, {stop[0]["z"]:.0f})  '
-                  f'{names[:70]}')
+            where = ('the zone itself' if stop[0]['x'] is None
+                     else f'({stop[0]["x"]:.0f}, {stop[0]["z"]:.0f})')
+            print(f'   zone {stop[0]["zone"]:>3} {where:<18} {names[:66]}')
         if len(stops) > 20:
             print(f'   … and {len(stops) - 20} more stops')
         return
@@ -216,7 +223,8 @@ def main():
         for q in stop:
             n += 1
             before = os.path.getsize(csv) if os.path.exists(csv) else 0
-            send('/vg verify %s %d' % (q['area'], q['id']))
+            send('/vg verify %s%s %d' % ('m ' if args.kind == 'mission' else '',
+                                          q['area'], q['id']))
             consumed()
             # Wait for the row rather than a fixed sleep: a zone still loading takes longer.
             end = time.time() + 8
@@ -257,7 +265,7 @@ def main():
         if n % 25 < len(stop):
             print(f'   {n}/{len(todo)} …', flush=True)
 
-    ledger.cmd_status(argparse.Namespace(db=args.db))
+    ledger.cmd_status(argparse.Namespace(db=args.db, kind=args.kind))
     print('done', flush=True)
 
 

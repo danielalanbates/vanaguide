@@ -14,8 +14,9 @@
 --
 -- Copyright (c) 2026 Bates LLC.  All rights reserved.
 
-local U      = require('core.util')
-local quests = require('data.quests')
+local U        = require('core.util')
+local quests   = require('data.quests')
+local missions = require('data.missions')
 
 local V = {}
 
@@ -64,13 +65,19 @@ function V.nearby(px, pz)
     return out
 end
 
---- Check one quest against the world the player is standing in.
---- Returns a result table; `ok` is true when the quest's own NPC is loaded nearby.
-function V.quest(area, id)
-    local q = quests.get(area, id)
+--- Check one quest or mission against the world the player is standing in.
+--- Returns a result table; `ok` is true when its own NPC is loaded nearby.
+---
+--- Missions are the same shape as quests -- a name, somebody to talk to, somewhere they
+--- stand -- so the check is identical and only the table differs. What is not identical is
+--- the key: `sandoria` is both a quest area and a mission storyline, with ids that overlap,
+--- so `kind` travels with every row from here to the ledger.
+function V.entry(kind, area, id)
+    local q = (kind == 'mission') and missions.get(area, id) or quests.get(area, id)
     local px, pz = U.position()
     local zone = U.zone()
     local r = {
+        kind = kind or 'quest',
         area = area, id = id, name = q and q.name or '?',
         npc = q and q.npc or '', want_zone = q and q.zone or nil,
         want_x = q and q.x or nil, want_z = q and q.z or nil,
@@ -78,11 +85,18 @@ function V.quest(area, id)
         ok = false, why = '', dist = nil, nearest = '',
     }
 
-    if q == nil then r.why = 'no such quest in the database'; return r end
+    if q == nil then r.why = 'no such ' .. (kind or 'quest') .. ' in the database'; return r end
     if q.zone == nil then r.why = 'the database has no location for it'; return r end
     if zone == nil or px == nil then r.why = 'not in the world'; return r end
     if zone ~= q.zone then
         r.why = ('standing in %d, quest is in %d'):format(zone, q.zone)
+        return r
+    end
+    -- A mission that begins by walking into a place has a zone and no spot in it. Being in
+    -- the right zone is the whole of what can be checked, and it has just been checked.
+    if q.x == nil then
+        r.ok = true
+        r.why = 'in the right zone; this one has no coordinate to stand on'
         return r
     end
 
@@ -130,7 +144,13 @@ function V.row(r)
         tostring(r.want_zone or ''), n(r.want_x), n(r.want_z),
         tostring(r.zone or ''), n(r.x), n(r.z), n(r.dist),
         '"' .. tostring(r.why):gsub('"', "'") .. '"',
+        -- Fourteenth column, added after the first sweeps: rows written before this default
+        -- to 'quest', which is what they were.
+        r.kind or 'quest',
     }, ',')
 end
 
 return V
+
+--- Kept for anything that still asks for a quest by name.
+function V.quest(area, id) return V.entry('quest', area, id) end

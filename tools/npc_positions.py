@@ -60,6 +60,7 @@ CREATE INDEX IF NOT EXISTS npcs_zone ON npcs(zone, name);
 -- What the server data says about each quest's NPC. One row per quest, replaced wholesale
 -- each run: unlike a check in a live client, this is cheap enough to redo from scratch.
 CREATE TABLE IF NOT EXISTS npc_match (
+    kind        TEXT NOT NULL DEFAULT 'quest',
     area        TEXT NOT NULL,
     id          INTEGER NOT NULL,
     verdict     TEXT NOT NULL,
@@ -70,7 +71,7 @@ CREATE TABLE IF NOT EXISTS npc_match (
     npc_z       REAL,
     candidates  INTEGER NOT NULL DEFAULT 0,
     note        TEXT NOT NULL DEFAULT '',
-    PRIMARY KEY (area, id)
+    PRIMARY KEY (kind, area, id)
 );
 """
 
@@ -145,18 +146,18 @@ def dist(ax, az, bx, bz):
     return math.hypot(ax - bx, az - bz)
 
 
-def match_all(db):
-    quests = db.execute('SELECT * FROM quests').fetchall()
+def match_all(db, kind='quest'):
+    quests = db.execute('SELECT * FROM quests WHERE kind = ?', (kind,)).fetchall()
     out = []
     for q in quests:
         if is_marker(q['npc']):
-            out.append((q['area'], q['id'], 'marker', None, q['zone'], None, None, None, 0,
+            out.append((kind, q['area'], q['id'], 'marker', None, q['zone'], None, None, None, 0,
                         'a ???, a door or a dig point -- only the client can check this'))
             continue
 
         npc = normalize(q['npc'])
         if not npc:
-            out.append((q['area'], q['id'], 'no npc named', None, None, None, None, None, 0,
+            out.append((kind, q['area'], q['id'], 'no npc named', None, None, None, None, None, 0,
                         'the quest script names nobody to talk to'))
             continue
 
@@ -165,13 +166,13 @@ def match_all(db):
         anywhere = db.execute('SELECT * FROM npcs WHERE name = ?', (npc,)).fetchall()
 
         if not anywhere:
-            out.append((q['area'], q['id'], 'not on this server', None, None, None, None, None,
+            out.append((kind, q['area'], q['id'], 'not on this server', None, None, None, None, None,
                         0, 'no NPC of that name exists in npc_list'))
             continue
 
         placed = [n for n in same_zone if positioned(n)]
         if q['zone'] and q['x'] is not None and same_zone and not placed:
-            out.append((q['area'], q['id'], 'placed at runtime', None, q['zone'], None, None,
+            out.append((kind, q['area'], q['id'], 'placed at runtime', None, q['zone'], None, None,
                         None, len(same_zone),
                         'the server has it in the right zone with no fixed position'))
             continue
@@ -182,13 +183,13 @@ def match_all(db):
             verdict = 'confirmed' if d <= NEAR else 'moved'
             note = ('the server puts it %.1f yalms from where the guide points' % d
                     if verdict == 'moved' else '')
-            out.append((q['area'], q['id'], verdict, d, best['zone'], best['x'], best['y'],
+            out.append((kind, q['area'], q['id'], verdict, d, best['zone'], best['x'], best['y'],
                         best['z'], len(placed), note))
             continue
 
         if q['zone'] and not same_zone:
             zones = sorted({n['zone'] for n in anywhere})
-            out.append((q['area'], q['id'], 'wrong zone', None, zones[0],
+            out.append((kind, q['area'], q['id'], 'wrong zone', None, zones[0],
                         anywhere[0]['x'], anywhere[0]['y'], anywhere[0]['z'], len(anywhere),
                         'the guide says zone %s; the server has it in %s'
                         % (q['zone'], ', '.join(str(z) for z in zones[:6]))))
@@ -197,27 +198,28 @@ def match_all(db):
         # No coordinates in the guide at all -- which is exactly what this table can fix.
         zones = sorted({n['zone'] for n in anywhere})
         first = anywhere[0]
-        out.append((q['area'], q['id'],
+        out.append((kind, q['area'], q['id'],
                     'position recoverable' if len(zones) == 1 else 'position ambiguous',
                     None, first['zone'], first['x'], first['y'], first['z'], len(anywhere),
                     'the guide gives no position; the server has it in zone %s'
                     % ', '.join(str(z) for z in zones[:6])))
 
     with db:
-        db.execute('DELETE FROM npc_match')
-        db.executemany('INSERT INTO npc_match (area, id, verdict, dist, npc_zone, npc_x, '
-                       'npc_y, npc_z, candidates, note) VALUES (?,?,?,?,?,?,?,?,?,?)', out)
+        db.execute('DELETE FROM npc_match WHERE kind = ?', (kind,))
+        db.executemany('INSERT INTO npc_match (kind, area, id, verdict, dist, npc_zone, '
+                       'npc_x, npc_y, npc_z, candidates, note) '
+                       'VALUES (?,?,?,?,?,?,?,?,?,?,?)', out)
     return len(out)
 
 
-def report(db):
+def report(db, kind='quest'):
     order = ['confirmed', 'moved', 'wrong zone', 'placed at runtime', 'marker',
              'position recoverable', 'position ambiguous', 'not on this server',
              'no npc named']
     counts = {r['verdict']: r['n'] for r in db.execute(
-        'SELECT verdict, COUNT(*) n FROM npc_match GROUP BY verdict')}
+        'SELECT verdict, COUNT(*) n FROM npc_match WHERE kind = ? GROUP BY verdict', (kind,))}
     total = sum(counts.values())
-    print(f'{total} quests checked against npc_list')
+    print(f'{total} {kind}s checked against npc_list')
     for v in order:
         if counts.get(v):
             print(f'   {v:<21} {counts[v]:>4}')
@@ -225,9 +227,10 @@ def report(db):
     for verdict, title in (('moved', 'The guide points somewhere the NPC is not'),
                            ('wrong zone', 'The guide names the wrong zone')):
         rows = db.execute("""SELECT m.*, q.name, q.npc, q.zone, q.x, q.z
-                             FROM npc_match m JOIN quests q USING (area, id)
-                             WHERE m.verdict = ? ORDER BY m.dist DESC, q.name""",
-                          (verdict,)).fetchall()
+                             FROM npc_match m JOIN quests q USING (kind, area, id)
+                             WHERE m.kind = ? AND m.verdict = ?
+                             ORDER BY m.dist DESC, q.name""",
+                          (kind, verdict)).fetchall()
         if not rows:
             continue
         print(f'\n{title} ({len(rows)})')
@@ -245,15 +248,16 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--db', default=ledger.DB)
     ap.add_argument('--report', action='store_true', help='only print, do not re-check')
+    ap.add_argument('--kind', default='quest', choices=('quest', 'mission'))
     args = ap.parse_args()
 
     db = ledger.connect(args.db)
     db.executescript(SCHEMA)
     if not args.report:
         n = load_npcs(db)
-        m = match_all(db)
-        print(f'{n} NPCs mirrored, {m} quests matched')
-    report(db)
+        m = match_all(db, args.kind)
+        print(f'{n} NPCs mirrored, {m} {args.kind}s matched')
+    report(db, args.kind)
 
 
 if __name__ == '__main__':
