@@ -22,9 +22,14 @@ local V = {}
 
 local MAX_ENTITY = 2303
 
--- How close counts as having arrived. The teleport is exact when it works at all, so this
--- is a tolerance for float noise, not for walking.
-local ARRIVED = 3.0
+-- How close counts as having arrived. Ten yalms, the same "you are in the right place" the
+-- arrow uses, and for the same reason: the entity table streams in a radius around the
+-- player, so ten yalms one way or the other does not change what is loaded. It is not float
+-- noise this is guarding against -- the rows it catches were fifty-five to two hundred and
+-- twelve yalms out, which is a different place entirely. A tighter number would start
+-- rejecting stops where the server puts the character on the nearest walkable ground rather
+-- than exactly on the coordinate, and those checks are perfectly good.
+local ARRIVED = 10.0
 
 local function normalize(s)
     return (tostring(s or ''):lower():gsub('[^%a%d]', ''))
@@ -106,7 +111,7 @@ function V.entry(kind, area, id)
     -- the right zone is the whole of what can be checked, and it has just been checked.
     if q.x == nil then
         r.ok = true
-        r.why = 'in the right zone; this one has no coordinate to stand on'
+        r.why = 'the zone is right, and the script names no spot in it'
         return r
     end
 

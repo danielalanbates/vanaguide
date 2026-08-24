@@ -19,7 +19,8 @@ import sys
 
 import ledger
 
-ORDER = ['verified', 'server confirmed', 'data error', 'only the client can check this',
+ORDER = ['verified', 'server confirmed', 'the zone is right, and that is all there is',
+         'data error', 'only the client can check this',
          'not on this server', 'nothing to check', 'pending']
 
 BLURB = {
@@ -31,7 +32,13 @@ BLURB = {
     'only the client can check this': 'The "NPC" is a `???`, a door or a dig point. It is a '
                                       'real entity with an internal name, and `npc_list` is '
                                       'not a reliable witness for it.',
-    'not on this server': 'No NPC of that name exists in this server\'s data at all.',
+    'the zone is right, and that is all there is':
+        'The mission begins by walking into a place rather than by talking to anybody. A '
+        'character stood in that zone; the script names no spot inside it, so there is '
+        'nothing further to stand on.',
+    'not on this server': 'No NPC of that name exists in this server\'s data at all, under '
+                          'its display name, its words in another order, or the internal '
+                          'name the server tracks it by.',
     'nothing to check': 'The quest script states no place — a mog-house moogle, or no '
                         'location given anywhere.',
     'pending': 'Nobody has looked yet.',
@@ -110,7 +117,8 @@ def main():
             out.append(f'| {r["name"]} | `{r["npc"]}` | {r["zone"]} | {ents} |')
 
     for v in ('data error', 'not on this server', 'nothing to check',
-              'only the client can check this'):
+              'only the client can check this',
+              'the zone is right, and that is all there is'):
         if not by.get(v):
             continue
         out.append(f'\n## {v.capitalize()} ({len(by[v])})\n')

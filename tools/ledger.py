@@ -94,10 +94,14 @@ CREATE TABLE IF NOT EXISTS issues (
 -- called `retry-long-settle` and another `xi_map-1648-...`: r sorts before x, so a re-check
 -- run to correct an earlier answer was outranked by the answer it corrected, and 39 quests
 -- found on the second pass went on being reported absent.
-CREATE VIEW IF NOT EXISTS quest_state AS
+CREATE VIEW quest_state AS
 SELECT q.kind, q.area, q.id, q.name, q.npc, q.zone, q.x, q.y, q.z,
        CASE
-           WHEN q.zone IS NULL OR q.x IS NULL THEN 'no coordinates'
+           -- A zone with no spot in it is still something to check: the character can be
+           -- put in the zone, which is the whole of what a mission that begins by walking
+           -- somewhere states. Only a row with no zone at all has nothing to check. Treating
+           -- the two the same left twenty-nine missions permanently out of every sweep.
+           WHEN q.zone IS NULL THEN 'no location'
            ELSE COALESCE((SELECT c.verdict FROM checks c
                           WHERE c.kind = q.kind AND c.area = q.area AND c.id = q.id
                             AND c.verdict <> 'unchecked'
@@ -123,7 +127,7 @@ FROM quests q;
 # The npc_match table is written by tools/npc_positions.py, which may not have run. The view
 # is created separately so the ledger still works without it.
 COMBINED = """
-CREATE VIEW IF NOT EXISTS quest_verdict AS
+CREATE VIEW quest_verdict AS
 SELECT s.kind, s.area, s.id, s.name, s.npc, s.zone, s.x, s.z,
        s.verdict AS client, COALESCE(m.verdict, 'not checked') AS server, s.dist, s.entities,
        COALESCE(NULLIF(m.note, ''), s.why, '') AS why,
@@ -137,7 +141,8 @@ SELECT s.kind, s.area, s.id, s.name, s.npc, s.zone, s.x, s.z,
            WHEN m.verdict = 'marker' OR s.verdict IN ('marker', 'unnamed')
                 THEN 'only the client can check this'
            WHEN m.verdict = 'not on this server' THEN 'not on this server'
-           WHEN s.verdict = 'no coordinates' OR m.verdict = 'no npc named'
+           WHEN s.verdict = 'zone only' THEN 'the zone is right, and that is all there is'
+           WHEN s.verdict = 'no location' OR m.verdict = 'no npc named'
                 THEN 'nothing to check'
            ELSE 'pending'
        END AS verdict
@@ -151,7 +156,7 @@ LEFT JOIN npc_match m ON m.kind = s.kind AND m.area = s.area AND m.id = s.id;
 # table to stop growing, so a fresh absent is much stronger than that. It stays retryable
 # anyway, because the ledger holds absent verdicts recorded under the old rule and no column
 # distinguishes them at a glance.
-SETTLED = ('found', 'marker', 'unnamed')
+SETTLED = ('found', 'marker', 'unnamed', 'zone only')
 
 
 def migrate(db):
@@ -207,6 +212,13 @@ def connect(path=DB):
     db.row_factory = sqlite3.Row
     if migrate(db):
         print('ledger migrated: every existing row is a quest')
+    # Views are dropped and rebuilt every time, not created IF NOT EXISTS. A view is code,
+    # and `CREATE VIEW IF NOT EXISTS` silently keeps whatever definition the database happens
+    # to be holding -- so editing the SQL here changed nothing at all, and the ledger went on
+    # answering with a definition nobody could see by reading the file. They cost nothing to
+    # rebuild.
+    db.execute('DROP VIEW IF EXISTS quest_verdict')
+    db.execute('DROP VIEW IF EXISTS quest_state')
     db.executescript(SCHEMA)
     add_columns(db)
     try:
@@ -273,6 +285,13 @@ def classify(verdict_col, npc, why, entities=None):
     marker quest whose "NPC" is a door, an NPC this server never spawns, and a genuinely wrong
     coordinate all read as MISS. See docs/QUEST_VERIFICATION.md.
     """
+    if 'names no spot in it' in why:
+        # A mission that begins by walking into a place has a zone and nowhere in it. Standing
+        # in the zone is the whole of what can be checked and it has just been checked -- but
+        # it is a much weaker statement than finding a named NPC on a coordinate, and calling
+        # both of them 'found' would have quietly diluted the strongest word in the ledger
+        # across twenty-nine rows.
+        return 'zone only'
     if verdict_col == 'ok':
         return 'found'
     if 'standing in' in why:
@@ -421,10 +440,10 @@ def cmd_status(args):
 
     c = counts(db, args.kind)
     total = sum(c.values())
-    checkable = total - c.get('no coordinates', 0)
+    checkable = total - c.get('no location', 0)
     settled = sum(c.get(v, 0) for v in SETTLED)
     print(f'{total} {args.kind}s: {checkable} can be checked by standing on them, '
-          f'{c.get("no coordinates", 0)} have no coordinates at all')
+          f'{c.get("no location", 0)} state no location at all')
     for v in ('found', 'absent', 'marker', 'unnamed', 'pending'):
         if c.get(v):
             print(f'   {v:<10} {c[v]:>4}')

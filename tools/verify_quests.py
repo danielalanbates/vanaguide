@@ -122,7 +122,7 @@ def main():
         todo = todo[:args.limit]
 
     checkable = db.execute('SELECT COUNT(*) FROM quest_state WHERE kind = ? '
-                           "AND verdict <> 'no coordinates'", (args.kind,)).fetchone()[0]
+                           "AND verdict <> 'no location'", (args.kind,)).fetchone()[0]
     print(f'{checkable} {args.kind}s can be checked, {len(todo)} left in this pass '
           f'(ledger run "{run}")', flush=True)
 
