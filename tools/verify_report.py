@@ -26,7 +26,7 @@ BLURB = {
     'verified': 'A character stood on the coordinate and the quest\'s own NPC was loaded and '
                 'named there. This is the strongest statement the project can make.',
     'server confirmed': 'The server spawns that NPC, in that zone, within ten yalms of where '
-                        'the guide points. Nobody has stood on it yet.',
+                        'the guide points, and no character has yet seen it loaded there.',
     'data error': 'The server puts the NPC somewhere the guide does not.',
     'only the client can check this': 'The "NPC" is a `???`, a door or a dig point. It is a '
                                       'real entity with an internal name, and `npc_list` is '
@@ -77,18 +77,21 @@ def main():
                    f'**{d[len(d) // 2]:.1f} yalms** of the coordinate the guide gives, and '
                    f'the worst was {d[-1]:.1f}.\n')
 
-    # The interesting half of "server confirmed": a character stood there and saw nothing.
-    # That is not a bad coordinate -- npc_list has the NPC, at that spot, in that zone -- it is
-    # an NPC the server spawns only under a condition a blank character does not meet. Nearly
-    # all of them are Crystal War and Abyssea, where the NPC exists only once the storyline
-    # has been started.
+    # "Confirmed by the server, absent in the client" was assumed to mean a spawn condition,
+    # and mostly it does not. The first full sweep produced 151 of them and they clustered in
+    # Lower Jeuno, Bastok Mines and Port Jeuno rather than in the storyline zones the theory
+    # predicted -- and standing on one of them again with a longer settle found the NPC at 0.9
+    # yalms. A dense city streams entities for longer than twenty seconds, and the sweep was
+    # calling the answer before the zone had finished arriving. The wording here says what is
+    # known and no more; the retry pass is what will separate the two.
     looked = [r for r in by.get('server confirmed', []) if r['client'] == 'absent']
     if looked:
         out.append(f'\n## Confirmed by the server, absent in the client ({len(looked)})\n')
         out.append('`npc_list` places the NPC exactly where the guide points, and a character '
-                   'standing on the spot saw nothing loaded. That is a spawn condition, not a '
-                   'wrong coordinate: these NPCs appear once the storyline that owns them has '
-                   'begun, and the character sweeping has begun nothing.\n')
+                   'standing on the spot saw nothing loaded. Two different things produce '
+                   'this, and they are told apart by standing there longer: an NPC that only '
+                   'exists once its storyline has begun will never appear, and one in a dense '
+                   'city simply had not streamed in yet. Neither is a wrong coordinate.\n')
         out.append('| quest | NPC | zone |')
         out.append('| --- | --- | ---: |')
         for r in sorted(looked, key=lambda r: (r['area'], r['id'])):
