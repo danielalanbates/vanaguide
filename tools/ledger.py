@@ -266,7 +266,7 @@ print('[' .. table.concat(rows, ',') .. ']')
     return json.loads(out.stdout)
 
 
-def classify(verdict_col, npc, why):
+def classify(verdict_col, npc, why, entities=None):
     """Turn one CSV row into a verdict.
 
     The CSV says only ok/MISS, and the three kinds of miss are not equally interesting: a
@@ -282,6 +282,13 @@ def classify(verdict_col, npc, why):
         # dropped silently, and the check then reads the entity table from the zone entrance.
         # Seven rows were recorded as absent that way before the addon started saying so.
         return 'unchecked'
+    if entities == 0:
+        # Nothing at all was loaded -- not the NPC, not the walls, not a rock. The entity
+        # table arrives in one burst about seventeen seconds after a teleport, and a check
+        # that ends with it still empty has not observed the world; it has observed the
+        # client not having sent it yet. That is the harness failing, exactly like arriving
+        # in the wrong place, and it is not evidence that the NPC is missing.
+        return 'unchecked'
     if npc.startswith('qm') or npc.startswith('_') or '???' in npc:
         return 'marker'
     if not npc:
@@ -293,19 +300,25 @@ def cmd_init(args):
     db = connect(args.db)
     rows = [dict(r, kind='quest') for r in quest_table()] + mission_table()
 
-    # A check is evidence about a coordinate, not about a quest. When the generator moves a
-    # quest -- and it moved nine of them the day npc_list was first consulted -- every earlier
-    # check of it was made somewhere else and says nothing about where it points now. Those
-    # get dropped rather than left standing as a verdict about the wrong place.
-    old = {(r['kind'], r['area'], r['id']): (r['zone'], r['x'], r['z'])
-           for r in db.execute('SELECT kind, area, id, zone, x, z FROM quests')}
+    # A check is evidence about a coordinate and a name, not about a quest. When the generator
+    # moves a quest -- and it moved nine of them the day npc_list was first consulted -- every
+    # earlier check of it was made somewhere else and says nothing about where it points now.
+    #
+    # The name counts too, and that was missed at first. `_iz2` became `Ebon Panel` at exactly
+    # the same coordinate: the old check was a marker pass, which asks only whether *something*
+    # is standing there, and the new entry asks whether an entity of that name is. The second
+    # question has not been answered by the first, and a comparison on position alone would
+    # have left the marker's answer standing as though it had been.
+    old = {(r['kind'], r['area'], r['id']): (r['zone'], r['x'], r['z'], r['npc'])
+           for r in db.execute('SELECT kind, area, id, zone, x, z, npc FROM quests')}
     moved = [(r['kind'], r['area'], r['id']) for r in rows
              if (r['kind'], r['area'], r['id']) in old
-             and old[(r['kind'], r['area'], r['id'])] != (r['zone'], r['x'], r['z'])]
+             and old[(r['kind'], r['area'], r['id'])] != (r['zone'], r['x'], r['z'],
+                                                          r.get('npc') or '')]
     if moved:
         with db:
             db.executemany('DELETE FROM checks WHERE kind = ? AND area = ? AND id = ?', moved)
-        print(f'{len(moved)} quests have moved since they were last checked; '
+        print(f'{len(moved)} quests have moved or been renamed since they were last checked; '
               f'their old results are dropped')
 
     with db:
@@ -343,9 +356,13 @@ def cmd_init(args):
 
 def cmd_ingest(args):
     db = connect(args.db)
+    # The last two arrived later than the rest: `kind` when missions joined the ledger, and
+    # `entities` when it turned out that how much of the world had loaded was the difference
+    # between a miss and a check that asked too early. Rows written before either default.
     cols = ['area', 'id', 'ok', 'name', 'npc', 'want_zone', 'want_x', 'want_z',
-            'zone', 'x', 'z', 'dist', 'why']
-    known = {(r['area'], r['id']) for r in db.execute('SELECT area, id FROM quests')}
+            'zone', 'x', 'z', 'dist', 'why', 'kind', 'entities']
+    known = {(r['kind'], r['area'], r['id'])
+             for r in db.execute('SELECT kind, area, id FROM quests')}
     added = skipped = 0
     seq = db.execute('SELECT COALESCE(MAX(seq), 0) FROM checks WHERE run = ?',
                      (args.run,)).fetchone()[0]
@@ -353,7 +370,7 @@ def cmd_ingest(args):
         for row in csv.DictReader(fh, fieldnames=cols):
             if not row['area'] or not (row['id'] or '').strip().isdigit():
                 continue
-            key = (row['area'], int(row['id']))
+            key = (row.get('kind') or 'quest', row['area'], int(row['id']))
             if key not in known:
                 skipped += 1        # a quest that has since left data/quests.lua
                 continue
@@ -363,14 +380,16 @@ def cmd_ingest(args):
                     return float(v)
                 except (TypeError, ValueError):
                     return None
+            ents = num(row.get('entities'))
+            ents = int(ents) if ents is not None else None
             db.execute(
                 """INSERT OR REPLACE INTO checks
-                   (area, id, run, seq, verdict, zone_seen, x, z, dist, why)
-                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                (key[0], key[1], args.run, seq,
-                 classify(row['ok'], row['npc'] or '', row['why'] or ''),
+                   (kind, area, id, run, seq, verdict, zone_seen, x, z, dist, why, entities)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (key[0], key[1], key[2], args.run, seq,
+                 classify(row['ok'], row['npc'] or '', row['why'] or '', ents),
                  int(num(row['zone']) or 0) or None, num(row['x']), num(row['z']),
-                 num(row['dist']), row['why'] or ''))
+                 num(row['dist']), row['why'] or '', ents))
             added += 1
     print(f'{added} checks recorded as run "{args.run}"'
           + (f', {skipped} rows for quests not in the database' if skipped else ''))

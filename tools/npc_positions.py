@@ -49,12 +49,23 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS npcs (
     npcid   INTEGER PRIMARY KEY,
     zone    INTEGER NOT NULL,
+    -- Three ways of asking for the same entity, because the guide and the server do not
+    -- always spell it the same way. `name` is the display name normalized. `aname` is the
+    -- same words sorted: LandSandBoat writes a door as Door:"Lion Springs" and the mission
+    -- script that uses it writes `Lion Springs Door`, and eleven missions were reported as
+    -- "no NPC of that name exists" over nothing but word order. `iname` is the internal
+    -- name, which is what a script's own section keys use -- `Lion_Springs`, `_6s1`,
+    -- `qm_maw` -- and for markers it is the only name there is.
     name    TEXT NOT NULL,
+    aname   TEXT NOT NULL DEFAULT '',
+    iname   TEXT NOT NULL DEFAULT '',
     x       REAL NOT NULL,
     y       REAL NOT NULL,
     z       REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS npcs_name ON npcs(name);
+CREATE INDEX IF NOT EXISTS npcs_aname ON npcs(aname);
+CREATE INDEX IF NOT EXISTS npcs_iname ON npcs(iname);
 CREATE INDEX IF NOT EXISTS npcs_zone ON npcs(zone, name);
 
 -- What the server data says about each quest's NPC. One row per quest, replaced wholesale
@@ -92,7 +103,12 @@ def positioned(n):
     return not (n['x'] == 0.0 and n['y'] == 0.0 and n['z'] == 0.0)
 
 
-MARKER = re.compile(r'^(?:qm\d*|_\w+|\?\?\?)$', re.I)
+# The same rule core/verify.lua uses, deliberately: a name starting `qm`, a name starting
+# with an underscore, or one containing `???`. The two used to differ -- this side was
+# anchored and required digits after `qm`, the client side was a loose prefix -- and they
+# disagreed about four real rows (`qm_rov2_20`, `qm_cetus`), which the client marker-passed
+# and this side then looked up by name and could not find.
+MARKER = re.compile(r'^(?:qm|_)|\?\?\?', re.I)
 
 
 def is_marker(name):
@@ -103,11 +119,26 @@ def is_marker(name):
     confident nonsense ("the guide says zone 102, the server has it in 238"). The client
     sweep is the only thing that can speak to a marker, and it does.
     """
-    return bool(MARKER.match((name or '').strip()))
+    return bool(MARKER.search((name or '').strip()))
 
 
 def normalize(s):
     return re.sub(r'[^a-z0-9]', '', (s or '').lower())
+
+
+def anagram(s):
+    """The same words in whatever order, as one key.
+
+    LandSandBoat writes a door's display name as `Door:"Lion Springs"`; the mission script's
+    header comment writes the same door as `Lion Springs Door`. Normalised those are
+    `doorlionsprings` and `lionspringsdoor`, which do not match, and eleven missions were
+    reported as "no NPC of that name exists in npc_list" -- an existence claim -- when every
+    one of them has a row within 1.6 yalms in the right zone. Sorting the words settles it.
+
+    Used only after an exact match has failed, so it can turn a miss into a hit and never the
+    other way round.
+    """
+    return ''.join(sorted(re.findall(r'[a-z0-9]+', (s or '').lower())))
 
 
 def sql(query):
@@ -126,19 +157,22 @@ def load_npcs(db):
 
     `polutils_name` is what the client displays; `name` is the internal one, and for the
     markers this project keeps tripping over (`_0id`, `qm1`) it is the only one there is.
-    Both are indexed, normalized, under the same column.
+    Both are stored, in their own columns, along with the word-sorted form of the display
+    name -- the three spellings a guide might be using for one entity.
     """
     rows = sql("""
         SELECT npcid, (npcid>>12)&0xFFF, COALESCE(NULLIF(polutils_name,''), CONVERT(name USING utf8)),
-               pos_x, pos_y, pos_z
+               CONVERT(name USING utf8), pos_x, pos_y, pos_z
         FROM npc_list
     """)
     with db:
         db.execute('DELETE FROM npcs')
-        db.executemany('INSERT OR REPLACE INTO npcs VALUES (?,?,?,?,?,?)',
-                       [(int(r[0]), int(r[1]), normalize(r[2]),
-                         float(r[3]), float(r[4]), float(r[5]))
-                        for r in rows if len(r) >= 6])
+        db.executemany('INSERT OR REPLACE INTO npcs '
+                       '(npcid, zone, name, aname, iname, x, y, z) '
+                       'VALUES (?,?,?,?,?,?,?,?)',
+                       [(int(r[0]), int(r[1]), normalize(r[2]), anagram(r[2]),
+                         normalize(r[3]), float(r[4]), float(r[5]), float(r[6]))
+                        for r in rows if len(r) >= 7])
     return len(rows)
 
 
@@ -161,13 +195,28 @@ def match_all(db, kind='quest'):
                         'the quest script names nobody to talk to'))
             continue
 
-        same_zone = db.execute('SELECT * FROM npcs WHERE name = ? AND zone = ?',
-                               (npc, q['zone'])).fetchall() if q['zone'] else []
-        anywhere = db.execute('SELECT * FROM npcs WHERE name = ?', (npc,)).fetchall()
+        # Exact display name first, then the same words in another order, then the internal
+        # name. Each fallback only runs when the one before it found nothing, so a fallback
+        # can turn a miss into a hit and never change a hit into something else.
+        def look(where, *args):
+            rows = db.execute('SELECT * FROM npcs WHERE ' + where, args).fetchall()
+            return rows
+        keys = [('name = ?', npc), ('aname = ?', anagram(q['npc'])),
+                ('iname = ?', npc)]
+        same_zone, anywhere, matched_by = [], [], 'name'
+        for cond, key in keys:
+            if not key:
+                continue
+            anywhere = look(cond, key)
+            if anywhere:
+                same_zone = look(cond + ' AND zone = ?', key, q['zone']) if q['zone'] else []
+                matched_by = cond.split(' ')[0]
+                break
 
         if not anywhere:
             out.append((kind, q['area'], q['id'], 'not on this server', None, None, None, None, None,
-                        0, 'no NPC of that name exists in npc_list'))
+                        0, 'no NPC of that name exists in npc_list, under its '
+                        'display name, its words in any order, or its internal name'))
             continue
 
         placed = [n for n in same_zone if positioned(n)]
@@ -183,6 +232,10 @@ def match_all(db, kind='quest'):
             verdict = 'confirmed' if d <= NEAR else 'moved'
             note = ('the server puts it %.1f yalms from where the guide points' % d
                     if verdict == 'moved' else '')
+            if matched_by != 'name':
+                spelling = ('the same words in another order' if matched_by == 'aname'
+                            else "the server's internal name for it")
+                note = (note + '; matched by ' + spelling).lstrip('; ')
             out.append((kind, q['area'], q['id'], verdict, d, best['zone'], best['x'], best['y'],
                         best['z'], len(placed), note))
             continue

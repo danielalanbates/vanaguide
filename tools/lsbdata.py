@@ -47,8 +47,22 @@ def parse_zone_ids(root):
     return out
 
 
+class NpcList(dict):
+    """(zone, normalized display name) -> [(x, y, z, display name), ...].
+
+    A dict, so every existing `in` and `.get` still means what it meant. `by_internal` is a
+    second index on the server's internal name, for the one pass that needs it.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.by_internal = {}
+
+
 def parse_npc_list(root):
-    """sql/npc_list.sql -> {(zone, normalized name): (x, y, z)}.
+    """sql/npc_list.sql -> {(zone, normalized name): [(x, y, z), ...]}.
+
+    Every row for a name, not the first: a name is not unique inside a zone.
 
     The header comment of a quest script names who to talk to, but only sometimes with a
     `!pos` beside it -- 160 quests, nearly all of them Abyssea dominion ops, name the NPC and
@@ -61,7 +75,7 @@ def parse_npc_list(root):
     against a checkout, with no server up.
     """
     path = os.path.join(root, 'sql/npc_list.sql')
-    out = {}
+    out = NpcList()
     if not os.path.exists(path):
         return out
     row = re.compile(r"\((\d+),'((?:[^']|\\')*)','((?:[^']|\\')*)',\s*\d+,"
@@ -71,12 +85,31 @@ def parse_npc_list(root):
             continue
         for m in row.finditer(line):
             npcid = int(m.group(1))
-            name = (m.group(3) or m.group(2))
+            internal, name = m.group(2), (m.group(3) or m.group(2))
             x, y, z = float(m.group(4)), float(m.group(5)), float(m.group(6))
             if x == 0.0 and y == 0.0 and z == 0.0:
                 continue        # placed at runtime; a position of (0,0,0) is not one
             key = ((npcid >> 12) & 0xFFF, re.sub(r'[^a-z0-9]', '', name.lower()))
-            out.setdefault(key, (x, y, z))
+            # Every row, not the first one. A name is not unique inside a zone -- twenty
+            # "Stone Door" in Ordelle's Caves, thirteen "Ornate Door" in the Quicksand Caves,
+            # nine "Regal Pawprints" in Beaucedine -- and keeping only the first meant the
+            # override below moved entries onto whichever instance happened to be earliest in
+            # the file. Twenty-six entries were relocated that way, by eleven to twelve
+            # hundred yalms, and both checks then blessed the new position: the server check
+            # re-derived the same row, and the client sweep teleported there and found
+            # another entity with the same name standing at it.
+            places = out.setdefault(key, [])
+            places.append((x, y, z, name))
+            # The internal name, indexed separately and consulted only when the display name
+            # has failed. A script's own section keys are internal names -- `['_6s1']`,
+            # `['qm_maw']`, `['Lion_Springs']` -- and the display index cannot see them, so
+            # the rescue pass that reads those keys could never fire for a door or a marker.
+            # Kept out of the primary index deliberately: putting both namespaces in one map
+            # changes which candidate the header pass picks, and doing that relocated four
+            # entries onto the wrong NPC in a different zone.
+            out.by_internal.setdefault(
+                ((npcid >> 12) & 0xFFF, re.sub(r'[^a-z0-9]', '', internal.lower())),
+                []).append((x, y, z, name))
     return out
 
 
@@ -158,8 +191,11 @@ def find_npc(text, lines, title, zone_ids, npc_list, allow_zone_only=False):
         for name in [h for h in header if h.lower() != title.lower()]:
             key = re.sub(r'[^a-z0-9]', '', name.lower())
             for zone in zones:
-                pos = npc_list.get((zone, key))
-                if pos:
+                places = npc_list.get((zone, key))
+                if places:
+                    # There is no header coordinate to be nearest to here, so the first row
+                    # is all there is to go on. Say so rather than implying a choice was made.
+                    pos = places[0]
                     npc = {'name': name, 'x': pos[0], 'y': pos[1], 'z': pos[2], 'zone': zone}
                     break
             if npc:
@@ -180,9 +216,17 @@ def find_npc(text, lines, title, zone_ids, npc_list, allow_zone_only=False):
                 continue
             for n in re.finditer(r"\[\s*'([^']{2,40})'\s*\]\s*=", m.group(2)):
                 name = n.group(1)
-                pos = npc_list.get((zone, re.sub(r'[^a-z0-9]', '', name.lower())))
-                if pos:
-                    found = {'name': name, 'x': pos[0], 'y': pos[1], 'z': pos[2],
+                key = re.sub(r'[^a-z0-9]', '', name.lower())
+                places = npc_list.get((zone, key)) or npc_list.by_internal.get((zone, key))
+                if places:
+                    # Nothing to be nearest to: the section key names the NPC and the script
+                    # states no coordinate at all, so the first row is the only answer there
+                    # is. Where several rows share the name this is a coin toss, and it says
+                    # so here rather than pretending otherwise.
+                    pos = places[0]
+                    # The name the *client* shows, not the section key. This field is read
+                    # out to the player ("Starts with ..."), and `_6s1` is not an instruction.
+                    found = {'name': pos[3] or name, 'x': pos[0], 'y': pos[1], 'z': pos[2],
                              'zone': zone}
                     break
             else:
@@ -199,9 +243,15 @@ def find_npc(text, lines, title, zone_ids, npc_list, allow_zone_only=False):
     # written -769.5 where the server puts her at +770.2, a sign typed wrong once and copied
     # since. Disagreements under ten yalms are left alone; they are the same spot.
     if npc and npc_list and npc['name']:
-        pos = npc_list.get((npc['zone'], re.sub(r'[^a-z0-9]', '', npc['name'].lower())))
-        if pos and math.hypot(pos[0] - npc['x'], pos[2] - npc['z']) > 10.0:
-            npc = dict(npc, x=pos[0], y=pos[1], z=pos[2], from_server=True)
+        places = npc_list.get((npc['zone'], re.sub(r'[^a-z0-9]', '', npc['name'].lower())))
+        # Of the rows that share the name in that zone, the nearest one. The comment is prose
+        # somebody typed and npc_list is what the server spawns, so the server still wins the
+        # position -- but "the server's row for this name" is a question with up to twenty
+        # answers, and the right one is the one the comment was pointing at.
+        if places:
+            pos = min(places, key=lambda p: math.hypot(p[0] - npc['x'], p[2] - npc['z']))
+            if math.hypot(pos[0] - npc['x'], pos[2] - npc['z']) > 10.0:
+                npc = dict(npc, x=pos[0], y=pos[1], z=pos[2], from_server=True)
 
     if npc is not None:
         return npc

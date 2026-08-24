@@ -47,17 +47,19 @@ def main():
     # "1 entity" and a miss that is not real. Measured on this Mac with the client on a
     # spinning external drive: a fresh zone needs about twenty seconds before its NPCs are all
     # in the table.
-    ap.add_argument('--zone-wait', type=float, default=20.0)
-    # There is no longer a fixed wait after a move inside a zone. `--step-wait` was six
-    # seconds and it was the single largest source of wrong answers in this project: a `!pos`
-    # inside a zone empties the client's entity table and it refills in one burst about
+    # Nothing sleeps a fixed time any more. `--zone-wait` was twenty seconds and `--step-wait`
+    # was six, and the six was the single largest source of wrong answers in this project: a
+    # `!pos` inside a zone empties the client's entity table and it refills in one burst about
     # seventeen seconds later (tools/settle_probe.py, data/settle_probe.csv), so every stop
-    # after the first in a city was read while the table was still empty. The sweep now waits
-    # for the world instead of guessing at it -- see settle() below.
+    # after the first in a city was read while the table was still empty. Twenty was not
+    # always enough either -- a slow zone change means the check runs against the zone the
+    # character just left. Both are now waited out by asking, in go() and settle() below.
     ap.add_argument('--poll', type=float, default=4.0,
                     help='seconds between asking again while the zone streams in')
     ap.add_argument('--max-settle', type=float, default=60.0,
                     help='give up waiting for a stop after this long')
+    ap.add_argument('--max-arrive', type=float, default=75.0,
+                    help='give up getting the character onto a spot after this long')
     ap.add_argument('--stable', type=int, default=3,
                     help='how many identical entity counts in a row mean the zone has '
                          'finished arriving')
@@ -200,30 +202,57 @@ def main():
                        '(kind, area, id, run, seq, verdict, zone_seen, x, z, dist, why, '
                        'entities) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
                        (args.kind, q['area'], q['id'], run, seq,
-                        ledger.classify(bits[2], bits[4], bits[12]),
+                        ledger.classify(bits[2], bits[4], bits[12],
+                                        int(num(bits[14])) if num(bits[14]) is not None
+                                        else None),
                         int(num(bits[8]) or 0) or None, num(bits[9]), num(bits[10]),
                         num(bits[11]), bits[12],
                         int(num(bits[14])) if num(bits[14]) is not None else None))
     current_zone = None
     misses = 0
 
-    def teleport(q, settle):
-        """Cross-zone moves go through `!zone` first.
+    def go(q):
+        """Put the character on the spot and prove it is there before checking anything.
 
-        A cross-zone `!pos` is not reliable on its own -- the dedicated zone command is, and
-        it costs one extra line per zone change in a sweep that is dominated by zone loads
-        anyway.
+        This used to be a `!zone`, a twenty-second sleep, a `!pos`, and the assumption that
+        both had worked. Neither assumption holds. A zone change sometimes takes longer than
+        twenty seconds, and when it does the check runs against the zone the character has
+        just left -- five in a row, the first time this was tried, each one reporting the
+        previous stop's zone. And a `!pos` issued while the character is still zoning is
+        dropped without a word, so the check runs in the right zone from the zone entrance,
+        two hundred yalms from the coordinate, and looks exactly like an ordinary miss.
+
+        So ask instead of assuming. Send it again every few seconds until the addon says the
+        character is standing where it was sent. Returns the addon's answer, the string
+        'wedged' if the client stopped answering at all, or None if it never arrived.
         """
-        if q['zone'] != current_zone:
-            send('!zone %d' % q['zone'])
-            consumed()
-            time.sleep(settle)
-        # Missions that begin by walking into a place have a zone and no spot in it. Being in
-        # the zone is the whole of what there is to check, so there is nowhere to !pos to.
-        if q['x'] is None:
-            return True
-        send('!pos %.3f %.3f %.3f %d' % (q['x'], q['y'] or 0, q['z'], q['zone']))
-        return consumed()
+        deadline = time.time() + args.max_arrive
+        in_zone = (q['zone'] == current_zone)
+        while time.time() < deadline:
+            if not in_zone:
+                send('!zone %d' % q['zone'])
+                if not consumed():
+                    return 'wedged'
+                time.sleep(args.poll)
+            # Missions that begin by walking into a place have a zone and no spot in it.
+            # Being in the zone is the whole of what there is to check.
+            if q['x'] is not None:
+                send('!pos %.3f %.3f %.3f %d' % (q['x'], q['y'] or 0, q['z'], q['zone']))
+                if not consumed():
+                    return 'wedged'
+            time.sleep(args.poll)
+            got = ask(q)
+            if got is None:
+                return 'wedged'
+            _, _ok, why, _ = got
+            if 'standing in' in why:
+                in_zone = False         # the zone change has not landed yet; ask again
+                continue
+            if 'yalms from the spot' in why:
+                in_zone = True          # right zone, the !pos was swallowed; just resend it
+                continue
+            return got
+        return None
 
     stuck, rescues = 0, 0
 
@@ -259,8 +288,10 @@ def main():
         # before it starts doing it, is cheap.
         zone, seconds = None, 0.0
         for stop in stops:
-            seconds += ((args.zone_wait * 2 if stop[0]['zone'] != zone else 0.0)
-                        + 20.0 + 2.0 * len(stop))     # 20s is the measured settle
+            # Measured, not guessed: about ten seconds to land a zone change, about twenty
+            # more for the entity table to come back, and two seconds an answer after that.
+            seconds += ((10.0 if stop[0]['zone'] != zone else 0.0)
+                        + 20.0 + 2.0 * len(stop))
             zone = stop[0]['zone']
         zones = len({s[0]['zone'] for s in stops})
         print(f'   {zones} zones, about {seconds / 60:.0f} minutes')
@@ -276,57 +307,61 @@ def main():
     n = 0
     for stop in stops:
         q = stop[0]
-        if not teleport(q, args.zone_wait):
+        arrived = go(q)
+        if arrived == 'wedged':
             # cmd.txt stops emptying when the addon is gone -- it is the addon that polls the
             # file. A blocking menu (an expansion prompt, a cutscene) does the same thing by
             # swallowing what the queued command turns into. Restarting the client clears
             # both, and the boot script reloads the addon.
             print('!! the client stopped consuming commands', flush=True)
+            current_zone = None
             if not rescue():
                 break
             continue
+        if arrived is None:
+            # Not the client failing and not the guide being wrong: the character could not
+            # be put on that coordinate at all. Say so, leave the row alone, carry on.
+            stuck += 1
+            current_zone = None
+            where = ('the zone itself' if q['x'] is None
+                     else f'({q["zone"]}, {q["x"]:.0f}, {q["z"]:.0f})')
+            print(f'   could not get onto {q["area"]} {q["id"]} {where}', flush=True)
+            # Five in a row is the death signature: a KO'd character is refused every GM
+            # command, so nothing moves and nothing says why. Revive and carry on -- the
+            # ledger keeps everything learned up to here.
+            if stuck >= 5:
+                if not rescue():
+                    print('!! wedged and out of rescues — stopping', flush=True)
+                    break
+                stuck = 0
+            continue
+        stuck = 0
         current_zone = q['zone']
 
         silent = False
-        # Everything at one stop shares a coordinate, so only the first of them has to wait
-        # for the zone; the rest are asked straight away off the same settled table.
-        waited = False
-        for q in stop:
+        # The character is on the spot; now wait for the world to arrive around it. Only the
+        # first of a stop has to -- everything else there shares the coordinate and is asked
+        # straight off the same settled table.
+        got = arrived
+        for i, q in enumerate(stop):
             n += 1
-            got = ask(q) if waited else settle(q)
+            if i:
+                got = ask(q)
+            elif not got[1]:
+                got = settle(q)
             if got is None:
                 misses += 1
                 silent = True
                 print(f'   no result for {q["area"]} {q["id"]}', flush=True)
                 break
             misses = 0
-            waited = True
-            last, _, why, ents = got
-            record(last, q)
-            # Did the character actually arrive? "standing in 178" is the wrong zone --
-            # the teleport did not take, and every later check inherits the mistake, 245 rows
-            # of it the first time. "standing 212.4 yalms from the spot" is the right zone
-            # and a `!pos` that was swallowed during a zone change; it used to be invisible
-            # and was recorded as seven perfectly ordinary-looking misses.
-            if 'standing in' in why or 'yalms from the spot' in why:
-                stuck += 1
-                current_zone = None
-                waited = False
-                break
-            stuck = 0
+            record(got[0], q)
 
         if silent and misses >= 10:
             print('!! ten silent checks in a row — the client is probably gone', flush=True)
             if not rescue():
                 break
             misses = 0
-        if stuck >= 5:
-            # Five refusals in a row is the death signature. Revive and carry on: everything
-            # already in the ledger is kept, and the run resumes where it stopped.
-            if not rescue():
-                print('!! wedged and out of rescues — stopping', flush=True)
-                break
-            stuck = 0
         if n % 25 < len(stop):
             print(f'   {n}/{len(todo)} …', flush=True)
 
