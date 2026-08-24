@@ -1,114 +1,149 @@
 #!/usr/bin/env python3
 """Vanaguide :: tools/verify_report.py
 
-Turn verify.csv into something a person can act on.
+Turn the ledger into something a person can act on.
 
-A raw sweep is a few hundred ok/MISS rows, and the misses are not equal: a marker quest whose
-"NPC" is a door, an NPC LandSandBoat never spawns, and a genuinely wrong coordinate all read
-the same. This sorts them and writes docs/QUEST_VERIFICATION_RESULTS.md.
+Two sources of evidence answer different questions. `npc_list` says where the server will
+spawn an NPC — cheap, complete, and available for every quest at once. The in-client sweep
+says what was actually standing there when a character stood on the spot — slow, partial, and
+the only thing that can speak for a `???` or a door. This writes what they say together, in
+the order somebody fixing the data would want to read it.
 
-    tools/verify_report.py <path to verify.csv> [-o docs/QUEST_VERIFICATION_RESULTS.md]
+    tools/verify_report.py [-o docs/QUEST_VERIFICATION_RESULTS.md]
 
 Copyright (c) 2026 Bates LLC.  All rights reserved.
 """
 import argparse
-import csv
 import os
 import sys
-from collections import defaultdict
 
+import ledger
 
-def classify(row):
-    npc = row['npc']
-    if row['ok'] == 'ok':
-        return 'ok'
-    # "standing in X, quest is in Y" is the harness failing, not the data: the teleport did
-    # not take. The first full sweep wedged in the Shrine of Ru'Avitau and produced 245 of
-    # these in a row. They are not evidence of anything and are counted separately.
-    if 'standing in' in row['why']:
-        return 'not checked'
-    if npc.startswith('qm') or npc.startswith('_') or '???' in npc:
-        return 'marker'
-    if not npc:
-        return 'unnamed'
-    return 'absent'
+ORDER = ['verified', 'server confirmed', 'the zone is right, and that is all there is',
+         'data error', 'only the client can check this',
+         'not on this server', 'nothing to check', 'pending']
+
+BLURB = {
+    'verified': 'A character stood on the coordinate and the quest\'s own NPC was loaded and '
+                'named there. This is the strongest statement the project can make.',
+    'server confirmed': 'The server spawns that NPC, in that zone, within ten yalms of where '
+                        'the guide points, and no character has yet seen it loaded there.',
+    'data error': 'The server puts the NPC somewhere the guide does not.',
+    'only the client can check this': 'The "NPC" is a `???`, a door or a dig point. It is a '
+                                      'real entity with an internal name, and `npc_list` is '
+                                      'not a reliable witness for it.',
+    'the zone is right, and that is all there is':
+        'The mission begins by walking into a place rather than by talking to anybody. A '
+        'character stood in that zone; the script names no spot inside it, so there is '
+        'nothing further to stand on.',
+    'not on this server': 'No NPC of that name exists in this server\'s data at all, under '
+                          'its display name, its words in another order, or the internal '
+                          'name the server tracks it by.',
+    'nothing to check': 'The quest script states no place — a mog-house moogle, or no '
+                        'location given anywhere.',
+    'pending': 'Nobody has looked yet.',
+}
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('csv')
-    ap.add_argument('-o', '--out', default='docs/QUEST_VERIFICATION_RESULTS.md')
+    ap.add_argument('--db', default=ledger.DB)
+    ap.add_argument('--kind', default='quest', choices=('quest', 'mission'))
+    ap.add_argument('-o', '--out', default='')
     args = ap.parse_args()
 
-    cols = ['area', 'id', 'ok', 'name', 'npc', 'want_zone', 'want_x', 'want_z',
-            'zone', 'x', 'z', 'dist', 'why']
-    rows = {}
-    with open(args.csv, newline='', encoding='utf-8', errors='replace') as fh:
-        for r in csv.DictReader(fh, fieldnames=cols):
-            if not r['area'] or r['id'] is None:
-                continue
-            rows[(r['area'], r['id'])] = r      # a later row wins: --recheck overwrites
+    db = ledger.connect(args.db)
+    try:
+        rows = db.execute('SELECT * FROM quest_verdict WHERE kind = ?',
+                          (args.kind,)).fetchall()
+    except Exception:
+        sys.exit('no quest_verdict view — run tools/npc_positions.py first')
     if not rows:
-        sys.exit('no rows in ' + args.csv)
+        sys.exit('the ledger is empty — run tools/ledger.py init')
 
-    buckets = defaultdict(list)
-    for r in rows.values():
-        buckets[classify(r)].append(r)
+    by = {}
+    for r in rows:
+        by.setdefault(r['verdict'], []).append(r)
+    total = len(rows)
+    good = len(by.get('verified', [])) + len(by.get('server confirmed', []))
 
-    unchecked = len(buckets['not checked'])
-    total = len(rows) - unchecked
-    ok = len(buckets['ok'])
-    dists = sorted(float(r['dist']) for r in buckets['ok'] if r['dist'])
-
-    out = []
-    out.append('# Every quest, checked by standing on it\n')
-    out.append('Generated by `tools/verify_report.py` from a sweep of the live client. '
-               'How the sweep works, and what a miss does and does not mean, is in '
+    args.out = args.out or ('docs/MISSION_VERIFICATION_RESULTS.md'
+                            if args.kind == 'mission'
+                            else 'docs/QUEST_VERIFICATION_RESULTS.md')
+    label = 'mission' if args.kind == 'mission' else 'quest'
+    out = [f'# Every {label}, checked\n']
+    out.append('Generated by `tools/verify_report.py` from `data/verification.sqlite3`. How '
+               'the two checks work, and what a miss does and does not mean, is in '
                '[QUEST_VERIFICATION.md](QUEST_VERIFICATION.md).\n')
-    out.append('| | quests |')
-    out.append('| --- | --- |')
-    out.append(f'| **checked** | {total} |')
-    out.append(f'| **NPC found where the guide points** | {ok} ({ok * 100 // max(total,1)}%) |')
-    out.append(f'| marker quest (the "NPC" is a door or a ???) | {len(buckets["marker"])} |')
-    out.append(f'| NPC not spawned by this server | {len(buckets["absent"])} |')
-    out.append(f'| teleport did not take — nothing learned, re-run these | {unchecked} |')
-    out.append(f'| no NPC named in the database | {len(buckets["unnamed"])} |')
-    if dists:
-        mid = dists[len(dists) // 2]
-        out.append(f'\nOf the ones found, half were within **{mid:.1f} yalms** of the '
-                   f'coordinate the guide gives, and the worst was {dists[-1]:.1f}.\n')
+    # Two numbers, because one of them alone always misleads. "Confirmed correct" is the
+    # strict count: a character found the NPC, or the server's own data places it where the
+    # guide points. "Checked" includes the weaker answers that are still answers -- a mission
+    # whose whole content is a zone, and a marker only the client can speak for. Reporting
+    # only the strict number makes coverage look worse than it is; reporting only the loose
+    # one makes it look better.
+    checked = total - len(by.get('nothing to check', [])) - len(by.get('pending', []))
+    out.append(f'**{good} of {total} {label}s are confirmed correct** '
+               f'({good * 100 // total}%).\n')
+    if checked > good:
+        out.append(f'{checked} have been checked as far as anything can check them; the '
+                   f'difference is {checked - good} whose strongest available answer is '
+                   f'weaker than an NPC found on a coordinate.\n')
+    out.append(f'| | {label}s | |')
+    out.append('| --- | ---: | --- |')
+    for v in ORDER:
+        if by.get(v):
+            out.append(f'| **{v}** | {len(by[v])} | {BLURB[v]} |')
 
-    if unchecked:
-        out.append(f'\n## Not checked ({unchecked})\n')
-        out.append('The character never arrived, so these rows say nothing about the data. '
-                   'Re-run with `--recheck`.\n')
+    found = [r for r in by.get('verified', []) if r['dist'] is not None]
+    if found:
+        d = sorted(r['dist'] for r in found)
+        out.append(f'\nOf the ones a character stood on, half were within '
+                   f'**{d[len(d) // 2]:.1f} yalms** of the coordinate the guide gives, and '
+                   f'the worst was {d[-1]:.1f}.\n')
 
-    if buckets['absent']:
-        out.append('\n## Not spawned by this server\n')
-        out.append('Right coordinate, no NPC standing on it — LandSandBoat implements a subset '
-                   'of the game. These are worth re-checking on a server that implements them '
-                   'before treating any of them as a data error.\n')
-        out.append('| quest | NPC | zone |')
-        out.append('| --- | --- | --- |')
-        for r in sorted(buckets['absent'], key=lambda r: (int(r['want_zone'] or 0), r['name'])):
-            out.append(f'| {r["name"]} | {r["npc"]} | {r["want_zone"]} |')
+    # This section used to say the two cases were "told apart by standing there longer".
+    # They were, and doing it settled the question: the settle was measured
+    # (docs/QUEST_VERIFICATION.md), the sweep now waits for the entity table to stop growing
+    # instead of sleeping a guessed number, and an absent verdict taken that way is a
+    # statement about the world rather than about the clock. The entity count is printed
+    # because it is the evidence: a plateau with the NPC missing is a server gap, and a
+    # handful of entities in a city street is a check that still asked too early.
+    looked = [r for r in by.get('server confirmed', []) if r['client'] == 'absent']
+    if looked:
+        out.append(f'\n## Confirmed by the server, absent in the client ({len(looked)})\n')
+        out.append('`npc_list` places the NPC exactly where the guide points, and a character '
+                   'standing on the spot did not see it loaded. The sweep waits for the '
+                   'entity table to stop growing before it answers, so these are not checks '
+                   'that asked too early: the world had finished arriving and the NPC was '
+                   'not in it. LandSandBoat implements a subset of the game, and an NPC no '
+                   'script spawns — or one that only exists once its storyline has begun — '
+                   'never appears. The coordinate can still be perfectly right for retail.\n')
+        out.append('`loaded` is how many entities were in the client when the answer was '
+                   'taken. A low number in a busy place is the one thing here still worth '
+                   'suspecting.\n')
+        out.append(f'| {label} | NPC | zone | loaded |')
+        out.append('| --- | --- | ---: | ---: |')
+        for r in sorted(looked, key=lambda r: (r['area'], r['id'])):
+            ents = '—' if r['entities'] is None else str(r['entities'])
+            out.append(f'| {r["name"]} | `{r["npc"]}` | {r["zone"]} | {ents} |')
 
-    if buckets['marker']:
-        out.append('\n## Marker quests\n')
-        out.append('Started at a `???`, a door or an object rather than by talking to somebody. '
-                   'The database carries the server\'s internal name and the client never uses '
-                   'it, so these are checked by "is anything standing here" instead.\n')
-        out.append('| quest | marker | zone | result |')
-        out.append('| --- | --- | --- | --- |')
-        for r in sorted(buckets['marker'], key=lambda r: (int(r['want_zone'] or 0), r['name'])):
-            out.append(f'| {r["name"]} | `{r["npc"]}` | {r["want_zone"]} | {r["why"]} |')
+    for v in ('data error', 'not on this server', 'nothing to check',
+              'only the client can check this',
+              'the zone is right, and that is all there is'):
+        if not by.get(v):
+            continue
+        out.append(f'\n## {v.capitalize()} ({len(by[v])})\n')
+        out.append(BLURB[v] + '\n')
+        out.append(f'| {label} | NPC | zone | |')
+        out.append('| --- | --- | ---: | --- |')
+        for r in sorted(by[v], key=lambda r: (r['area'], r['id'])):
+            out.append(f'| {r["name"]} | `{r["npc"] or "—"}` | {r["zone"] or "—"} | '
+                       f'{r["why"] or r["server"]} |')
 
     text = '\n'.join(out) + '\n'
     os.makedirs(os.path.dirname(args.out) or '.', exist_ok=True)
     open(args.out, 'w', encoding='utf-8').write(text)
-    print(f'{total} checked, {ok} found, {len(buckets["absent"])} absent, '
-          f'{len(buckets["marker"])} markers, {unchecked} not checked '
-          f'-> {args.out}')
+    print(f'{good}/{total} confirmed -> {args.out}')
 
 
 if __name__ == '__main__':

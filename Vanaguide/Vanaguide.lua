@@ -337,8 +337,16 @@ ashita.events.register('command', 'vg_command', function (e)
     -- Stand on a quest's coordinates and check the NPC is really there. Writes a CSV row to
     -- addons/Vanaguide/verify.csv as well as printing, because a full sweep is hundreds of
     -- these and they are read by a script.  See docs/QUEST_VERIFICATION.md.
+    -- `/vg verify <area> <id>` for a quest, `/vg verify m <area> <id>` for a mission.
+    if (sub == 'verify' and #args > 4 and args[3]:lower() == 'm') then
+        local r = Verify.entry('mission', args[4]:lower(), tonumber(args[5]) or -1);
+        Verify.log('verify.csv', Verify.row(r));
+        U.print(('verify mission %s %s: %s — %s'):format(r.area, tostring(r.id),
+            r.ok and 'ok' or 'MISS', r.why));
+        return;
+    end
     if (sub == 'verify' and #args > 3) then
-        local r = Verify.quest(args[3]:lower(), tonumber(args[4]) or -1);
+        local r = Verify.entry('quest', args[3]:lower(), tonumber(args[4]) or -1);
         Verify.log('verify.csv', Verify.row(r));
         U.print(('verify %s %s: %s — %s'):format(r.area, tostring(r.id),
             r.ok and 'ok' or 'MISS', r.why));
@@ -353,6 +361,50 @@ ashita.events.register('command', 'vg_command', function (e)
         for i = 1, math.min(8, #list) do
             U.print(('  %-24s %5.1f yalms'):format(list[i].name, list[i].dist or -1));
         end
+        return;
+    end
+
+    -- Copy everything printed to a file as well as to chat. A script driving the client
+    -- through cmd.txt has no way to read the game's chat log, so without this the only
+    -- commands it can check are the ones that happen to write a file of their own.
+    --   /vg tee answers.txt   -> addons/Vanaguide/answers.txt
+    --   /vg tee off
+    if (sub == 'tee') then
+        local name = (#args > 2) and args[3] or 'off';
+        if (name:lower() == 'off') then
+            U.tee = nil;
+            U.print('tee off');
+        else
+            local base = AshitaCore:GetInstallPath():gsub('[\\/]$', '');
+            U.tee = ('%s\\addons\\Vanaguide\\%s'):format(base, name);
+            U.print('tee -> ' .. name);
+        end
+        return;
+    end
+
+    -- What the zone graph has learned from play, and whether it is learning at all. The
+    -- graph records every crossing (docs/ROUTING.md) and until now nothing could read the
+    -- result back, so "zone-line learning works" was an untested claim in the docs.
+    if (sub == 'graph') then
+        -- `/vg graph <a> <b>` answers about one pair. The count on its own cannot tell you
+        -- whether a crossing was recorded, because Z.learn refuses to record a pair it
+        -- already knows -- so warping between two zones the sweep has visited a hundred
+        -- times leaves the total unchanged and looks exactly like learning being broken.
+        if (#args > 3) then
+            local a, b = tonumber(args[3]), tonumber(args[4]);
+            local key = ('%d-%d'):format(math.min(a, b), math.max(a, b));
+            local set = graph.save_learned() or {};
+            U.print(('graph: %s learned = %s'):format(key,
+                (set[key] or set[('%d-%d'):format(a, b)] or set[('%d-%d'):format(b, a)])
+                and 'yes' or 'no'));
+            return;
+        end
+        local learned, seed = {}, 0;
+        for key in pairs(graph.save_learned() or {}) do learned[#learned + 1] = key; end
+        for _ in pairs(graph.adj or {}) do seed = seed + 1; end
+        table.sort(learned);
+        U.print(('graph: %d zones with edges, %d learned crossings'):format(seed, #learned));
+        for i = 1, math.min(20, #learned) do U.print('  learned ' .. learned[i]); end
         return;
     end
 

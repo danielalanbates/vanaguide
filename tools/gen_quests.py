@@ -23,12 +23,26 @@ import re
 import sys
 from collections import defaultdict
 
+import lsbdata
+
 AREA_LOG = {
     'sandoria': 'sandoria', 'bastok': 'bastok', 'windurst': 'windurst',
     'jeuno': 'jeuno', 'otherAreas': 'other', 'outlands': 'outlands',
     'ahtUrhgan': 'ahturhgan', 'crystalWar': 'wotg', 'abyssea': 'abyssea',
     'adoulin': 'adoulin', 'coalition': 'coalition',
 }
+
+# A quest states its own area as the directory name (`crystalWar`) and its prerequisite's as
+# the questLog constant (`CRYSTAL_WAR`). Squashing case and underscores makes them the same
+# key -- without it, every cross-referenced prerequisite in Aht Urhgan, the Crystal War and
+# "other areas" pointed at an area that does not exist, and 44 of the 48 dangling
+# prerequisites in the database were this one line.
+AREA_ANY = {k.lower().replace('_', ''): v for k, v in AREA_LOG.items()}
+
+
+def area_key(name):
+    flat = (name or '').lower().replace('_', '')
+    return AREA_ANY.get(flat, flat)
 
 
 def parse_ids(root):
@@ -71,7 +85,7 @@ def parse_items(root):
     return out
 
 
-def parse_quest(path, ids, key_items, item_ids):
+def parse_quest(path, ids, key_items, item_ids, zone_ids=None, npc_list=None):
     text = open(path, encoding='utf-8', errors='replace').read()
 
     m = re.search(r"Quest:new\(\s*xi\.questLog\.(\w+)\s*,\s*xi\.quest\.id\.(\w+)\.([A-Z0-9_]+)", text)
@@ -93,16 +107,7 @@ def parse_quest(path, ids, key_items, item_ids):
 
     # Header comments: "-- Balasiel : !pos -136 -11 64 230".  The first one is where the
     # quest is taken, which is the only coordinate a guide can state without guessing.
-    npc = None
-    for line in lines[:40]:
-        m = re.match(r"--\s*(.+?)\s*:\s*!pos\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(\d+)", line)
-        if m:
-            npc = {
-                'name': m.group(1).strip(),
-                'x': float(m.group(2)), 'y': float(m.group(3)), 'z': float(m.group(4)),
-                'zone': int(m.group(5)),
-            }
-            break
+    npc = lsbdata.find_npc(text, lines, title, zone_ids, npc_list)
 
     reward_ki = None
     m = re.search(r"keyItem\s*=\s*xi\.ki\.([A-Z0-9_]+)", text)
@@ -134,10 +139,10 @@ def parse_quest(path, ids, key_items, item_ids):
         p_log, _, p_const = m.groups()
         p_id = ids.get(p_log, {}).get(p_const)
         if p_id is not None:
-            prereq = (AREA_LOG.get(p_log.lower().replace('_', ''), p_log.lower()), p_id)
+            prereq = (area_key(p_log), p_id)
 
     return {
-        'area': AREA_LOG.get(id_area, id_area.lower()),
+        'area': area_key(id_area),
         'id': qid,
         'name': title,
         'npc': npc,
@@ -161,6 +166,8 @@ def main():
     ids = parse_ids(args.root)
     key_items = parse_key_items(args.root)
     item_ids = parse_items(args.root)
+    zone_ids = lsbdata.parse_zone_ids(args.root)
+    npc_list = lsbdata.parse_npc_list(args.root)
 
     quests, skipped = defaultdict(dict), 0
     qdir = os.path.join(args.root, 'scripts/quests')
@@ -168,7 +175,8 @@ def main():
         for f in sorted(files):
             if not f.endswith('.lua'):
                 continue
-            q = parse_quest(os.path.join(dirpath, f), ids, key_items, item_ids)
+            q = parse_quest(os.path.join(dirpath, f), ids, key_items, item_ids,
+                            zone_ids, npc_list)
             if q is None:
                 skipped += 1
                 continue

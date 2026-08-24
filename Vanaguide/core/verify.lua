@@ -14,12 +14,22 @@
 --
 -- Copyright (c) 2026 Bates LLC.  All rights reserved.
 
-local U      = require('core.util')
-local quests = require('data.quests')
+local U        = require('core.util')
+local quests   = require('data.quests')
+local missions = require('data.missions')
 
 local V = {}
 
 local MAX_ENTITY = 2303
+
+-- How close counts as having arrived. Ten yalms, the same "you are in the right place" the
+-- arrow uses, and for the same reason: the entity table streams in a radius around the
+-- player, so ten yalms one way or the other does not change what is loaded. It is not float
+-- noise this is guarding against -- the rows it catches were fifty-five to two hundred and
+-- twelve yalms out, which is a different place entirely. A tighter number would start
+-- rejecting stops where the server puts the character on the nearest walkable ground rather
+-- than exactly on the coordinate, and those checks are perfectly good.
+local ARRIVED = 10.0
 
 local function normalize(s)
     return (tostring(s or ''):lower():gsub('[^%a%d]', ''))
@@ -43,13 +53,19 @@ end
 
 --- Every named entity currently loaded, with its distance from the player.
 --- `Type` 0 is a PC, 1 a monster, 2 an NPC; only NPCs and monsters are interesting here.
+---
+--- The player's own entity is skipped. It is always at distance zero, so leaving it in made
+--- every miss ever recorded say "nearest Test" -- a field that looked like evidence and
+--- carried none.
 function V.nearby(px, pz)
     local mm = AshitaCore:GetMemoryManager()
     local ents = mm:GetEntity()
+    local me = -1
+    pcall(function() me = mm:GetParty():GetMemberTargetIndex(0) end)
     local out = {}
     for i = 0, MAX_ENTITY do
         local ok, name = pcall(function() return ents:GetName(i) end)
-        if ok and name ~= nil and name ~= '' then
+        if i ~= me and ok and name ~= nil and name ~= '' then
             local x = ents:GetLocalPositionX(i)
             local z = ents:GetLocalPositionY(i)     -- Ashita's Y is the second horizontal axis
             if x ~= nil and (x ~= 0 or z ~= 0) then
@@ -64,25 +80,49 @@ function V.nearby(px, pz)
     return out
 end
 
---- Check one quest against the world the player is standing in.
---- Returns a result table; `ok` is true when the quest's own NPC is loaded nearby.
-function V.quest(area, id)
-    local q = quests.get(area, id)
+--- Check one quest or mission against the world the player is standing in.
+--- Returns a result table; `ok` is true when its own NPC is loaded nearby.
+---
+--- Missions are the same shape as quests -- a name, somebody to talk to, somewhere they
+--- stand -- so the check is identical and only the table differs. What is not identical is
+--- the key: `sandoria` is both a quest area and a mission storyline, with ids that overlap,
+--- so `kind` travels with every row from here to the ledger.
+function V.entry(kind, area, id)
+    local q = (kind == 'mission') and missions.get(area, id) or quests.get(area, id)
     local px, pz = U.position()
     local zone = U.zone()
     local r = {
+        kind = kind or 'quest',
         area = area, id = id, name = q and q.name or '?',
         npc = q and q.npc or '', want_zone = q and q.zone or nil,
         want_x = q and q.x or nil, want_z = q and q.z or nil,
         zone = zone, x = px, z = pz,
-        ok = false, why = '', dist = nil, nearest = '',
+        ok = false, why = '', dist = nil, nearest = '', entities = nil,
     }
 
-    if q == nil then r.why = 'no such quest in the database'; return r end
+    if q == nil then r.why = 'no such ' .. (kind or 'quest') .. ' in the database'; return r end
     if q.zone == nil then r.why = 'the database has no location for it'; return r end
     if zone == nil or px == nil then r.why = 'not in the world'; return r end
     if zone ~= q.zone then
         r.why = ('standing in %d, quest is in %d'):format(zone, q.zone)
+        return r
+    end
+    -- A mission that begins by walking into a place has a zone and no spot in it. Being in
+    -- the right zone is the whole of what can be checked, and it has just been checked.
+    if q.x == nil then
+        r.ok = true
+        r.why = 'the zone is right, and the script names no spot in it'
+        return r
+    end
+
+    -- In the right zone and in the wrong place. A `!pos` issued while the character is still
+    -- zoning is dropped without a word, and the check that follows reads the entity table
+    -- from the zone entrance and calls the NPC absent. Seven rows in the ledger were written
+    -- that way -- all in Northern San d'Oria, up to 212 yalms off -- and every one of them
+    -- reads like a real miss. Say so instead: this is the harness failing, not evidence.
+    local off = U.dist(px, pz, q.x, q.z)
+    if off > ARRIVED then
+        r.why = ('standing %.1f yalms from the spot'):format(off)
         return r
     end
 
@@ -94,6 +134,7 @@ function V.quest(area, id)
                                      or q.npc:find('%?%?%?') ~= nil)
     local want = normalize(q.npc)
     local list = V.nearby(px, pz)
+    r.entities = #list
     r.nearest = (#list > 0) and list[1].name or ''
     if want == '' or marker then
         -- Within ten yalms is the same "you are in the right place" the arrow uses.
@@ -130,7 +171,17 @@ function V.row(r)
         tostring(r.want_zone or ''), n(r.want_x), n(r.want_z),
         tostring(r.zone or ''), n(r.x), n(r.z), n(r.dist),
         '"' .. tostring(r.why):gsub('"', "'") .. '"',
+        -- Fourteenth column, added after the first sweeps: rows written before this default
+        -- to 'quest', which is what they were.
+        r.kind or 'quest',
+        -- Fifteenth column. Written on every row, not only on misses: "the NPC was not here"
+        -- and "nothing at all was here yet" are different findings and the count is what
+        -- tells them apart. Rows written before this leave it blank.
+        r.entities == nil and '' or tostring(r.entities),
     }, ',')
 end
+
+--- Kept for anything that still asks for a quest by name.
+function V.quest(area, id) return V.entry('quest', area, id) end
 
 return V

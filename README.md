@@ -15,7 +15,7 @@ in-game yet.** Read [docs/VERIFICATION.md](docs/VERIFICATION.md) before you trus
 | Travel routing (flight paths, boats) | ✅ `routing/zonegraph.lua` — Dijkstra over the zone graph, with airships and the Selbina/Mhaura ferry as real edges |
 | A travel graph that is actually complete | ⚠️ partly. The seed graph covers the base world; **the addon learns every zone line you walk through** and saves it, so it fills itself in from play instead of from guesswork |
 | Gear finder / "where does this drop?" | ✅ `/vg find`, `/vg gear <slot>`, `/vg nm` over 365 notorious monsters, 1,167 purchasable items and 485 sourced equipment pieces ([docs/LOOT_AND_HUNTING.md](docs/LOOT_AND_HUNTING.md)) |
-| Guide library | **506 quests and 459 missions**, generated from server data into 25 guides — one per quest area, one per storyline ([docs/QUEST_DATABASE.md](docs/QUEST_DATABASE.md)) — plus hand-written guides in `Vanaguide/guides/` |
+| Guide library | **505 quests and 459 missions**, generated from server data into 25 guides — one per quest area, one per storyline ([docs/QUEST_DATABASE.md](docs/QUEST_DATABASE.md)) — plus hand-written guides in `Vanaguide/guides/` |
 | Guide editor | ❌ — but `/vg mark` writes a paste-ready guide line for wherever you are standing |
 
 ## Install
@@ -82,17 +82,42 @@ docs/         format, routing, packets, arrow calibration, verification, pathway
 ## Testing
 
 ```sh
-luajit tools/test_offline.lua      # 1239 assertions, no game required
+luajit tools/test_offline.lua      # 1423 assertions, no game required
 ```
 
 The harness fakes Ashita's globals (`tools/stubs.lua`), so the parser, the completion
 conditions, the packet reader, the progress cursor and the router are all exercised without
 launching anything.
 
+Beyond the unit tests, every quest and every mission is checked twice — against the server's
+own `npc_list`, and by standing a character on the coordinate in a running client:
+
+```sh
+tools/npc_positions.py --kind quest    # all 505 against the server data, about a second
+tools/verify_quests.py --game …        # stand on each one; resumable, unattended
+tools/settle_probe.py --game …         # how long a zone really takes to load
+tools/capability_check.py --game …     # the things only a live client can answer
+tools/ledger.py status                 # where it stands
+```
+
+**501 of 505 quests and 357 of 459 missions are confirmed correct**, and every entry that
+carries a place has been stood on. What each check can and cannot prove — and why a miss is
+usually not a bad coordinate — is in
+[docs/QUEST_VERIFICATION.md](docs/QUEST_VERIFICATION.md); the current results are in
+[docs/QUEST_VERIFICATION_RESULTS.md](docs/QUEST_VERIFICATION_RESULTS.md) and
+[docs/MISSION_VERIFICATION_RESULTS.md](docs/MISSION_VERIFICATION_RESULTS.md).
+
+The sweep waits for the world instead of guessing at it. A teleport empties the client's
+entity table and it refills all at once about seventeen seconds later, so a check made too
+early sees nothing and cannot tell that it is early — which is how hundreds of NPCs came to be
+recorded as missing from a server that spawns them perfectly well. It is measured, not
+assumed: `data/settle_probe.csv`.
+
 ## Documentation
 
 * [docs/LOOT_AND_HUNTING.md](docs/LOOT_AND_HUNTING.md) — gear, drops and notorious monsters, and how thin the open drop data really is
-* [docs/QUEST_DATABASE.md](docs/QUEST_DATABASE.md) — the 506-quest database, and why it comes from server code rather than a wiki
+* [docs/QUEST_DATABASE.md](docs/QUEST_DATABASE.md) — the 505-quest database, and why it comes from server code rather than a wiki
+* [docs/QUEST_VERIFICATION.md](docs/QUEST_VERIFICATION.md) — two checks, what each proves, and the ledger that tracks them
 * [docs/GUIDE_FORMAT.md](docs/GUIDE_FORMAT.md) — how to write a guide
 * [docs/ROUTING.md](docs/ROUTING.md) — the travel graph and how it learns
 * [docs/PACKETS.md](docs/PACKETS.md) — how quest and mission completion is read

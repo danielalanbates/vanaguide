@@ -9,6 +9,11 @@
 -- Copyright (c) 2026 Bates LLC.  All rights reserved.
 
 local travel = require('data.travel')
+-- The server's own zone lines, generated from sql/zonelines.sql. The hand-written seed in
+-- data/travel.lua covers the base world and was never meant to be complete; this is, for
+-- every zone LandSandBoat will walk a player through. Both are loaded: a server with custom
+-- zones keeps whatever travel.lua says, and learned edges still win over both.
+local ok_lines, zonelines = pcall(require, 'data.zonelines')
 
 local Z = { adj = {}, learned = {} }
 
@@ -19,10 +24,24 @@ end
 
 local function build()
     Z.adj = {}
-    for _, pair in ipairs(travel.walk) do
-        local a, b = pair[1], pair[2]
+    local seen = {}
+    local function walk_pair(a, b)
+        local key = (a < b) and (a .. ':' .. b) or (b .. ':' .. a)
+        if seen[key] then return end
+        seen[key] = true
         link(a, { to = b, cost = travel.WALK_COST, kind = 'walk' })
         link(b, { to = a, cost = travel.WALK_COST, kind = 'walk' })
+    end
+    for _, pair in ipairs(travel.walk) do
+        walk_pair(pair[1], pair[2])
+    end
+    if ok_lines and zonelines and zonelines.walk then
+        for _, pair in ipairs(zonelines.walk) do
+            walk_pair(pair[1], pair[2])
+        end
+        for _, t in ipairs(zonelines.transit or {}) do
+            link(t.from, { to = t.to, cost = t.cost, kind = t.kind, via = t.via })
+        end
     end
     for _, t in ipairs(travel.transit) do
         link(t.from, { to = t.to, cost = t.cost, kind = 'transit', via = t.via, pass = t.pass })

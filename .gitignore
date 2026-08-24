@@ -1,5 +1,10 @@
 # Nothing personal belongs in this repository.
 marks.txt
+# Written next to the installed addon while a sweep or a capability check runs. Results
+# belong in data/verification.sqlite3, not in a scratch file with a character's position in it.
+verify.csv
+answers.txt
+cmd.txt
 *.log
 logs/
 config/
@@ -8,3 +13,5 @@ settings/
 # Ashita writes per-character settings next to the addon; those hold character names.
 Vanaguide/settings/
 Vanaguide/config/
+__pycache__/
+*.pyc

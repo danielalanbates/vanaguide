@@ -4,11 +4,13 @@
 -- Two kinds of data live here.
 --
 --   walk[]      zone lines — two zones you can walk between.  Hand-authored for the base
---               world from common game knowledge, and DELIBERATELY incomplete: the client
---               keeps its zone-line geometry in the DATs, no server project publishes a
---               table of them, and guessing one is worse than not having it.  Whatever is
---               missing here the addon LEARNS: every time you zone, Routing/ZoneGraph
---               records the pair you just crossed and saves it (see docs/ROUTING.md).
+--               world from common game knowledge.  This was once the only walk data there
+--               was, on the belief that no server project publishes a table of zone lines.
+--               LandSandBoat does: sql/zonelines.sql, and data/zonelines.lua is generated
+--               from it by tools/gen_zonelines.py.  Both are loaded, so a server with
+--               custom zones keeps whatever is written here.  Whatever neither has, the
+--               addon LEARNS: every time you zone, Routing/ZoneGraph records the pair you
+--               just crossed and saves it (see docs/ROUTING.md).
 --
 --   transit[]   everything that is not a zone line — airships, ferries, the Kazham
 --               shuttle, teleports.  These carry a `via` string, which is what the guide

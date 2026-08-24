@@ -63,3 +63,55 @@ zone" is most of the win.
   an addon a server might approve and one that gets you banned ([SERVERS.md](SERVERS.md)).
 * **No coordinates written from memory.** A wrong `POS` is worse than none: it points the
   arrow confidently at the wrong place. Hence `/vg mark`.
+
+## Next, for whoever picks this up
+
+The sweep is done, for both quests and missions. Every entry that carries a place has had a
+character stood on it or has been answered by the server's own data, and where neither could
+answer, the ledger says which and why. [QUEST_VERIFICATION.md](QUEST_VERIFICATION.md) is the
+method; [QUEST_VERIFICATION_RESULTS.md](QUEST_VERIFICATION_RESULTS.md) and
+[MISSION_VERIFICATION_RESULTS.md](MISSION_VERIFICATION_RESULTS.md) are the current answers.
+
+What is genuinely left, in the order I would do it:
+
+**Ten missions implemented outside `scripts/missions/`.** The mission file is a stub and a
+zone or NPC script drives the thing. A reverse index over `scripts/` would find them, and the
+obvious version of that rule is wrong in a way that produces confident answers — `addMission`
+marks where the *previous* mission ended, and one of the ten resolves to two files with the
+tie-break picking the wrong one. Ten is few enough to read by hand. The full accounting of
+what is and is not recoverable is the table in QUEST_VERIFICATION.md.
+
+**Seven trigger-area coordinates.** Those missions have a zone and `Zone.lua` registers a
+cuboid or cylinder with an exact centre — `registerCuboidTriggerArea(id, xMin, yMin, zMin,
+xMax, yMax, zMax)`, signatures in `src/map/lua/lua_zone.cpp`. Parsing those turns seven
+zone-only rows into coordinates. Watch for `[N]` keys that are not direct children of the
+table: `progressEvent(168, { [0] = ... })` looks identical and is not a trigger area.
+
+**The five prerequisites naming a quest this server has no script for.** `tools/ledger.py
+check` lists them. The guide currently points at a quest it cannot describe; it should say
+the unlock is unavailable here.
+
+**The 28 unreachable zones.** Abyssea, the Crystal War cities, Adoulin and Tavnazia are
+entered through Cavernous Maws and event NPCs rather than zone lines or ferries, so
+`sql/zonelines.sql` and `sql/transport.sql` say nothing about them and the router cannot get
+there. The maws are real NPCs in `npc_list`, and which one leads where is stated in
+`scripts/zones/*/npcs/`. That is the last big gap in routing, and it is readable, not
+guesswork.
+
+**Fifty-six missions LandSandBoat has not implemented** (Voracious Resurgence 46, Shantotto
+Ascension 9, Crystalline Prophecy 1) are a gap in the server, not in the guide, and no amount
+of work here closes them. Say so in the UI rather than pointing a player at nothing.
+
+## What to be careful of, learned the expensive way
+
+* **Never sleep a fixed time and then read the entity table.** A teleport empties it and it
+  refills all at once about seventeen seconds later. The six-second wait between stops inside
+  one zone is the reason hundreds of NPCs were recorded absent, and it looked like a fact
+  about the server for weeks. Poll until the count stops changing.
+* **Prove the character arrived.** `!pos` issued during a zone change is dropped silently, and
+  the check that follows is in the right zone, two hundred yalms from the coordinate, and
+  reads exactly like an ordinary miss.
+* **A name is not unique inside a zone.** Twenty "Stone Door" in Ordelle's Caves. Any rule of
+  the form "the row with this name" is a coin toss unless it also says *which* one.
+* **`CREATE VIEW IF NOT EXISTS` is a trap for a view whose SQL you intend to edit.** It kept
+  a definition that was no longer anywhere in the source.

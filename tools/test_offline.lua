@@ -25,6 +25,34 @@ local story  = require('core.story')
 local graph  = require('routing.zonegraph')
 local R      = require('routing.router')
 
+-- ---- every file the addon loads actually parses --------------------------------
+-- A syntax error in a module the suite does not itself require is invisible here and fatal
+-- in the client: the addon simply never loads, cmd.txt stops being polled, and the sweep
+-- driving it reports a client that has stopped answering. That is exactly what a stray
+-- `function` written after `return V` in core/verify.lua did. Parsing every file costs
+-- nothing and catches the whole class.
+do
+    local files = {
+        'Vanaguide.lua', 'core/verify.lua', 'core/util.lua', 'core/guide.lua',
+        'core/conditions.lua', 'core/progress.lua', 'core/story.lua', 'core/lookup.lua',
+        'routing/zonegraph.lua', 'routing/router.lua',
+        'data/quests.lua', 'data/missions.lua', 'data/zone_names.lua', 'data/travel.lua',
+        'data/zonelines.lua', 'data/gear.lua', 'data/drops.lua', 'data/nm.lua',
+        'data/vendors.lua',
+    }
+    for _, f in ipairs(files) do
+        local path = 'Vanaguide/' .. f
+        local fh = io.open(path, 'r')
+        if fh == nil then
+            ok(false, path .. ' exists')
+        else
+            fh:close()
+            local chunk, err = loadfile(path)
+            ok(chunk ~= nil, path .. ' parses' .. (chunk == nil and (': ' .. tostring(err)) or ''))
+        end
+    end
+end
+
 -- ---- zone data ----------------------------------------------------------------
 eq(zones.name[230], "Southern San d'Oria", 'zone 230 name')
 eq(zones.find("southern san d'oria"), 230, 'zone lookup by name')

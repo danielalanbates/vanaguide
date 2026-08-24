@@ -18,6 +18,8 @@ import re
 import sys
 from collections import defaultdict
 
+import lsbdata
+
 # LandSandBoat's log names -> the names core/story.lua uses for packet 0x056 areas.
 AREA_LOG = {
     'sandoria': 'sandoria', 'bastok': 'bastok', 'windurst': 'windurst',
@@ -46,7 +48,7 @@ def parse_ids(root):
     return out
 
 
-def parse_mission(path, ids):
+def parse_mission(path, ids, zone_ids=None, npc_list=None):
     text = open(path, encoding='utf-8', errors='replace').read()
     m = re.search(r"Mission:new\(\s*xi\.mission\.log_id\.(\w+)\s*,\s*xi\.mission\.id\.(\w+)\.([A-Z0-9_]+)", text)
     if not m:
@@ -68,13 +70,7 @@ def parse_mission(path, ids):
         if m2:
             label = m2.group(1).strip()
 
-    npc = None
-    for line in lines[:40]:
-        m2 = re.match(r"--\s*(.+?)\s*:\s*!pos\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(\d+)", line)
-        if m2:
-            npc = {'name': m2.group(1).strip(), 'x': float(m2.group(2)),
-                   'y': float(m2.group(3)), 'z': float(m2.group(4)), 'zone': int(m2.group(5))}
-            break
+    npc = lsbdata.find_npc(text, lines, title, zone_ids, npc_list, allow_zone_only=True)
 
     return {'area': area, 'id': mid, 'name': title, 'label': label, 'npc': npc}
 
@@ -90,12 +86,14 @@ def main():
     args = ap.parse_args()
 
     ids = parse_ids(args.root)
+    zone_ids = lsbdata.parse_zone_ids(args.root)
+    npc_list = lsbdata.parse_npc_list(args.root)
     missions, skipped = defaultdict(dict), 0
     for dirpath, _, files in os.walk(os.path.join(args.root, 'scripts/missions')):
         for f in sorted(files):
             if not f.endswith('.lua'):
                 continue
-            m = parse_mission(os.path.join(dirpath, f), ids)
+            m = parse_mission(os.path.join(dirpath, f), ids, zone_ids, npc_list)
             if m is None:
                 skipped += 1
                 continue
@@ -106,7 +104,9 @@ def main():
                 missions[m['area']][m['id']] = m
 
     total = sum(len(v) for v in missions.values())
-    positioned = sum(1 for a in missions.values() for m in a.values() if m['npc'])
+    positioned = sum(1 for a in missions.values() for m in a.values()
+                     if m['npc'] and m['npc'].get('x') is not None)
+    placed = sum(1 for a in missions.values() for m in a.values() if m['npc'])
 
     with open(args.out, 'w', encoding='utf-8') as fh:
         fh.write("""-- Vanaguide :: data/missions.lua
@@ -131,9 +131,15 @@ local M = {}
                     bits.append('label = %s' % lua_str(m['label']))
                 if m['npc']:
                     n = m['npc']
-                    bits += ['zone = %d' % n['zone'], 'x = %.1f' % n['x'],
-                             'z = %.1f' % n['z'], 'y = %.1f' % n['y'],
-                             'npc = %s' % lua_str(n['name'])]
+                    bits.append('zone = %d' % n['zone'])
+                    # A mission that begins by zoning in has a place but no spot in it. The
+                    # guide can still say where to go, so the zone is written and the
+                    # coordinates are not invented.
+                    if n.get('x') is not None:
+                        bits += ['x = %.1f' % n['x'], 'z = %.1f' % n['z'],
+                                 'y = %.1f' % n['y']]
+                    if n['name']:
+                        bits.append('npc = %s' % lua_str(n['name']))
                 fh.write('        [%d] = { %s },\n' % (mid, ', '.join(bits)))
             fh.write('    },\n')
         fh.write('}\n\n')
@@ -152,8 +158,8 @@ end
 return M
 """)
 
-    print('%d missions in %d storylines (%d with coordinates); %d files skipped'
-          % (total, len(missions), positioned, skipped))
+    print('%d missions in %d storylines (%d with coordinates, %d with at least a zone); '
+          '%d files skipped' % (total, len(missions), positioned, placed, skipped))
 
 
 if __name__ == '__main__':
