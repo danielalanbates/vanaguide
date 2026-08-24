@@ -65,6 +65,10 @@ CREATE TABLE IF NOT EXISTS checks (
     z           REAL,
     dist        REAL,
     why         TEXT NOT NULL DEFAULT '',
+    -- How many entities were loaded when the check ran. The most useful number on a miss and
+    -- the one that was missing longest: "the NPC was not here" and "nothing was here yet"
+    -- look identical without it. Blank on every row written before 2026-08-24.
+    entities    INTEGER,
     PRIMARY KEY (kind, area, id, run, seq)
 );
 
@@ -105,6 +109,12 @@ SELECT q.kind, q.area, q.id, q.name, q.npc, q.zone, q.x, q.y, q.z,
        (SELECT c.why FROM checks c
         WHERE c.kind = q.kind AND c.area = q.area AND c.id = q.id AND c.verdict <> 'unchecked'
         ORDER BY c.rowid DESC LIMIT 1) AS why,
+       -- How much of the world had arrived when the answer was taken. On a miss this is the
+       -- difference between "the NPC was not here" and "nothing was here yet", and it is the
+       -- only column that can tell them apart.
+       (SELECT c.entities FROM checks c
+        WHERE c.kind = q.kind AND c.area = q.area AND c.id = q.id AND c.verdict <> 'unchecked'
+        ORDER BY c.rowid DESC LIMIT 1) AS entities,
        (SELECT COUNT(*) FROM checks c
         WHERE c.kind = q.kind AND c.area = q.area AND c.id = q.id) AS attempts
 FROM quests q;
@@ -115,7 +125,7 @@ FROM quests q;
 COMBINED = """
 CREATE VIEW IF NOT EXISTS quest_verdict AS
 SELECT s.kind, s.area, s.id, s.name, s.npc, s.zone, s.x, s.z,
-       s.verdict AS client, COALESCE(m.verdict, 'not checked') AS server, s.dist,
+       s.verdict AS client, COALESCE(m.verdict, 'not checked') AS server, s.dist, s.entities,
        COALESCE(NULLIF(m.note, ''), s.why, '') AS why,
        CASE
            -- Standing on it and finding the NPC is the whole point; nothing outranks it.
@@ -136,8 +146,11 @@ LEFT JOIN npc_match m ON m.kind = s.kind AND m.area = s.area AND m.id = s.id;
 """
 
 # Terminal verdicts: nothing is learned by standing on the spot a second time. `absent` is
-# deliberately NOT one of them -- an NPC missing at a short settle and present at a longer one
-# is the single most common false miss this sweep produces.
+# deliberately NOT one of them. It used to be excluded because the settle was a guess and an
+# NPC missing at a short one turns up at a longer one; the sweep now waits for the entity
+# table to stop growing, so a fresh absent is much stronger than that. It stays retryable
+# anyway, because the ledger holds absent verdicts recorded under the old rule and no column
+# distinguishes them at a glance.
 SETTLED = ('found', 'marker', 'unnamed')
 
 
@@ -175,6 +188,19 @@ def migrate(db):
     return True
 
 
+def add_columns(db):
+    """Additive migrations, which are the only kind that need no rebuild.
+
+    `CREATE TABLE IF NOT EXISTS` in SCHEMA is silent about a table that exists with the wrong
+    shape, so a new column has to be asked for by name.
+    """
+    for table, column, decl in (('checks', 'entities', 'INTEGER'),):
+        have = [r[1] for r in db.execute('PRAGMA table_info(%s)' % table)]
+        if have and column not in have:
+            db.execute('ALTER TABLE %s ADD COLUMN %s %s' % (table, column, decl))
+            db.commit()
+
+
 def connect(path=DB):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     db = sqlite3.connect(path)
@@ -182,6 +208,7 @@ def connect(path=DB):
     if migrate(db):
         print('ledger migrated: every existing row is a quest')
     db.executescript(SCHEMA)
+    add_columns(db)
     try:
         db.executescript(COMBINED)
     except sqlite3.OperationalError:
@@ -250,6 +277,11 @@ def classify(verdict_col, npc, why):
         return 'found'
     if 'standing in' in why:
         return 'unchecked'          # the character never arrived; says nothing about the data
+    if 'yalms from the spot' in why:
+        # In the right zone and in the wrong place: `!pos` issued during a zone change is
+        # dropped silently, and the check then reads the entity table from the zone entrance.
+        # Seven rows were recorded as absent that way before the addon started saying so.
+        return 'unchecked'
     if npc.startswith('qm') or npc.startswith('_') or '???' in npc:
         return 'marker'
     if not npc:

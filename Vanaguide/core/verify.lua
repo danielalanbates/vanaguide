@@ -22,6 +22,10 @@ local V = {}
 
 local MAX_ENTITY = 2303
 
+-- How close counts as having arrived. The teleport is exact when it works at all, so this
+-- is a tolerance for float noise, not for walking.
+local ARRIVED = 3.0
+
 local function normalize(s)
     return (tostring(s or ''):lower():gsub('[^%a%d]', ''))
 end
@@ -44,13 +48,19 @@ end
 
 --- Every named entity currently loaded, with its distance from the player.
 --- `Type` 0 is a PC, 1 a monster, 2 an NPC; only NPCs and monsters are interesting here.
+---
+--- The player's own entity is skipped. It is always at distance zero, so leaving it in made
+--- every miss ever recorded say "nearest Test" -- a field that looked like evidence and
+--- carried none.
 function V.nearby(px, pz)
     local mm = AshitaCore:GetMemoryManager()
     local ents = mm:GetEntity()
+    local me = -1
+    pcall(function() me = mm:GetParty():GetMemberTargetIndex(0) end)
     local out = {}
     for i = 0, MAX_ENTITY do
         local ok, name = pcall(function() return ents:GetName(i) end)
-        if ok and name ~= nil and name ~= '' then
+        if i ~= me and ok and name ~= nil and name ~= '' then
             local x = ents:GetLocalPositionX(i)
             local z = ents:GetLocalPositionY(i)     -- Ashita's Y is the second horizontal axis
             if x ~= nil and (x ~= 0 or z ~= 0) then
@@ -82,7 +92,7 @@ function V.entry(kind, area, id)
         npc = q and q.npc or '', want_zone = q and q.zone or nil,
         want_x = q and q.x or nil, want_z = q and q.z or nil,
         zone = zone, x = px, z = pz,
-        ok = false, why = '', dist = nil, nearest = '',
+        ok = false, why = '', dist = nil, nearest = '', entities = nil,
     }
 
     if q == nil then r.why = 'no such ' .. (kind or 'quest') .. ' in the database'; return r end
@@ -100,6 +110,17 @@ function V.entry(kind, area, id)
         return r
     end
 
+    -- In the right zone and in the wrong place. A `!pos` issued while the character is still
+    -- zoning is dropped without a word, and the check that follows reads the entity table
+    -- from the zone entrance and calls the NPC absent. Seven rows in the ledger were written
+    -- that way -- all in Northern San d'Oria, up to 212 yalms off -- and every one of them
+    -- reads like a real miss. Say so instead: this is the harness failing, not evidence.
+    local off = U.dist(px, pz, q.x, q.z)
+    if off > ARRIVED then
+        r.why = ('standing %.1f yalms from the spot'):format(off)
+        return r
+    end
+
     -- Some quests are started at a "???" marker or a door rather than by talking to anybody.
     -- The database carries the server's internal name for those — `qm6 (H-10/Boat)`, `_0id`,
     -- `_iya` — and the client never calls them that, so matching by name is impossible. For
@@ -108,6 +129,7 @@ function V.entry(kind, area, id)
                                      or q.npc:find('%?%?%?') ~= nil)
     local want = normalize(q.npc)
     local list = V.nearby(px, pz)
+    r.entities = #list
     r.nearest = (#list > 0) and list[1].name or ''
     if want == '' or marker then
         -- Within ten yalms is the same "you are in the right place" the arrow uses.
@@ -147,6 +169,10 @@ function V.row(r)
         -- Fourteenth column, added after the first sweeps: rows written before this default
         -- to 'quest', which is what they were.
         r.kind or 'quest',
+        -- Fifteenth column. Written on every row, not only on misses: "the NPC was not here"
+        -- and "nothing at all was here yet" are different findings and the count is what
+        -- tells them apart. Rows written before this leave it blank.
+        r.entities == nil and '' or tostring(r.entities),
     }, ',')
 end
 

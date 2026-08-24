@@ -48,7 +48,19 @@ def main():
     # spinning external drive: a fresh zone needs about twenty seconds before its NPCs are all
     # in the table.
     ap.add_argument('--zone-wait', type=float, default=20.0)
-    ap.add_argument('--step-wait', type=float, default=6.0)
+    # There is no longer a fixed wait after a move inside a zone. `--step-wait` was six
+    # seconds and it was the single largest source of wrong answers in this project: a `!pos`
+    # inside a zone empties the client's entity table and it refills in one burst about
+    # seventeen seconds later (tools/settle_probe.py, data/settle_probe.csv), so every stop
+    # after the first in a city was read while the table was still empty. The sweep now waits
+    # for the world instead of guessing at it -- see settle() below.
+    ap.add_argument('--poll', type=float, default=4.0,
+                    help='seconds between asking again while the zone streams in')
+    ap.add_argument('--max-settle', type=float, default=60.0,
+                    help='give up waiting for a stop after this long')
+    ap.add_argument('--stable', type=int, default=3,
+                    help='how many identical entity counts in a row mean the zone has '
+                         'finished arriving')
     # Zone 178 (the Shrine of Ru'Avitau) was blamed for the first sweep's collapse and was
     # innocent: the character had died, and a KO'd character is refused every GM command with
     # "You cannot use that command while unconscious" -- so the last zone it reached, which
@@ -112,6 +124,62 @@ def main():
     print(f'{checkable} {args.kind}s can be checked, {len(todo)} left in this pass '
           f'(ledger run "{run}")', flush=True)
 
+    def ask(q):
+        """Ask the addon about one quest and read its answer back. None if it never came."""
+        before = os.path.getsize(csv) if os.path.exists(csv) else 0
+        send('/vg verify %s%s %d' % ('m ' if args.kind == 'mission' else '',
+                                     q['area'], q['id']))
+        consumed()
+        end = time.time() + 8
+        while time.time() < end:
+            if os.path.exists(csv) and os.path.getsize(csv) > before:
+                break
+            time.sleep(0.3)
+        else:
+            return None
+        line = open(csv, encoding='utf-8', errors='replace').read().strip().splitlines()[-1]
+        bits = next(csvlib.reader([line]))
+        bits += [''] * (15 - len(bits))
+        return line, bits[2] == 'ok', bits[12], (int(bits[14]) if bits[14].isdigit() else None)
+
+    def settle(q):
+        """Ask until the answer stops changing, rather than sleeping a guessed number.
+
+        Every settle time this project has used was picked by feel -- twenty seconds, then
+        thirty-two -- and every absent result carried the same unanswerable objection: maybe
+        the check simply asked too early. Measuring it (tools/settle_probe.py) showed the
+        objection was right and the guess was in the wrong place: the *zone* wait was ample
+        and the six-second wait after a move *inside* a zone was not, because a `!pos` drops
+        the entity table to nothing and it comes back all at once about seventeen seconds
+        later.
+
+        So stop guessing. Ask every few seconds; stop the moment the NPC appears, or once the
+        entity count has repeated itself -- the zone has finished arriving and the NPC is not
+        in it. That makes an absent verdict mean something it never meant before: not "it was
+        not there yet", but "the world had finished loading and it was not there".
+        """
+        deadline = time.time() + args.max_settle
+        stable, last, got = 0, None, None
+        while True:
+            got = ask(q)
+            if got is None:
+                return None
+            _, ok, why, ents = got
+            if ok or 'standing in' in why or 'yalms from the spot' in why:
+                return got
+            # Zero is the table being empty, which is never an answer -- it is the moment
+            # right after the teleport, before anything has streamed in.
+            if ents is not None and ents > 0 and ents == last:
+                stable += 1
+                if stable >= args.stable:
+                    return got
+            else:
+                stable = 0
+            last = ents
+            if time.time() >= deadline:
+                return got
+            time.sleep(args.poll)
+
     def record(row, q):
         """Fold one CSV line into the ledger as it arrives.
 
@@ -120,7 +188,7 @@ def main():
         """
         nonlocal seq
         bits = next(csvlib.reader([row]))
-        bits += [''] * (13 - len(bits))
+        bits += [''] * (15 - len(bits))
         def num(v):
             try:
                 return float(v)
@@ -129,12 +197,13 @@ def main():
         seq += 1
         with db:
             db.execute('INSERT OR REPLACE INTO checks '
-                       '(kind, area, id, run, seq, verdict, zone_seen, x, z, dist, why) '
-                       'VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+                       '(kind, area, id, run, seq, verdict, zone_seen, x, z, dist, why, '
+                       'entities) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
                        (args.kind, q['area'], q['id'], run, seq,
                         ledger.classify(bits[2], bits[4], bits[12]),
                         int(num(bits[8]) or 0) or None, num(bits[9]), num(bits[10]),
-                        num(bits[11]), bits[12]))
+                        num(bits[11]), bits[12],
+                        int(num(bits[14])) if num(bits[14]) is not None else None))
     current_zone = None
     misses = 0
 
@@ -190,8 +259,8 @@ def main():
         # before it starts doing it, is cheap.
         zone, seconds = None, 0.0
         for stop in stops:
-            seconds += (args.zone_wait * 2 if stop[0]['zone'] != zone
-                        else args.step_wait) + 2.0 * len(stop)
+            seconds += ((args.zone_wait * 2 if stop[0]['zone'] != zone else 0.0)
+                        + 20.0 + 2.0 * len(stop))     # 20s is the measured settle
             zone = stop[0]['zone']
         zones = len({s[0]['zone'] for s in stops})
         print(f'   {zones} zones, about {seconds / 60:.0f} minutes')
@@ -216,37 +285,33 @@ def main():
             if not rescue():
                 break
             continue
-        time.sleep(args.step_wait if q['zone'] == current_zone else args.zone_wait)
         current_zone = q['zone']
 
         silent = False
+        # Everything at one stop shares a coordinate, so only the first of them has to wait
+        # for the zone; the rest are asked straight away off the same settled table.
+        waited = False
         for q in stop:
             n += 1
-            before = os.path.getsize(csv) if os.path.exists(csv) else 0
-            send('/vg verify %s%s %d' % ('m ' if args.kind == 'mission' else '',
-                                          q['area'], q['id']))
-            consumed()
-            # Wait for the row rather than a fixed sleep: a zone still loading takes longer.
-            end = time.time() + 8
-            while time.time() < end:
-                if os.path.exists(csv) and os.path.getsize(csv) > before:
-                    break
-                time.sleep(0.3)
-            else:
+            got = ask(q) if waited else settle(q)
+            if got is None:
                 misses += 1
                 silent = True
                 print(f'   no result for {q["area"]} {q["id"]}', flush=True)
                 break
             misses = 0
-            last = open(csv, encoding='utf-8', errors='replace')\
-                .read().strip().splitlines()[-1]
+            waited = True
+            last, _, why, ents = got
             record(last, q)
-            # Did the character actually arrive? A row that says "standing in" means the
-            # teleport did not take, and every later check inherits the mistake -- 245 rows
-            # of it, the first time.
-            if 'standing in' in last:
+            # Did the character actually arrive? "standing in 178" is the wrong zone --
+            # the teleport did not take, and every later check inherits the mistake, 245 rows
+            # of it the first time. "standing 212.4 yalms from the spot" is the right zone
+            # and a `!pos` that was swallowed during a zone change; it used to be invisible
+            # and was recorded as seven perfectly ordinary-looking misses.
+            if 'standing in' in why or 'yalms from the spot' in why:
                 stuck += 1
                 current_zone = None
+                waited = False
                 break
             stuck = 0
 
