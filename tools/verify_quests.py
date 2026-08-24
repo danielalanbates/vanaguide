@@ -228,6 +228,7 @@ def main():
         """
         deadline = time.time() + args.max_arrive
         in_zone = (q['zone'] == current_zone)
+        last = None
         while time.time() < deadline:
             if not in_zone:
                 send('!zone %d' % q['zone'])
@@ -245,6 +246,7 @@ def main():
             if got is None:
                 return 'wedged'
             _, _ok, why, _ = got
+            last = got
             if 'standing in' in why:
                 in_zone = False         # the zone change has not landed yet; ask again
                 continue
@@ -252,6 +254,14 @@ def main():
                 in_zone = True          # right zone, the !pos was swallowed; just resend it
                 continue
             return got
+        # Out of time, and *how* it ran out matters. A character in the right zone that
+        # cannot be moved onto the coordinate is a fact about the coordinate -- Northern San
+        # d'Oria has spots the server will not place you at, and it puts you on the nearest
+        # floor instead. A character still in the wrong zone is not moving at all, which is
+        # the death signature. Rescuing costs a client restart, so only the second one earns
+        # it, and the first is worth recording rather than only logging.
+        if last is not None and 'yalms from the spot' in last[2]:
+            return ('unreachable', last)
         return None
 
     stuck, rescues = 0, 0
@@ -318,17 +328,27 @@ def main():
             if not rescue():
                 break
             continue
+        if isinstance(arrived, tuple) and arrived[0] == 'unreachable':
+            # In the right zone and the server will not put the character on the spot. Record
+            # it: an unreachable coordinate is worth knowing about, and leaving no row at all
+            # means the next sweep tries it again from scratch and learns nothing either.
+            for q in stop:
+                n += 1
+                record(arrived[1][0], q)
+            print(f'   could not get onto {q["area"]} {q["id"]} '
+                  f'({q["zone"]}, {q["x"]:.0f}, {q["z"]:.0f}) — {arrived[1][2]}', flush=True)
+            current_zone = q['zone']
+            stuck = 0
+            continue
         if arrived is None:
-            # Not the client failing and not the guide being wrong: the character could not
-            # be put on that coordinate at all. Say so, leave the row alone, carry on.
+            # Still in the wrong zone after seventy-five seconds of asking: nothing is moving,
+            # which is what a dead character looks like -- LandSandBoat refuses every GM
+            # command from one and says so only in the game's chat log.
             stuck += 1
             current_zone = None
             where = ('the zone itself' if q['x'] is None
                      else f'({q["zone"]}, {q["x"]:.0f}, {q["z"]:.0f})')
-            print(f'   could not get onto {q["area"]} {q["id"]} {where}', flush=True)
-            # Five in a row is the death signature: a KO'd character is refused every GM
-            # command, so nothing moves and nothing says why. Revive and carry on -- the
-            # ledger keeps everything learned up to here.
+            print(f'   never reached {q["area"]} {q["id"]} {where}', flush=True)
             if stuck >= 5:
                 if not rescue():
                     print('!! wedged and out of rescues — stopping', flush=True)

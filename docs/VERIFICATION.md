@@ -48,11 +48,18 @@ the plugin block.
 
 ## Verified without the game
 
-`luajit tools/test_offline.lua` — 1,224 assertions covering the parser, the completion
+`luajit tools/test_offline.lua` — 1,471 assertions covering the parser, the completion
 conditions, the `0x056` bit maths (including the two packet shapes above), the progress
 cursor, the router, the generated databases and the arrow's rotation.
 
 ## Still not verified
+
+Five of the six below were open for the same reason and it was not the interesting one: every
+`/vg` command answers into the game's chat log, and a script driving the client through
+`cmd.txt` cannot read chat. `/vg tee <file>` copies printed lines to a file, `/vg graph` reads
+the learned zone graph back, and `tools/capability_check.py` walks the list. The sixth needs
+somebody to walk.
+
 
 1. **Quest completion flags.** Missions are proven end to end; the `Q` tag's page ids
    (`0x0090` and friends) were parsed from a live server but the character had zero completed

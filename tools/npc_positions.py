@@ -313,6 +313,10 @@ def main():
         db.execute('DROP VIEW IF EXISTS quest_verdict')
         db.commit()
         print('npc_match rebuilt for missions')
+    # Before the schema, not after: `CREATE TABLE IF NOT EXISTS` is silent about a table that
+    # already exists with an older shape, and the CREATE INDEX lines that follow are not --
+    # they fail on a column the table has not got. The columns have to be asked for by name.
+    ledger.add_columns(db)
     db.executescript(SCHEMA)
     ledger.connect(args.db)         # recreate the combined view against the new table
     if not args.report:

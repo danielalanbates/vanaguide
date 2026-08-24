@@ -199,7 +199,9 @@ def add_columns(db):
     `CREATE TABLE IF NOT EXISTS` in SCHEMA is silent about a table that exists with the wrong
     shape, so a new column has to be asked for by name.
     """
-    for table, column, decl in (('checks', 'entities', 'INTEGER'),):
+    for table, column, decl in (('checks', 'entities', 'INTEGER'),
+                                ('npcs', 'aname', "TEXT NOT NULL DEFAULT ''"),
+                                ('npcs', 'iname', "TEXT NOT NULL DEFAULT ''")):
         have = [r[1] for r in db.execute('PRAGMA table_info(%s)' % table)]
         if have and column not in have:
             db.execute('ALTER TABLE %s ADD COLUMN %s %s' % (table, column, decl))
