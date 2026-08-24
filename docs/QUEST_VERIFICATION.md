@@ -268,14 +268,44 @@ that overlap, so `kind` travels with every row from the addon to the ledger.
 
 ## What is still owed a check
 
-* **The 103 missions with no coordinate.** 22% of the mission database, and the largest
-  untested block in the project. Some are Mog House moogles, which have no world coordinate
-  and never will; some are cutscenes triggered by zoning, where the zone alone is a checkable
-  fact the generator is not currently recovering. Nobody has separated the two.
-* **Absent verdicts recorded before 2026-08-24.** Every one of them was taken at a fixed
-  settle, and the settle was wrong for any stop that did not change zone. They are being
-  re-swept; until that finishes, treat an old absent as unanswered rather than as a fact.
-* **The seven mission NPCs that are not NPCs.** `Lion Springs Door`, `Batallia Downs`,
-  `Marble Bridge Eatery` — place names sitting in a field that is supposed to hold a person.
-  No NPC of those names exists in `npc_list`, which is the generator being wrong rather than
-  the server being incomplete.
+### Missions with no coordinate: 103, and 29 of them were checkable all along
+
+The mission database is 459 rows. 356 carry a coordinate. Of the 103 that do not, the
+categories are these — read out of the LandSandBoat scripts one by one, not estimated:
+
+| | how many | can it ever be checked |
+| --- | ---: | --- |
+| **LandSandBoat stub** — the whole script is `-- TODO: Add zones and interactions`, and nothing anywhere else implements it (TVR 46, ASA 9, ACP 1) | 56 | No. Not a gap in the guide: a gap in the server. |
+| **Zone-only cutscene** — `onZoneIn` in a `[xi.zone.X]` section; the zone *is* the location | 22 | **Yes, and it now is.** These were filed as "nothing to check" by the ledger view and skipped by every sweep. |
+| **Zone-only plus a trigger area** — the same, and `Zone.lua` registers a cuboid or cylinder with an exact centre | 7 | Yes, as a zone today; as a coordinate if `registerCuboidTriggerArea` is parsed. |
+| **Implemented outside `scripts/missions/`** — the mission file is a stub and a zone or NPC script drives it | 10 | Probably. See the trap below. |
+| **Table-driven zone list** — `local rovEntryZones = {...}` and an `ipairs` loop, which the section-key regex cannot see (`rov` 0 and 28) | 2 | Only as ten zones, and the schema holds one. |
+| **Mog House moogle** — the section loops over all 21 Mog House zones and the trigger is the moogle in your own | 2 | No. There is no world coordinate, by design. |
+| **Fin / Epilogue sentinel** — `mission.reward = {}`, no `nextMission`, empty body: a completion state, not a step | 3 | No. |
+| **Deliberately blank** — the script says so: "no existing capture in which the player lands on this mission" | 1 | No. |
+
+The 29 zone-only rows are the change worth having made: `quest_state` treated "no coordinate"
+and "no location at all" as one verdict, so the sweep never offered them, even though
+`core/verify.lua` had always known how to answer them. They are checked now, and they get
+their own verdict rather than being called *verified* — standing in a zone is a real fact and
+a much weaker one than finding a named NPC on a coordinate.
+
+**The trap in the remaining ten.** The obvious rule — index every `getCurrentMission(...) ==
+xi.mission.id.<area>.<CONST>` outside `scripts/missions/` and take that file's location — is
+wrong in a way that produces confident answers. `addMission(...)` marks where the *previous*
+mission ended, not where this one happens. `acp/4` matches two files and the tie-break
+that prefers the one with a `!pos` header picks the wrong zone. 40% of `scripts/zones/*/npcs/`
+have no `!pos` header at all, so a rule that assumes one has no fallback. Whoever does this
+should check each of the ten by hand; there are only ten.
+
+### Everything else
+
+* **`Sacrifice` was the only data error and the generator now fixes it.** The mission's door
+  is `_521` in zone 182; the guide said 89. It was reported for weeks as "the server puts the
+  NPC somewhere the guide does not", which was exactly right.
+* **The five prerequisites that name a quest this server has no script for** (`tools/ledger.py
+  check`). Nothing to stand on; the guide should say the unlock is unavailable here rather
+  than pointing at a quest that cannot be described.
+* **`data/settle_probe.csv` is five spots.** The seventeen-second figure is measured on this
+  Mac with the client on an external drive, in three zones. It is the right order of magnitude
+  and it is not a constant of the game.
