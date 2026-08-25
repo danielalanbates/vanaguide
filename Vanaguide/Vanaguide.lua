@@ -62,7 +62,11 @@ local Arrow  = require('ui.arrow');
 -- Centred horizontally and low on the screen: Daniel asked for it directly under the macro
 -- bar rather than up in the middle of the view, where it covered what he was walking into.
 -- Measured from a real 2560x1600 frame, not guessed -- see docs/ARROW.md.
-local ARROW_X, ARROW_Y = 0.5, 0.86
+-- The arrow lives at the top, under the game's command bar. It used to sit at 0.86 -- down
+-- among the chat log, the party list and the target bar, competing with all of them for the
+-- one glance it exists to catch. Daniel asked for it moved on 2026-08-25.
+local ARROW_X, ARROW_Y = 0.5, 0.12
+local ARROW_Y_OLD = 0.86        -- the position being migrated away from; see apply_settings
 local ARROW_SCALE = 0.6
 local Window = require('ui.window');
 local Line   = require('ui.line');
@@ -125,6 +129,12 @@ local function apply_settings(s)
     graph.load_learned(vg.settings.learned);
     Arrow.calibration = vg.settings.arrow.calibration or 1;
     Arrow.offset = vg.settings.arrow.offset or 0;
+    -- A saved position wins over the default, which would have left every existing install
+    -- sitting at the old spot for ever. Anyone still on the old default is moved once; a
+    -- position somebody actually chose is left alone, because it will not be exactly 0.86.
+    if (vg.settings.arrow.y == ARROW_Y_OLD) then
+        vg.settings.arrow.y = ARROW_Y;
+    end
     Arrow.move(vg.settings.arrow.x or ARROW_X, vg.settings.arrow.y or ARROW_Y);
     Arrow.scale = vg.settings.arrow.scale or ARROW_SCALE;
     if (vg.settings.line == nil) then vg.settings.line = T{ visible = true, style = 'both', width = 4 }; end
@@ -181,6 +191,13 @@ end);
 -- the ids the server sent when it opened the event, so they are kept here.
 --   0x032  UniqueNo(0x04) ActIndex(0x08) EventNum(0x0A)  -- a plain event
 --   0x034  same three fields in the same places          -- an event with numeric parameters
+-- Declared here, above the packet handler, and not beside the chat tap further down.
+-- Lua closes over the local that exists at the point the closure is written: with the table
+-- declared later, `chatlog` inside the packet handler resolved to the *global* of that name,
+-- which is nil, and the addon unloaded itself on the first packet with
+-- "attempt to index global 'chatlog' (a nil value)".
+local chatlog = { path = nil, all_in = false };
+
 local event = { open = false, unique = 0, index = 0, num = 0, auto = false, pending = false };
 
 local function u16(data, off) return data:byte(off + 1) + data:byte(off + 2) * 256; end
@@ -214,7 +231,16 @@ ashita.events.register('packet_in', 'vg_packet_in', function (e)
         event.open   = true;
         event.unique = u32(e.data, 0x04);
         event.index  = u16(e.data, 0x08);
-        event.num    = u16(e.data, 0x0A);
+        -- 0x0C, not 0x0A. LandSandBoat's struct lists EventNum immediately after ActIndex, but
+        -- on the wire 0x0A carries something else and the event id is two bytes further on.
+        -- Measured 2026-08-25 from a real packet, talking to Ambrotien:
+        --
+        --   32 0A DD 00 | 62 60 0E 01 | 62 00 | E6 00 | E9 07 00 00 | E6 00 00 00
+        --                  UniqueNo     ActIndex  230    0x07E9=2025
+        --
+        -- and the server had already said which of those two it wanted, by rejecting the
+        -- other one: "Invalid GP_CLI_COMMAND_EVENTEND packet: Event ID mismatch 2025 != 230".
+        event.num    = u16(e.data, 0x0C);
         -- Unattended mode. The client latches on an event and waits for Enter, and on this
         -- build no synthetic key reaches it -- Ashita's WNDPROC hook never sees a posted
         -- WM_KEYDOWN at all (`/winecursor` reports "real key events 0" straight after one).
@@ -262,7 +288,6 @@ end
 --
 -- The tap is off unless asked for (`/vg chatlog on`), appends, and strips FFXI's colour and
 -- auto-translate bytes so the file is readable text rather than a field of question marks.
-local chatlog = { path = nil, all_in = false };
 
 local function chat_strip(text)
     if (text == nil) then return ''; end
@@ -814,7 +839,7 @@ ashita.events.register('command', 'vg_command', function (e)
             local px = tonumber(args[4]);
             local py = tonumber(args[5]);
             if (px == nil or py == nil) then
-                U.print('/vg arrow move <across%> <down%>   e.g. /vg arrow move 50 28');
+                U.print('/vg arrow move <across%> <down%>   e.g. /vg arrow move 50 12');
                 return;
             end
             local rx, ry = Arrow.move(px / 100, py / 100);

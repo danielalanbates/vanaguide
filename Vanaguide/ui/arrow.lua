@@ -26,6 +26,16 @@ local A = {
     screen = { w = 1280, h = 720 },
     calibration = 1,     -- see docs/ARROW.md: +1 or -1, whichever makes it point right
     offset = 0,          -- radians added to the bearing, for the same reason
+    scale = 0.6,         -- 1.0 was the original size; /vg arrow size <n> changes it
+
+    -- Where the arrow sits, as a fraction of the screen.
+    --
+    -- It used to sit low, which put it in the busiest part of the screen: the chat log, the
+    -- party list and the target bar all live down there, and the one thing you are meant to
+    -- glance at was competing with all of them. Daniel asked for it at the top, under the
+    -- game's command bar (2026-08-25), which is empty screen on every layout.
+    rel_x = 0.5,
+    rel_y = 0.12,
 }
 
 -- ImGui packs colours as 0xAABBGGRR -- alpha, blue, green, red -- not ARGB. Written the
@@ -55,7 +65,7 @@ function A.draw(bearing, distance, label, sub)
 
     local ok = pcall(function()
         local dl = imgui.GetForegroundDrawList()
-        local cx, cy = A.pos_x or (A.screen.w / 2), A.pos_y or (A.screen.h * 0.28)
+        local cx, cy = A.pos_x or (A.screen.w / 2), A.pos_y or (A.screen.h * A.rel_y)
 
         -- Screen angle.  Zero bearing draws straight up.  The screen's y grows *downward*,
         -- so a positive (leftward) bearing has to become a negative screen rotation or the
@@ -63,24 +73,35 @@ function A.draw(bearing, distance, label, sub)
         local a = -(bearing or 0) * A.calibration + A.offset
         local colour = colour_for(distance)
 
-        local tipx, tipy = rotate(cx, cy, 0, -34, a)
-        local lx, ly     = rotate(cx, cy, -20, 16, a)
-        local rx, ry     = rotate(cx, cy, 20, 16, a)
-        local bx, by     = rotate(cx, cy, 0, 4, a)
+        -- The arrow's shape is written at its original size and then scaled, so `A.scale`
+        -- is the only number to change.  It was hard-coded pixels until 2026-08-25, which
+        -- meant "make it smaller" had no answer and a 2560-wide window got the same arrow
+        -- as a 640-wide one.
+        local k = A.scale or 1.0
+        local tipx, tipy = rotate(cx, cy, 0, -34 * k, a)
+        local lx, ly     = rotate(cx, cy, -20 * k, 16 * k, a)
+        local rx, ry     = rotate(cx, cy, 20 * k, 16 * k, a)
+        local bx, by     = rotate(cx, cy, 0, 4 * k, a)
 
-        dl:AddLine({ tipx, tipy }, { lx, ly }, COL_SHELL, 6)
-        dl:AddLine({ tipx, tipy }, { rx, ry }, COL_SHELL, 6)
-        dl:AddLine({ lx, ly }, { bx, by }, COL_SHELL, 6)
-        dl:AddLine({ rx, ry }, { bx, by }, COL_SHELL, 6)
+        -- Keep the outline readable when the arrow is small: a 6px shell around a 3px line
+        -- swallows the line entirely once k drops much below a half.
+        local shell_w = math.max(2.5, 6 * k)
+        local line_w  = math.max(1.5, 3 * k)
+        dl:AddLine({ tipx, tipy }, { lx, ly }, COL_SHELL, shell_w)
+        dl:AddLine({ tipx, tipy }, { rx, ry }, COL_SHELL, shell_w)
+        dl:AddLine({ lx, ly }, { bx, by }, COL_SHELL, shell_w)
+        dl:AddLine({ rx, ry }, { bx, by }, COL_SHELL, shell_w)
 
-        dl:AddLine({ tipx, tipy }, { lx, ly }, colour, 3)
-        dl:AddLine({ tipx, tipy }, { rx, ry }, colour, 3)
-        dl:AddLine({ lx, ly }, { bx, by }, colour, 3)
-        dl:AddLine({ rx, ry }, { bx, by }, colour, 3)
+        dl:AddLine({ tipx, tipy }, { lx, ly }, colour, line_w)
+        dl:AddLine({ tipx, tipy }, { rx, ry }, colour, line_w)
+        dl:AddLine({ lx, ly }, { bx, by }, colour, line_w)
+        dl:AddLine({ rx, ry }, { bx, by }, colour, line_w)
 
         if dl.AddText ~= nil then
-            if label ~= nil then dl:AddText({ cx - 60, cy + 26 }, colour, label) end
-            if sub ~= nil then dl:AddText({ cx - 60, cy + 42 }, 0xFFCCCCCC, sub) end
+            -- The text rides under the arrow, so it follows the arrow's size down.
+            local ty = cy + 22 * k + 6
+            if label ~= nil then dl:AddText({ cx - 60, ty }, colour, label) end
+            if sub ~= nil then dl:AddText({ cx - 60, ty + 16 }, 0xFFCCCCCC, sub) end
         end
     end)
     return ok
@@ -95,7 +116,7 @@ function A.set_viewport(w, h)
     if w ~= nil and w > 0 then A.screen.w = w end
     if h ~= nil and h > 0 then A.screen.h = h end
     A.pos_x = (A.rel_x or 0.5) * A.screen.w
-    A.pos_y = (A.rel_y or 0.28) * A.screen.h
+    A.pos_y = (A.rel_y or 0.12) * A.screen.h
 end
 
 --- Move the arrow. `x` and `y` are fractions of the screen (0.5, 0.28 is the default), so a
@@ -104,7 +125,7 @@ function A.move(x, y)
     if x ~= nil then A.rel_x = math.max(0.02, math.min(0.98, x)) end
     if y ~= nil then A.rel_y = math.max(0.02, math.min(0.98, y)) end
     A.set_viewport(A.screen.w, A.screen.h)
-    return A.rel_x or 0.5, A.rel_y or 0.28
+    return A.rel_x or 0.5, A.rel_y or 0.12
 end
 
 return A
