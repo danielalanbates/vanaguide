@@ -15,3 +15,9 @@ Vanaguide/settings/
 Vanaguide/config/
 __pycache__/
 *.pyc
+
+# Navigation grids, built by tools/gen_navgrid.py from LandSandBoat's navmeshes.
+# They are derived from Square Enix's map geometry by way of a GPL-3.0 project, so they are
+# generated on the machine that has them and never committed here. See docs/NAVMESH.md.
+Vanaguide/data/nav/
+*.vgnav

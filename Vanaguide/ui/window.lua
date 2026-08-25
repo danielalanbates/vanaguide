@@ -79,6 +79,12 @@ local function text_colored(colour, s)
     end
 end
 
+--- A destination the player asked for by name, set by `/vg goto`.  It outranks the guide's
+--- step everywhere else, so the window has to say so too: seen in-game, the arrow and the
+--- line pointed at Valkurm Dunes while this window still read "Zone into West Ronfaure",
+--- which is two different answers to one question.
+W.destination = nil
+
 --- One frame.  `w` is a world snapshot; `on_pick` is called with a guide name.
 function W.draw(w, on_pick)
     local imgui = imgui_module()
@@ -97,6 +103,14 @@ function W.draw(w, on_pick)
         imgui.SetNextWindowSize({ fw, fh }, ImGuiCond_FirstUseEver)
     end
     if imgui.Begin('Vanaguide', W.open) then
+        if W.destination ~= nil then
+            local rec = R.recommend(W.destination, w)
+            text_colored({ 0.4, 1.0, 0.7, 1.0 }, 'Going to ' .. U.zone_name(W.destination.zone))
+            text_colored({ 0.55, 0.8, 1.0, 1.0 }, rec.text or '')
+            local summary = R.summary(rec)
+            if summary ~= nil then text_colored({ 0.75, 0.75, 0.75, 1.0 }, summary) end
+            imgui.Separator()
+        end
         local guide = P.guide
         if guide == nil then
             imgui.Text('No guide loaded.')
@@ -132,8 +146,19 @@ function W.draw(w, on_pick)
 
                 local rec = R.recommend(step, w)
                 text_colored({ 0.55, 0.8, 1.0, 1.0 }, rec.text or '')
-                if rec.mode == 'travel' and rec.hops ~= nil then
-                    imgui.Text(('%d zones to %s'):format(rec.hops, U.zone_name(rec.destination)))
+                if rec.mode == 'travel' then
+                    local summary = R.summary(rec)
+                    if summary ~= nil then
+                        text_colored({ 0.75, 0.75, 0.75, 1.0 }, summary)
+                    end
+                    -- The zones on the way, on one line. Not on a narrow window: it is the
+                    -- least important line here and the buttons have to stay above the fold.
+                    if not narrow then
+                        local chain = R.chain(rec.legs, 3)
+                        if chain ~= nil then
+                            text_colored({ 0.55, 0.55, 0.6, 1.0 }, chain)
+                        end
+                    end
                 end
 
                 if imgui.Button('Done') then P.check() end

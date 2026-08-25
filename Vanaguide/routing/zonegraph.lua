@@ -9,13 +9,17 @@
 -- Copyright (c) 2026 Bates LLC.  All rights reserved.
 
 local travel = require('data.travel')
+local points = require('routing.zonepoints')
 -- The server's own zone lines, generated from sql/zonelines.sql. The hand-written seed in
 -- data/travel.lua covers the base world and was never meant to be complete; this is, for
 -- every zone LandSandBoat will walk a player through. Both are loaded: a server with custom
 -- zones keeps whatever travel.lua says, and learned edges still win over both.
 local ok_lines, zonelines = pcall(require, 'data.zonelines')
 
-local Z = { adj = {}, learned = {} }
+-- `version` ticks every time the graph changes shape.  routing/router.lua caches a
+-- computed route -- Dijkstra twice a frame for the window and the arrow was the one
+-- measurable cost in the present hook -- and a learned edge has to throw that cache away.
+local Z = { adj = {}, learned = {}, version = 0 }
 
 local function link(a, edge)
     Z.adj[a] = Z.adj[a] or {}
@@ -23,17 +27,32 @@ local function link(a, edge)
 end
 
 local function build()
+    Z.version = Z.version + 1
     Z.adj = {}
     local seen = {}
-    local function walk_pair(a, b)
+    local function walk_pair(a, b, cost, unverified)
         local key = (a < b) and (a .. ':' .. b) or (b .. ':' .. a)
         if seen[key] then return end
         seen[key] = true
-        link(a, { to = b, cost = travel.WALK_COST, kind = 'walk' })
-        link(b, { to = a, cost = travel.WALK_COST, kind = 'walk' })
+        cost = cost or travel.WALK_COST
+        link(a, { to = b, cost = cost, kind = 'walk', unverified = unverified })
+        link(b, { to = a, cost = cost, kind = 'walk', unverified = unverified })
     end
+    -- The hand-written seed goes in first, and any pair the server's own table contradicts
+    -- goes in expensive.  Not removed: a private server can have a doorway LandSandBoat does
+    -- not, and a route that exists is worth more than a route that is pretty.  But it loses
+    -- every time there is a way round that the router can actually point at -- which is the
+    -- whole difference between "Zone into Port San d'Oria" from a ward that does not touch
+    -- it, and walking you through Northern San d'Oria where both doorways have coordinates.
+    Z.suspect = {}
     for _, pair in ipairs(travel.walk) do
-        walk_pair(pair[1], pair[2])
+        local a, b = pair[1], pair[2]
+        if points.contradicted(a, b) then
+            Z.suspect[#Z.suspect + 1] = { a, b }
+            walk_pair(a, b, travel.WALK_COST * 3, true)
+        else
+            walk_pair(a, b)
+        end
     end
     if ok_lines and zonelines and zonelines.walk then
         for _, pair in ipairs(zonelines.walk) do

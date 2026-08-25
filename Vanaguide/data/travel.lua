@@ -25,6 +25,16 @@ local T = {}
 
 T.WALK_COST = 90
 
+-- KNOWN WRONG, and deliberately still here.  Twenty-five of the pairs below are contradicted
+-- by sql/zonelines.sql -- both zones are in the server's table and neither lists the other --
+-- and spot-checking says the server is right and this file's author remembered the map wrong:
+-- King Ranperre's Tomb opens off East Ronfaure and Jugner Forest, not West Ronfaure; Bastok
+-- Markets meets South Gustaberg, not North; Kazham's gate is on Yuhtunga Jungle.  They are not
+-- deleted because a private server can legitimately have a doorway LandSandBoat does not, and
+-- because a graph that is merely wrong beats a graph that is disconnected.  routing/zonegraph
+-- gives every contradicted pair three times the cost, so the route with real coordinates wins
+-- wherever there is one; `/vg graph suspect` lists them.
+--
 -- Pairs are undirected unless a third value says otherwise.
 T.walk = {
     -- San d'Oria
