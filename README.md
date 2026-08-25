@@ -123,6 +123,7 @@ tools/settle_probe.py --game …         # how long a zone really takes to load
 tools/capability_check.py --game …     # the things only a live client can answer
 tools/ledger.py status                 # where it stands
 tools/gen_navgrid.py <lsb checkout>    # navigation grids, if you want paths round walls
+tools/nav_preview.py <grid.vgnav>      # look at one, and count how many pieces it is in
 ```
 
 **501 of 505 quests and 357 of 459 missions are confirmed correct**, and every entry that

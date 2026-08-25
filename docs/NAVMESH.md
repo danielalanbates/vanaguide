@@ -61,6 +61,21 @@ Two things it learned the hard way, both of which produced confident nonsense fi
   invents a height. Southern San d'Oria came out spanning 285 yalms vertically, in a city
   whose navmesh is 43 yalms tall. Clamping to the polygon's own vertex range fixes it.
 
+## Looking at one
+
+```sh
+tools/nav_preview.py Vanaguide/data/nav/230.vgnav -o /tmp/sandoria.png     --at -113.4,-57.4 --at 113.5,-57.4
+```
+
+A PNG of the walkable cells shaded by height — enough to recognise a city you have walked
+through — and, more useful, a count of **connected components under the addon's own movement
+rule**, corner-cutting ban included. `--at x,z` marks a coordinate and says which component it
+landed in; two points in different components mean no route can exist between them, whatever
+the picture looks like.
+
+That number is what caught the kerb bug. The statistics all looked healthy — 8,345 walkable
+cells, the right bounding box, both gates marked walkable — and the grid was 88 pieces.
+
 ## Two simplifications, said out loud
 
 **One floor per cell.** A cell holds one height, so a zone stacked on itself — a tower, a
