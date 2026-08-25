@@ -45,6 +45,42 @@ CHARID="${VG_CHARID:-1}"
 # ROM/119/50.dat -- is inside the horizonoverrides overlay.
 PIVOT="$PREFIX/drive_c/HorizonXI/config/pivot"
 
+# The shared install has ONE XIPivot overlay list and ONE Ashita pointer file, and both are
+# read at client start-up. So swapping either while somebody else's client is live is fine --
+# but swapping it and then having them LAUNCH is not: they get whatever we left behind.
+#
+# Daniel caught exactly that on 2026-08-25: he relaunched HorizonXI while this script had the
+# overlays swapped to stock, and his game came up wearing the generic LandSandBoat title logo
+# instead of HORIZON XI. Refusing to swap while another world's client is running does not fix
+# that case on its own, so `stop` puts things back immediately rather than at some later point.
+another_world_running() {
+  local pids; pids=$(pgrep -f 'horizon-loader\.exe' 2>/dev/null || true)
+  local pid
+  for pid in ${=pids}; do
+    ps -o args= -p "$pid" 2>/dev/null | grep -q -- "--server ${LOCAL_HOST}" || return 0
+  done
+  return 1
+}
+
+# custom.pointers.ini repairs signatures Ashita cannot resolve on this client build, which is
+# what makes packet injection work. It is installed only while the local world is running.
+#
+# It is deliberately NOT left in place for HorizonXI. Ashita reads it per install, not per boot
+# profile, so leaving it there changes how every addon behaves on a live server -- addons that
+# had been silently unable to send packets suddenly could. That is a change to Daniel's live
+# account that he did not ask for, made by a test harness, and it is not this script's call.
+POINTERS="$PREFIX/drive_c/HorizonXI/config/ashita/custom.pointers.ini"
+POINTERS_SRC="${VG_POINTERS:-$HOME/Library/Mobile Documents/com~apple~CloudDocs/Code/HorizonXI-on-Mac/patches/ashita/custom.pointers.ini}"
+
+use_pointers() {
+  local which="$1"     # on | off
+  if [[ "$which" == on ]]; then
+    [[ -f "$POINTERS_SRC" ]] && cp "$POINTERS_SRC" "$POINTERS" && print -r -- "==> signature patch: on"
+  else
+    rm -f "$POINTERS" && print -r -- "==> signature patch: off"
+  fi
+}
+
 use_pivot() {
   local which="$1"     # stock | horizon
   [[ -f "$PIVOT/pivot.ini.$which" ]] || { print -r -- "no pivot.ini.$which"; return 0; }
@@ -53,7 +89,12 @@ use_pivot() {
 }
 
 start() {
-  use_pivot stock
+  if another_world_running; then
+    print -r -- "==> another world's client is running; leaving its branding and pointers alone"
+  else
+    use_pivot stock
+    use_pointers on
+  fi
   cd "$GAME"
   env -i HOME="$HOME" USER="$USER" PATH=/usr/bin:/bin:/usr/sbin:/sbin SHELL=/bin/zsh \
     WINEPREFIX="$PREFIX" \
@@ -100,6 +141,7 @@ stop() {
     fi
   done
   (( killed > 0 )) && sleep 3
+  use_pointers off
   # Leave the install as HorizonXI expects to find it: this is a shared client.
   use_pivot horizon
 }
