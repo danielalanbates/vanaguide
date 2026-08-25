@@ -137,6 +137,7 @@ local function apply_settings(s)
     end
     Arrow.move(vg.settings.arrow.x or ARROW_X, vg.settings.arrow.y or ARROW_Y);
     Arrow.scale = vg.settings.arrow.scale or ARROW_SCALE;
+    Arrow.locked = vg.settings.arrow.locked ~= false;
     if (vg.settings.line == nil) then vg.settings.line = T{ visible = true, style = 'both', width = 4 }; end
     Line.enabled = vg.settings.line.visible ~= false;
     Line.style   = vg.settings.line.style or 'both';
@@ -823,6 +824,28 @@ ashita.events.register('command', 'vg_command', function (e)
 
     if (sub == 'arrow') then
         local what = (#args > 2) and args[3]:lower() or '';
+
+        -- `/vg arrow unlock`, drag it with the mouse, `/vg arrow lock` to fix it there.
+        --
+        -- HXUI's pattern (addons/HXUI/expbar.lua): the element is an ImGui window and locking
+        -- only adds ImGuiWindowFlags_NoMove. Dragging then runs on ImGui's io, which is the
+        -- one mouse path that works under wine on this build -- the WNDPROC 'mouse' event the
+        -- primitives-based panels use is dead here, which is exactly why HXUI's bars can be
+        -- dragged and `timers`/`tparty` cannot. ImGui writes the position into
+        -- config/imgui.ini by itself, so nothing about it is stored on this side.
+        if (what == 'lock' or what == 'unlock') then
+            Arrow.locked = (what == 'lock');
+            vg.settings.arrow.locked = Arrow.locked;
+            settings.save();
+            U.print(Arrow.locked and 'arrow locked'
+                    or 'arrow unlocked -- drag it with the mouse, then /vg arrow lock');
+            return;
+        end
+
+        if (what == 'why' and Arrow.last_error ~= nil) then
+            U.print('arrow draw error: ' .. Arrow.last_error);
+            return;
+        end
         if (what == 'flip') then
             Arrow.calibration = -Arrow.calibration;
             vg.settings.arrow.calibration = Arrow.calibration;
