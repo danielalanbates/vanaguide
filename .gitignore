@@ -8,3 +8,7 @@ settings/
 # Ashita writes per-character settings next to the addon; those hold character names.
 Vanaguide/settings/
 Vanaguide/config/
+# Navigation grids are built from LandSandBoat's navmeshes (GPL-3.0, derived from Square
+# Enix map geometry). tools/gen_navgrid.py ships; its output must not. See docs/NAVMESH.md.
+Vanaguide/data/nav/
+*.vgnav
