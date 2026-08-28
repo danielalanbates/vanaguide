@@ -2,12 +2,19 @@
 
 For whoever picks it up — human or AI. Ordered by value, with what is already in place.
 
-## 1. Verify it in the game (blocks everything else)
+## 1. Verify it in the game -- DONE 2026-08-28, keep it that way
 
-[VERIFICATION.md](VERIFICATION.md) has the checklist. Until somebody runs it, every item
-below is building on an untested foundation. The likeliest failures, in order: Ashita's
-`require` path not finding `core.util` (fix: `package.path` line at the top of
-`Vanaguide.lua`), the arrow being mirrored (fix: `/vg arrow flip`), a wrong `0x056` page id.
+`tools/guided_run.sh <guide> <steps>` drives a character through a guide on the local
+LandSandBoat world and writes `results/guided-<date>/RESULTS.md` with a screenshot per
+phase. Read [DRIVING_THE_CLIENT.md](DRIVING_THE_CLIENT.md) first: three client facts that
+cost days are written there (injected packets wait for a client-originated one; the release
+needs the event id; 0x034 is not 0x032). Run it after any change to `Vanaguide.lua`,
+`core/story.lua` or `core/progress.lua`. Never point it at a hosted server.
+
+What it proves: the arrow and distance point at the step's NPC, the talk opens the event,
+the narrator receives the line, the quest goes ACCEPTED on the server, the step ticks. What
+it does not prove: that a player could finish the quest (it uses `!completequest`), or that
+walking there works (it teleports).
 
 ## 2. A shared travel graph
 
