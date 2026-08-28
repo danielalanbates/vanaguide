@@ -200,7 +200,7 @@ end);
 local chatlog = { path = nil, all_in = false };
 
 local event = { open = false, unique = 0, index = 0, num = 0, auto = false, pending = false,
-                release = 2, release_pending = false };
+                release = 2, release_pending = false, server = false };
 
 local function u16(data, off) return data:byte(off + 1) + data:byte(off + 2) * 256; end
 local function u32(data, off)
@@ -827,11 +827,23 @@ ashita.events.register('command', 'vg_command', function (e)
 
     -- `/vg release [mode]` injects the client-side release on its own; `/vg release auto <mode|off>`
     -- sets which one `/vg advance` sends after the 0x05B (default 2 = CancelEvent).
+    -- `/vg send <id> <hex bytes...>` hands a raw outgoing packet to Ashita. For experiments
+    -- only: the header's size/sequence are whatever you typed, so type the whole packet.
+    if (sub == 'send') then
+        local id = tonumber(args[3] or '');
+        if (id == nil) then U.print('send: /vg send <id> <hex bytes...>'); return; end
+        local pkt = {};
+        for i = 4, #args do pkt[#pkt+1] = tonumber(args[i], 16) or 0; end
+        AshitaCore:GetPacketManager():AddOutgoingPacket(id, pkt);
+        U.print(('send: 0x%03X, %d bytes'):format(id, #pkt));
+        return;
+    end
+
     if (sub == 'release') then
         local a = (args[3] or ''):lower();
         if (a == 'auto') then
             local v = (args[4] or ''):lower();
-            event.release = (v == 'off') and nil or (tonumber(v) or 2);
+            if (v == 'off') then event.release = nil; else event.release = tonumber(v) or 2; end
             U.print('release after advance: ' .. tostring(event.release));
             return;
         end
@@ -842,8 +854,32 @@ ashita.events.register('command', 'vg_command', function (e)
     if (sub == 'advance' or sub == 'pick') then
         local mode   = (sub == 'pick') and 1 or 0;
         local option = tonumber(args[3] or '0') or 0;
+        if (event.server and event.open and mode == 0) then
+            -- The scripted Enter, done on the SERVER. Measured 2026-08-28 on the local
+            -- LandSandBoat world: an injected 0x05B reaches the server (it warns "Not in an
+            -- event" when sent idle) but while an event is open it is swallowed without a
+            -- trace -- no EVENTUCOFF back, quest still AVAILABLE. What does work is running
+            -- the event's finish handler through the GM `!exec` and then `!release`, which
+            -- ends the event server-side AND sends the client the CancelEvent it needs to
+            -- let go of the dialogue box. Needs GM level 4+ on a world you own; it is never
+            -- sent anywhere else (`/vg advance server off`).
+            local n = event.num;
+            AshitaCore:GetChatManager():QueueCommand(-1,
+                ('!exec InteractionGlobal.onEventFinish(player, %d, %d, player:getEventTarget())'):format(n, option));
+            AshitaCore:GetChatManager():QueueCommand(-1, '!release');
+            event.open = false;
+            U.print(('advance: event %d finished on the server, option %d, released'):format(n, option));
+            return;
+        end
         local ok, why = event_end(mode, option);
         U.print(ok and ('advance: ' .. why) or ('advance: ' .. why));
+        return;
+    end
+
+    -- `/vg advance server on|off`: use the GM-side finish above instead of the 0x05B.
+    if (sub == 'server') then
+        event.server = (args[3] or 'on'):lower() == 'on';
+        U.print('advance on the server: ' .. (event.server and 'on' or 'off'));
         return;
     end
 
