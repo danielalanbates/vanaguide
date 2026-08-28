@@ -13,6 +13,7 @@
 --- gave nil in-game, so the window and the arrow silently never drew while every command
 --- worked — measured 2026-08-22, `/vg status` reporting `imgui=false`. Cached on first use so
 --- the offline harness can still inject a fake by setting `A.imgui_module`.
+local A_imgui
 local function imgui_module()
     if A_imgui ~= nil then return A_imgui end
     if _G.imgui ~= nil then A_imgui = _G.imgui; return A_imgui end
@@ -20,8 +21,6 @@ local function imgui_module()
     if ok then A_imgui = m end
     return A_imgui
 end
-
-local A_imgui
 local A = {
     screen = { w = 1280, h = 720 },
     calibration = 1,     -- see docs/ARROW.md: +1 or -1, whichever makes it point right
