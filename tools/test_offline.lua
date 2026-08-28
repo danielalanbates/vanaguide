@@ -198,25 +198,43 @@ ok(guard < 100, 'and it terminates')
 -- unnegated mirrors the arrow — left targets get a right-pointing arrow.
 do
     local lines = {}
-    _G.imgui = { GetForegroundDrawList = function()
-        return { AddLine = function(_, a, b, _, width)
-            if width == 3 then lines[#lines + 1] = { a[1], a[2], b[1], b[2] } end
-        end }
+    -- The arrow draws inside its own ImGui window (draggable, HXUI-style), so the stub
+    -- needs the window calls too.  The window sits at (0,0) in the stub, so drawn
+    -- coordinates are the tip/corner positions the test compares.
+    for _, f in ipairs({ 'ImGuiWindowFlags_NoDecoration', 'ImGuiWindowFlags_NoBackground',
+        'ImGuiWindowFlags_NoFocusOnAppearing', 'ImGuiWindowFlags_NoNav',
+        'ImGuiWindowFlags_NoBringToFrontOnFocus', 'ImGuiWindowFlags_NoMove',
+        'ImGuiCond_FirstUseEver' }) do _G[f] = _G[f] or 1 end
+    local dl = { AddLine = function(_, a, b, _, width)
+        if width == 3 then lines[#lines + 1] = { a[1], a[2], b[1], b[2] } end
     end }
+    _G.imgui = {
+        GetForegroundDrawList = function() return dl end,
+        GetWindowDrawList = function() return dl end,
+        SetNextWindowPos = function() end,
+        SetNextWindowSize = function() end,
+        Begin = function() return true end,
+        End = function() end,
+        GetWindowPos = function() return 0, 0 end,
+        IsWindowHovered = function() return false end,
+        IsMouseDown = function() return false end,
+    }
     local A = require('ui.arrow')
     local function tip(bearing)
         lines = {}
-        A.pos_x, A.pos_y = 100, 100
+        A.pos_x, A.pos_y = 100, 100; A.scale = 1.0   -- line width 3 marks the coloured pass
         A.draw(bearing, 10, nil, nil)
-        -- the tip is the point two of the coloured lines share
-        return lines[1][1], lines[1][2]
+        assert(#lines == 4, 'arrow drew 4 coloured lines (' .. tostring(A.last_error) .. ')')
+        -- lines: tip->left, tip->right, left->base, right->base.  Return the tip relative
+        -- to the base notch, so the test does not care where the window put the arrow.
+        return lines[1][1] - lines[3][3], lines[1][2] - lines[3][4]
     end
-    local tx, ty = tip(0)
-    ok(math.abs(tx - 100) < 1 and ty < 100, 'bearing 0 points up the screen')
-    tx, ty = tip(math.pi / 2)
-    ok(tx < 100 and math.abs(ty - 100) < 1, 'a bearing to the left points left on screen')
-    tx, ty = tip(-math.pi / 2)
-    ok(tx > 100, 'a bearing to the right points right on screen')
+    local dx, dy = tip(0)
+    ok(math.abs(dx) < 1 and dy < 0, 'bearing 0 points up the screen')
+    dx, dy = tip(math.pi / 2)
+    ok(dx < 0 and math.abs(dy) < 1, 'a bearing to the left points left on screen')
+    dx, dy = tip(-math.pi / 2)
+    ok(dx > 0, 'a bearing to the right points right on screen')
     _G.imgui = nil
 end
 
