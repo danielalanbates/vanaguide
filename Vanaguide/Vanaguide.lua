@@ -200,7 +200,7 @@ end);
 local chatlog = { path = nil, all_in = false };
 
 local event = { open = false, unique = 0, index = 0, num = 0, auto = false, pending = false,
-                release = 2, release_pending = false, server = false };
+                release = 2, release_pending = false, server = false, kick = nil };
 
 local function u16(data, off) return data:byte(off + 1) + data:byte(off + 2) * 256; end
 local function u32(data, off)
@@ -262,6 +262,20 @@ ashita.events.register('packet_in', 'vg_packet_in', function (e)
     end
 end);
 
+--- Injected packets do not leave the client on their own. Measured 2026-08-28 against the
+--- local LandSandBoat world with its packet debug on: an injected 0x05B sat in the client's
+--- outgoing queue for eight seconds and was parsed by the server in the same bundle as the
+--- next chat line typed -- and two injected 0x01A talks were parsed together, both at the
+--- moment a `!checkquest` went out. The client bundles queued packets when IT has something
+--- to send; standing still with a dialogue open, it has nothing. So after every injection,
+--- give it something: a chat command the world will not mind. `/vg kick <command>` sets it
+--- (`!where` on a world where you are a GM); unset, nothing is sent and injections wait.
+local function kick()
+    if (event.kick ~= nil and event.kick ~= '') then
+        AshitaCore:GetChatManager():QueueCommand(-1, event.kick);
+    end
+end
+
 --- Send 0x05B to end (mode 0) or update (mode 1) the open event.
 --- `option` is the menu choice; 0 is "just carry on", which is what advancing dialogue is.
 local function event_end(mode, option)
@@ -277,6 +291,7 @@ local function event_end(mode, option)
     put16(n);            -- 0x10 EventNum
     put16(n);            -- 0x12 EventPara: the server reads THIS as the event id it is ending
     AshitaCore:GetPacketManager():AddOutgoingPacket(0x05B, pkt);
+    kick();
     -- The 0x05B ends the event on the SERVER. The client is still holding its dialogue box
     -- open, waiting for Enter, and the server does not tell it otherwise: what comes back is
     -- a 0x052 in mode 1 (EventRecvPending), which is bookkeeping, not a release. A real
@@ -291,9 +306,15 @@ end
 --- mode 0 = Standard, 1 = EventRecvPending, 2 = CancelEvent, 3 = CancelInput.
 local function event_release(mode)
     local m = mode or event.release or 2;
-    local pkt = { 0, 0, 0, 0, bit.band(m, 0xFF), 0, 0, 0 };
+    -- The Mode field is a uint32 and, for CancelEvent, the server packs the event id into
+    -- it: `Mode | (eventId << 8)` (LandSandBoat, 0x052_eventucoff.cpp). A release without
+    -- the id is ignored by the client -- measured 2026-08-28: after one, the next event's
+    -- text never rendered; after a real `!release` (bytes `02 77 02 00` for event 631) it
+    -- did. So the injected one carries the id of the event it is closing.
+    local n = (m == 2) and event.num or 0;
+    local pkt = { 0, 0, 0, 0, bit.band(m, 0xFF), bit.band(n, 0xFF), bit.band(bit.rshift(n, 8), 0xFF), 0 };
     AshitaCore:GetPacketManager():AddIncomingPacket(0x052, pkt);
-    return ('release: injected 0x052 mode %d'):format(m);
+    return ('release: injected 0x052 mode %d, event %d'):format(m, n);
 end
 
 -- Everything the game says, copied to a file.
@@ -802,6 +823,7 @@ ashita.events.register('command', 'vg_command', function (e)
             0, 0 };                                                     -- 0x0A ActionID 0 = Talk
         for _ = 1, 16 do pkt[#pkt + 1] = 0; end                          -- 0x0C the action union
         AshitaCore:GetPacketManager():AddOutgoingPacket(0x01A, pkt);
+        kick();
         U.print(('talk -> %s (index %d, server id %d) at %.1f yalms'):format(
             best.name, best.index, sid, best.dist or -1));
         return;
@@ -835,7 +857,15 @@ ashita.events.register('command', 'vg_command', function (e)
         local pkt = {};
         for i = 4, #args do pkt[#pkt+1] = tonumber(args[i], 16) or 0; end
         AshitaCore:GetPacketManager():AddOutgoingPacket(id, pkt);
+        kick();
         U.print(('send: 0x%03X, %d bytes'):format(id, #pkt));
+        return;
+    end
+
+    if (sub == 'kick') then
+        event.kick = (#args > 2) and table.concat({ unpack(args, 3) }, ' ') or nil;
+        if (event.kick ~= nil and event.kick:lower() == 'off') then event.kick = nil; end
+        U.print('kick after injection: ' .. tostring(event.kick));
         return;
     end
 
