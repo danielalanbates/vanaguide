@@ -1,26 +1,86 @@
 # Driving the client without a human: what works, what does not
 
-Rewritten 2026-08-25 after the blocker below was fixed. The previous version of this file said
-the chain broke because "there is no way to press a key". That was the wrong diagnosis of the
-right symptom, and this is what it actually was.
+Rewritten 2026-08-28. The 2026-08-25 version of this file said the client "latches on an
+event and nothing scripted can release it". That was, again, the wrong diagnosis of the right
+symptom. Three separate things were wrong, and all three are fixed.
 
-## The headline
+## The headline, 2026-08-28
 
-**An NPC can now be talked to, and the narrator speaks its words.** Verified in-world on the
-local LandSandBoat world, character `Test`, Southern San d'Oria:
+**A character can be walked through a guide unattended: talk -> the NPC's words render and
+the narrator reads them -> `/vg advance` ends the event -> the server says ACCEPTED -> the
+guide ticks the step and the arrow swings to the next one.** `tools/guided_run.sh` does it
+and writes a results file with screenshots; `results/guided-20260828-*/` has the runs.
+Three rounds of talk/advance on Balasiel in a row, each one ACCEPTED on the server with no
+warnings, then the same on Rosel in the guide itself.
 
-    [out] id=0x01A size=28 injected=true 1A 0E 00 00 62 60 0E 01 62 00 00 00 ...
-    [Vanaguide] talk -> Ambrotien (index 98, server id 17719394) at 2.3 yalms
-    Ambrotien : A boy training to be a friar went near Ghelsba and did not return.
-                His name was Tedimout.
+## The three things that were actually wrong
 
-and, at the same moment, in `/tmp/vanavoice/dialogue.jsonl`:
+### 1. Injected packets do not leave the client until it has something of its own to send
 
-    {"mode":150,"race":3,"speaker":"Ambrotien",
-     "text":"A boy training to be a friar went near Ghelsba and did not return. ..."}
+With the server's `logging.DEBUG_PACKETS` on (`settings/logging.lua`; needs a map-server
+restart), every parsed packet is logged with its sequence number:
 
-That is the whole chain: injected packet -> server -> NPC dialogue -> narrator. It had never
-run before.
+    07:29:55  /vg advance                     (0x05B injected)
+    07:30:02  !checkquest sandoria 10         (a chat line the client sends itself)
+    07:30:03  parse: 0B5 | 0106 00EA ...      <- the chat
+    07:30:03  parse: 05B | 0106 00EA ...      <- the 0x05B, same bundle, 8 s late
+
+Two injected 0x01A talks were likewise parsed together at the moment a later chat line went
+out. The client bundles its outgoing queue when IT has a packet to send; standing still with
+a dialogue open, it has none, so injected packets wait. Movement updates (0x015) do not
+flush it -- they were going out the whole time.
+
+Fix: `/vg kick <chat command>`. After every injection Vanaguide queues that command; the
+harness uses `!where`, a GM command nobody else can see. On a world where you are not a GM
+there is nothing safe to send, so the default is off and injections wait -- which on a public
+server is what you want anyway (docs/SERVERS.md).
+
+### 2. The client-side release must carry the event id
+
+The client does need telling that the event is over -- the server's answer to a 0x05B is a
+0x052 in mode 1 (EventRecvPending), which is bookkeeping, not a release. A real release is a
+0x052 in mode 2, and LandSandBoat packs the event id into the same field:
+
+    Mode | (eventId << 8)        ->  bytes  02 77 02 00   for event 631
+
+Injecting `02 00 00 00` was silently ignored: the next event's text never rendered. With the
+id in it, the next talk renders and narrates, three rounds running. (`/vg release [mode]`
+sends one by hand; `/vg release auto 2` is the default after an advance.)
+
+### 3. 0x034 is not laid out like 0x032
+
+An event with numeric parameters (Rosel's quest offer, event 523) arrives as 0x034, whose
+ids sit 32 bytes further on than 0x032's, after `int32 num[8]`. Read at 0x032's offsets it
+gave "event 0 on index 0" and the server rejected the 0x05B with `Event ID mismatch 523 != 0`.
+
+### Also found
+
+* **`!pos` into another zone empties the entity table for longer than 22 s.** In Northern
+  San d'Oria the NPCs were there at ~50 s. The harness retries the talk, 12 s + 10 s apart.
+* **`!checkquest` is the truth.** `char_quests` does not exist as a table; quest state is a
+  blob in `chars`. An earlier "the quest did not begin" conclusion here came from a SQL query
+  that had silently failed.
+* **The 0x032 arrives four times** while the client sits in an event: with nothing outgoing
+  the server's packets go unacknowledged and it retransmits. Harmless, but it explains the
+  triplicated dialogue lines (modes 662/66200) and the narrator sink receiving each line three
+  times (modes 150/152/152) -- VanaVoice should de-duplicate on (speaker, text, second).
+* **A server-side Enter exists too.** `!exec InteractionGlobal.onEventFinish(player, <csid>,
+  <option>, player:getEventTarget())` followed by `!release` moves the quest without any
+  client packet at all (`/vg server on` switches `/vg advance` to it). Kept as a fallback for
+  regression runs; the packet path is the one that matches what a player's Enter does.
+
+## What is still open
+
+* **The harness teleports; it does not walk.** There is no movement automation and there
+  will not be (docs/SERVERS.md). "Following the arrow" is verified by `/vg status` (distance
+  and bearing to the target) and by the screenshots, not by a character walking there.
+* **Most generated quest steps need prerequisites** (fame, an earlier quest, a level). On a
+  fresh character the NPC gives its stock line and no event opens; the harness records
+  exactly that and moves on with `!completequest`, which proves the guide advances on the
+  server's quest log, not that the quest was playable.
+* Cutscenes with menus: `/vg pick <n>` sends the option, untested beyond option 0.
+
+## Earlier findings (2026-08-25), still true
 
 ## The two things that were actually wrong
 

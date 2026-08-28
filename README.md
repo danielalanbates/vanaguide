@@ -4,8 +4,11 @@
 thing to do, ticks it off when the **server** says you have done it, and points an arrow at
 where to go — routing you across zones, airships and ferries when "there" is a continent away.
 
-**Status: v0.1.0 — the engine is complete and tested offline; nothing has been confirmed
-in-game yet.** Read [docs/VERIFICATION.md](docs/VERIFICATION.md) before you trust a step.
+**Status: v0.2.0 — verified in-game on a local LandSandBoat world (2026-08-28): a scripted
+character talks to the step's NPC, the narrator reads the line, the quest is accepted, the
+step ticks and the arrow moves on.** `tools/guided_run.sh` reproduces it;
+[docs/DRIVING_THE_CLIENT.md](docs/DRIVING_THE_CLIENT.md) says exactly what that does and does
+not prove. Not yet run on a hosted server, and it must not be (see below).
 
 | Zygor feature | Vanaguide |
 | --- | --- |

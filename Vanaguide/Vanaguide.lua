@@ -24,7 +24,7 @@
 
 addon.name    = 'Vanaguide';
 addon.author  = 'Bates LLC';
-addon.version = '0.1.0';
+addon.version = '0.2.0';
 addon.desc    = 'Step-by-step quest and mission guides with a routing arrow.';
 addon.link    = 'https://batesai.org';
 
@@ -200,7 +200,7 @@ end);
 local chatlog = { path = nil, all_in = false };
 
 local event = { open = false, unique = 0, index = 0, num = 0, auto = false, pending = false,
-                release = 2, release_pending = false, server = false, kick = nil };
+                release = 2, release_pending = false, server = false, kick = nil, await_ack = nil };
 
 local function u16(data, off) return data:byte(off + 1) + data:byte(off + 2) * 256; end
 local function u32(data, off)
@@ -232,7 +232,12 @@ ashita.events.register('packet_in', 'vg_packet_in', function (e)
         end
         event.open   = true;
         event.unique = u32(e.data, 0x04);
-        event.index  = u16(e.data, 0x08);
+        -- 0x034 (an event with numeric parameters) is NOT laid out like 0x032: eight int32
+        -- parameters sit between UniqueNo and ActIndex, so its ids are 32 bytes further on
+        -- (LandSandBoat 0x034_eventnum.h). Read as a 0x032 it gave "event 0 on index 0" and
+        -- the server answered the 0x05B with "Event ID mismatch 523 != 0" -- Rosel, 2026-08-28.
+        local shift = (e.id == 0x034) and 32 or 0;
+        event.index  = u16(e.data, 0x08 + shift);
         -- 0x0C, not 0x0A. LandSandBoat's struct lists EventNum immediately after ActIndex, but
         -- on the wire 0x0A carries something else and the event id is two bytes further on.
         -- Measured 2026-08-25 from a real packet, talking to Ambrotien:
@@ -242,7 +247,7 @@ ashita.events.register('packet_in', 'vg_packet_in', function (e)
         --
         -- and the server had already said which of those two it wanted, by rejecting the
         -- other one: "Invalid GP_CLI_COMMAND_EVENTEND packet: Event ID mismatch 2025 != 230".
-        event.num    = u16(e.data, 0x0C);
+        event.num    = u16(e.data, 0x0C + shift);
         -- Unattended mode. The client latches on an event and waits for Enter, and on this
         -- build no synthetic key reaches it -- Ashita's WNDPROC hook never sees a posted
         -- WM_KEYDOWN at all (`/winecursor` reports "real key events 0" straight after one).
@@ -259,6 +264,10 @@ ashita.events.register('packet_in', 'vg_packet_in', function (e)
     elseif (e.id == 0x052) then
         -- EVENTUCOFF: the server acknowledging the end of an event.
         event.open = false;
+        if (event.await_ack ~= nil and not e.injected) then
+            event.await_ack = nil;
+            event.release_pending = true;
+        end
     end
 end);
 
@@ -297,7 +306,13 @@ local function event_end(mode, option)
     -- a 0x052 in mode 1 (EventRecvPending), which is bookkeeping, not a release. A real
     -- release -- what `player:release()` sends -- is a 0x052 in mode 2 (CancelEvent) or
     -- mode 0 (Standard). The client acts on packets, not on who sent them, so hand it one.
-    if (mode == 0 and event.release ~= nil) then event.release_pending = true; end
+    -- ...but not yet. The client answers a release with a 0x05B of its own (EndPara
+    -- 0x40000000, "cancelled"), and if that is bundled ahead of ours the server finishes
+    -- the event with the cancel and the quest is not begun -- seen 2026-08-28, two 0x05Bs
+    -- in one bundle, "Not in an event" for the second. So wait for the server's answer to
+    -- OUR 0x05B (a 0x052 that is not ours) before handing the client its release; after two
+    -- seconds without one, release anyway.
+    if (mode == 0 and event.release ~= nil) then event.await_ack = os.clock() + 2; end
     return true, ('event %d on index %d: %s, option %d')
         :format(n, i, mode == 0 and 'end' or 'update', o);
 end
@@ -501,6 +516,26 @@ ashita.events.register('command', 'vg_command', function (e)
         L.track(P, r);
         save_progress();
         U.print('tracking: ' .. r.text);
+        return;
+    end
+
+    -- `/vg target`: the current step's destination, machine-readably, for a script driving
+    -- the client (tools/guided_run.sh). One line: zone, x/y/z, the NPC, the quest key.
+    if (sub == 'target') then
+        local step = P.step();
+        if (step == nil) then U.print('target: no step'); return; end
+        local key = step.quest or step.quest_accept or step.mission;
+        local q = nil;
+        if (step.quest or step.quest_accept) then
+            local ok, Qd = pcall(require, 'data.quests');
+            if (ok and Qd.quests and Qd.quests[key.area]) then q = Qd.quests[key.area][key.id]; end
+        end
+        local npc = (q and q.npc) or (step.note or ''):match('Ask ([^.]+)%.') or (step.note or ''):match('Starts with ([^.]+)%.') or '';
+        U.print(('target: step=%d zone=%s x=%s y=%s z=%s npc=%s key=%s,%s name=%s')
+            :format(P.index, tostring(step.zone or (q and q.zone) or ''),
+                    q and q.x or (step.pos and step.pos.x) or '', q and q.y or '',
+                    q and q.z or (step.pos and step.pos.z) or '', npc,
+                    key and key.area or '', key and key.id or '', step.text or ''));
         return;
     end
 
@@ -1030,6 +1065,11 @@ ashita.events.register('d3d_present', 'vg_present', function ()
     if (event.pending) then
         event.pending = false;
         event_end(0, 0);
+    end
+    if (event.await_ack ~= nil and os.clock() > event.await_ack) then
+        event.await_ack = nil;
+        event.release_pending = true;
+        U.print('release: no answer to the 0x05B in 2 s; releasing anyway');
     end
     if (event.release_pending) then
         event.release_pending = false;
