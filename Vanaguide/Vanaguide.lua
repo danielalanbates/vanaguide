@@ -199,7 +199,8 @@ end);
 -- "attempt to index global 'chatlog' (a nil value)".
 local chatlog = { path = nil, all_in = false };
 
-local event = { open = false, unique = 0, index = 0, num = 0, auto = false, pending = false };
+local event = { open = false, unique = 0, index = 0, num = 0, auto = false, pending = false,
+                release = 2, release_pending = false };
 
 local function u16(data, off) return data:byte(off + 1) + data:byte(off + 2) * 256; end
 local function u32(data, off)
@@ -276,8 +277,23 @@ local function event_end(mode, option)
     put16(n);            -- 0x10 EventNum
     put16(n);            -- 0x12 EventPara: the server reads THIS as the event id it is ending
     AshitaCore:GetPacketManager():AddOutgoingPacket(0x05B, pkt);
+    -- The 0x05B ends the event on the SERVER. The client is still holding its dialogue box
+    -- open, waiting for Enter, and the server does not tell it otherwise: what comes back is
+    -- a 0x052 in mode 1 (EventRecvPending), which is bookkeeping, not a release. A real
+    -- release -- what `player:release()` sends -- is a 0x052 in mode 2 (CancelEvent) or
+    -- mode 0 (Standard). The client acts on packets, not on who sent them, so hand it one.
+    if (mode == 0 and event.release ~= nil) then event.release_pending = true; end
     return true, ('event %d on index %d: %s, option %d')
         :format(n, i, mode == 0 and 'end' or 'update', o);
+end
+
+--- Inject an incoming 0x052 (EVENTUCOFF) so the client lets go of the event it is in.
+--- mode 0 = Standard, 1 = EventRecvPending, 2 = CancelEvent, 3 = CancelInput.
+local function event_release(mode)
+    local m = mode or event.release or 2;
+    local pkt = { 0, 0, 0, 0, bit.band(m, 0xFF), 0, 0, 0 };
+    AshitaCore:GetPacketManager():AddIncomingPacket(0x052, pkt);
+    return ('release: injected 0x052 mode %d'):format(m);
 end
 
 -- Everything the game says, copied to a file.
@@ -809,6 +825,20 @@ ashita.events.register('command', 'vg_command', function (e)
         return;
     end
 
+    -- `/vg release [mode]` injects the client-side release on its own; `/vg release auto <mode|off>`
+    -- sets which one `/vg advance` sends after the 0x05B (default 2 = CancelEvent).
+    if (sub == 'release') then
+        local a = (args[3] or ''):lower();
+        if (a == 'auto') then
+            local v = (args[4] or ''):lower();
+            event.release = (v == 'off') and nil or (tonumber(v) or 2);
+            U.print('release after advance: ' .. tostring(event.release));
+            return;
+        end
+        U.print(event_release(tonumber(a)));
+        return;
+    end
+
     if (sub == 'advance' or sub == 'pick') then
         local mode   = (sub == 'pick') and 1 or 0;
         local option = tonumber(args[3] or '0') or 0;
@@ -934,6 +964,10 @@ ashita.events.register('d3d_present', 'vg_present', function ()
     if (event.pending) then
         event.pending = false;
         event_end(0, 0);
+    end
+    if (event.release_pending) then
+        event.release_pending = false;
+        U.print(event_release());
     end
     -- Gate on being in a zone, not on GetLoginStatus(). Measured in-game 2026-08-22: the
     -- status word is not 2 on this client while standing in Southern San d'Oria, so gating on
