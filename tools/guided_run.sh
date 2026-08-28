@@ -61,9 +61,11 @@ for ((i = 1; i <= STEPS; i++)); do
   shot "step$step-b-arrived"
   : > "$CHAT"; : > "$NARR"
   # After a zone change the client's entity table refills slowly; give the NPC time to appear.
+  # ...and right after zoning the server can parse the talk and start nothing (the character
+  # is still "disappearing" to it), so a talk that opened no event is tried again too.
   for try in 1 2 3 4; do
     : > "$CHAT"; say "/vg talk $npc"; sleep 12
-    /usr/bin/grep -a -q 'loaded here' "$CHAT" || break
+    if ! /usr/bin/grep -a -q 'loaded here' "$CHAT" && /usr/bin/grep -a -q "^\[6[0-9]*\] " "$CHAT"; then break; fi
     sleep 10
   done
   print -r -- "- talk (attempt $try): $(last 'talk')" >> "$MD"
