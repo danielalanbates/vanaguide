@@ -101,8 +101,11 @@ function Path.to(w, target)
         or (math.abs(target.x - cache.tx) > 2) or (math.abs(target.z - cache.tz) > 2)
     local moved
     if cache.points ~= nil and cache.source == 'navmesh' then
-        local near = Path.nearest_index(cache.points, w.x, w.z)
+        local near = Path.nearest_index(cache.points, w.x, w.z, w.y)
         local off = U.dist(w.x, w.z, cache.points[near].x, cache.points[near].z)
+        if w.y ~= nil and cache.points[near].y ~= nil then
+            off = math.max(off, math.abs(cache.points[near].y - w.y) * 3)
+        end
         moved = off > 10 or U.dist(w.x, w.z, cache.ax, cache.az) > 80
     else
         moved = (cache.ax == nil) or (U.dist(w.x, w.z, cache.ax, cache.az) > 12)
@@ -151,11 +154,19 @@ end
 --- Which point of a path the player is standing nearest.  The line is drawn from there
 --- forward, so the part already walked stops being drawn instead of trailing behind and
 --- pointing backwards.
-function Path.nearest_index(points, x, z)
+function Path.nearest_index(points, x, z, y)
     if points == nil or #points == 0 or x == nil then return 1 end
     local best, best_d = 1, nil
     for i = 1, #points do
         local d = U.dist2(x, z, points[i].x, points[i].z)
+        -- Height counts, and counts triple: where one floor runs over another (Port San
+        -- d'Oria's stairs, every bridge) the nearest sample on the map is a floor away, and
+        -- following it means running at a wall.  Measured 2026-08-29 with the client's own
+        -- runner; the server walker never noticed because it sets the height itself.
+        if y ~= nil and points[i].y ~= nil then
+            local dy = (points[i].y - y) * 3
+            d = d + dy * dy
+        end
         if best_d == nil or d < best_d then best, best_d = i, d end
     end
     return best

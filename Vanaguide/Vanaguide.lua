@@ -765,6 +765,36 @@ ashita.events.register('command', 'vg_command', function (e)
 
     -- Walk the character to the current target.  Local world only: writing the player's
     -- position is a bannable offence anywhere that is not our own server.
+    -- Measurement aid for docs/WALK.md: drive the client's own auto-follow by hand.
+    --   /vg af <index>        follow that entity (what /follow does), by memory
+    --   /vg af d <x> <z> [y]  set the follow delta directly and auto-run
+    --   /vg af off
+    --   /vg af                print the raw struct
+    if (sub == 'af') then
+        local f = AshitaCore:GetMemoryManager():GetAutoFollow();
+        local a = (args[3] or ''):lower();
+        if (a == 'off') then
+            f:SetIsAutoRunning(0); f:SetFollowTargetIndex(0); f:SetFollowTargetServerId(0);
+            f:SetFollowDeltaX(0); f:SetFollowDeltaY(0); f:SetFollowDeltaZ(0);
+        elseif (a == 'd') then
+            f:SetFollowTargetIndex(0); f:SetFollowTargetServerId(0);
+            f:SetFollowDeltaX(tonumber(args[4]) or 0); f:SetFollowDeltaY(tonumber(args[5]) or 0);
+            f:SetFollowDeltaZ(tonumber(args[6]) or 0); f:SetFollowDeltaW(tonumber(args[7]) or 0);
+            f:SetIsAutoRunning(1);
+        elseif (tonumber(a) ~= nil) then
+            local idx = tonumber(a);
+            local sid = AshitaCore:GetMemoryManager():GetEntity():GetServerId(idx);
+            f:SetFollowTargetIndex(idx); f:SetFollowTargetServerId(sid);
+            f:SetTargetIndex(idx); f:SetTargetServerId(sid);
+            f:SetIsAutoRunning(1);
+        end
+        U.print(('af: target=%d/%d follow=%d/%d delta=(%.2f, %.2f, %.2f, %.2f) run=%d fp=%d lock=%d/%d'):format(
+            f:GetTargetIndex(), f:GetTargetServerId(), f:GetFollowTargetIndex(), f:GetFollowTargetServerId(),
+            f:GetFollowDeltaX(), f:GetFollowDeltaY(), f:GetFollowDeltaZ(), f:GetFollowDeltaW(),
+            f:GetIsAutoRunning(), f:GetIsFirstPersonCamera(), f:GetIsCameraLocked(), f:GetIsCameraLockedOn()));
+        return;
+    end
+
     if (sub == 'walk') then
         local what = (#args > 2) and args[3]:lower() or '';
         if (what == 'stop' or what == 'off') then
