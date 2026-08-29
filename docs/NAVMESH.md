@@ -78,10 +78,14 @@ cells, the right bounding box, both gates marked walkable — and the grid was 8
 
 ## Two simplifications, said out loud
 
-**One floor per cell.** A cell holds one height, so a zone stacked on itself — a tower, a
-bridge over a road — keeps the lower surface and forgets the other. Ground level is what a
-guide usually wants, and the cost is a line drawn under a bridge you are walking over. A
-second layer is a real fix and is not this.
+**Two floors per cell (file version 2, 2026-08-28).** A cell holds its lowest surface and,
+where something at least 4 yalms higher also covers it, its highest — a bridge over a
+street, a rampart over a yard. The A* walks *floors*, not cells: a neighbour counts only if
+one of its surfaces is within a step (3 yalms, or 1.5 cells) of the height you are on, and the
+start snaps to the floor nearest the player's own height. Before this, a player on a covered
+walkway in Southern San d'Oria was routed straight off it onto the street 6 yalms below,
+because the street was the only floor the cell knew. A three-storey stack keeps bottom and
+top and forgets the middle; version-1 files still load as one floor.
 
 **Coarse cells in big zones.** The cell size is chosen per zone to stay under `--max-cells`,
 so a 2,400-yalm zone gets four or six yalms and a city gets two. A doorway narrower than a

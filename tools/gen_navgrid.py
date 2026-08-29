@@ -29,7 +29,7 @@ they already have.  Same shape as tools/gen_zonelines.py and tools/gen_quests.py
 `string.byte` and nothing else:
 
     0   "VGNV"                 magic
-    4   version                1 byte, currently 1
+    4   version                1 byte, currently 2 (1 = single layer, still readable)
     5   zone id                2 bytes
     7   cell size, tenths      1 byte  (20 = two yalms; see --cell)
     8   origin x, tenths       4 bytes signed  (the west/south corner, in yalms x 10)
@@ -40,16 +40,20 @@ they already have.  Same shape as tools/gen_zonelines.py and tools/gen_quests.py
     24  mask runs              5 bytes each: 4-byte length, 1-byte value (0 or 1)
     ..  height run count       4 bytes
     ..  height runs            6 bytes each: 4-byte length, 2-byte signed height x 4
+    ..  (version 2) the same two arrays again for the UPPER layer: a mask of cells that
+        have a second, higher surface (a bridge over the street, a rampart over the yard)
+        and its height.  Cells with one floor have 0 there.
 
 Both arrays are run-length encoded because both are enormously repetitive -- most of a zone
 is one unbroken run of "not walkable", and open ground is one height for tens of cells.
 
 ## Two known simplifications, said out loud
 
-**One floor.**  A cell holds one height, so a zone stacked on itself -- a tower, a bridge over
-a road -- keeps the *lower* surface and forgets the other.  Ground level is what a guide
-usually wants, and the cost of the error is a line drawn under a bridge you are walking over.
-A second layer is a real fix and is not this.
+**Two floors, not more.**  A cell holds the lowest surface and, when something at least
+LAYER_GAP yalms higher also covers it, the highest.  That is a bridge over a street or a
+rampart over a yard -- the cases a walker meets -- and it is what turned "the line points
+straight down off the bridge" into a line along the bridge.  A three-storey stack keeps its
+bottom and top and forgets the middle.
 
 **Coarse.**  The cell is chosen per zone so the grid stays under `--max-cells`, which for a
 2,400-yalm zone means four or six yalms.  A doorway narrower than a cell can close.  The A*
@@ -69,6 +73,9 @@ SET_MAGIC = b'TESM'                # 'MSET', little-endian
 MESH_HEADER = 100                  # bytes, dtMeshHeader
 POLY_SIZE = 32                     # bytes, dtPoly
 DT_VERTS_PER_POLYGON = 6
+# Two surfaces in one cell are two floors only when they are further apart than a step.  FFXI
+# stairs rise about a yalm per yalm; anything under four yalms is a kerb or a ramp, not a bridge.
+LAYER_GAP = 4.0
 
 
 def parse_zone_names(root):
@@ -165,8 +172,9 @@ def rasterise(polys, cell, max_cells, wanted):
     h = int((maxz - oz) / cell) + 2
 
     mask = bytearray(w * h)
-    # The height axis points down, so "keep the lower surface" is "keep the larger y".
-    heights = [None] * (w * h)
+    # The height axis points down: the lowest floor is the *largest* y, the highest the smallest.
+    heights = [None] * (w * h)          # lower layer
+    upper = [None] * (w * h)            # upper layer, or None where there is only one floor
 
     for ring in polys:
         ys = [p[2] for p in ring]
@@ -197,8 +205,21 @@ def rasterise(polys, cell, max_cells, wanted):
             i = r * w + c
             mask[i] = 1
             cur = heights[i]
-            if cur is None or y > cur:
+            if cur is None:
                 heights[i] = y
+                return
+            # Keep the lowest floor in `heights`; anything a real storey above it is the
+            # upper layer, of which the highest wins.  A surface between the two is a
+            # ramp or a kerb of one of them and joins whichever it is nearer.
+            if y > cur:                              # lower than the lower floor
+                if (y - cur) >= LAYER_GAP:
+                    # the old floor was really an upper one
+                    if upper[i] is None or cur < upper[i]:
+                        upper[i] = cur
+                heights[i] = y
+            elif cur - y >= LAYER_GAP:               # a storey above the lower floor
+                if upper[i] is None or y < upper[i]:
+                    upper[i] = y
 
         # The polygon's *edges*, cell by cell, before its interior.  A centre-in-polygon test
         # on its own drops every cell whose middle falls a hand's breadth outside the mesh,
@@ -229,7 +250,11 @@ def rasterise(polys, cell, max_cells, wanted):
                 # invents a height.  Southern San d'Oria came out spanning 285 yalms
                 # vertically, in a city whose navmesh is 43 yalms tall.
                 put(c, r, plane(px, pz) if plane is not None else (sum(ys) / len(ys)))
-    return ox, oz, w, h, cell, mask, heights
+    # An upper layer within a step of the lower one is the same floor seen twice.
+    for i in range(w * h):
+        if upper[i] is not None and heights[i] is not None and heights[i] - upper[i] < LAYER_GAP:
+            upper[i] = None
+    return ox, oz, w, h, cell, mask, heights, upper
 
 
 def plane_of(ring):
@@ -281,17 +306,21 @@ def rle_bytes(values, pack, size):
     return runs + 1, out
 
 
-def write_grid(path, zone, ox, oz, w, h, cell, mask, heights):
+def write_grid(path, zone, ox, oz, w, h, cell, mask, heights, upper=None):
     # An unwalkable cell still needs a height in the array so the runs line up with the mask;
     # zero is as good as anything and is never read.
-    quant = [0 if heights[i] is None else max(-32000, min(32000, int(round(heights[i] * 4))))
-             for i in range(w * h)]
-    mask_runs, mask_bytes = rle_bytes(mask, lambda v: struct.pack('<B', v), 1)
-    h_runs, h_bytes = rle_bytes(quant, lambda v: struct.pack('<h', v), 2)
-    body = struct.pack('<4sBHBiiHH', b'VGNV', 1, zone, int(round(cell * 10)),
+    def layer(hs):
+        quant = [0 if hs[i] is None else max(-32000, min(32000, int(round(hs[i] * 4))))
+                 for i in range(w * h)]
+        m = bytearray(0 if hs[i] is None else 1 for i in range(w * h))
+        mask_runs, mask_bytes = rle_bytes(m, lambda v: struct.pack('<B', v), 1)
+        h_runs, h_bytes = rle_bytes(quant, lambda v: struct.pack('<h', v), 2)
+        return struct.pack('<I', mask_runs) + bytes(mask_bytes) \
+            + struct.pack('<I', h_runs) + bytes(h_bytes)
+    body = struct.pack('<4sBHBiiHH', b'VGNV', 2, zone, int(round(cell * 10)),
                        int(round(ox * 10)), int(round(oz * 10)), w, h)
-    body += struct.pack('<I', mask_runs) + bytes(mask_bytes)
-    body += struct.pack('<I', h_runs) + bytes(h_bytes)
+    body += layer([heights[i] if mask[i] else None for i in range(w * h)])
+    body += layer(upper if upper is not None else [None] * (w * h))
     open(path, 'wb').write(body)
     return len(body)
 
@@ -343,15 +372,16 @@ def main():
         if not polys:
             skipped += 1
             continue
-        ox, oz, w, h, cell, mask, heights = rasterise(polys, args.cell, args.max_cells,
-                                                      args.cell)
+        ox, oz, w, h, cell, mask, heights, upper = rasterise(polys, args.cell,
+                                                             args.max_cells, args.cell)
         n = write_grid(os.path.join(args.out, '%d.vgnav' % zone), zone,
-                       ox, oz, w, h, cell, mask, heights)
+                       ox, oz, w, h, cell, mask, heights, upper)
         total_bytes += n
         done += 1
         walk = sum(mask)
-        print('  %-34s zone %-4d %4dx%-4d cell %.0f  %6d walkable  %6.1f KB'
-              % (stem, zone, w, h, cell, walk, n / 1024.0))
+        two = sum(1 for u in upper if u is not None)
+        print('  %-34s zone %-4d %4dx%-4d cell %.0f  %6d walkable %5d two-floor %6.1f KB'
+              % (stem, zone, w, h, cell, walk, two, n / 1024.0))
     print('%d zones -> %s  (%.1f MB), %d skipped'
           % (done, args.out, total_bytes / 1048576.0, skipped))
 
