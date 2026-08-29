@@ -25,11 +25,11 @@ local function walkStep(player, tx, ty, tz, speed, gen, last)
     local px, py, pz = player:getXPos(), player:getYPos(), player:getZPos()
     local dx, dz = tx - px, tz - pz
     local d = math.sqrt(dx * dx + dz * dz)
-    -- The timer's real period is coarser than asked (measured ~400 ms for a 200 ms request),
-    -- so the hop is sized by the clock, not by the request.
-    local now = os.clock()
-    local span = last and math.max(0.05, math.min(1, now - last)) or 0.2
-    local hop = speed * span
+    -- The timer's real period is coarser than asked: measured ~400 ms for a 200 ms request,
+    -- and os.clock() here is CPU time, which is useless for pacing (it made 5 yalms/s come
+    -- out at 1.4).  Size the hop for the period that was measured.
+    local now = 0
+    local hop = speed * 0.4
     if d <= hop then
         player:setPos(tx, ty, tz, player:getRotPos())
         player:setLocalVar('walkto_gen', 0)
