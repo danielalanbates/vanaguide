@@ -95,7 +95,16 @@ end
 --- One frame.  `w` is the world snapshot (x, z, y, zone, yaw).  Returns true on arrival.
 function W.update(w)
     if not W.active then return false end
-    if w == nil or w.x == nil or w.zone == nil then W.last = nil; return false end
+    if w == nil or w.x == nil or w.zone == nil then
+        -- Zoning: no position for a while.  Nothing here is stuck; forget the progress
+        -- check so the load time is not counted against the walk.
+        W.last, W.stuck_pos, W.stuck_since = nil, nil, nil
+        return false
+    end
+    if W.zone_seen ~= w.zone then
+        W.zone_seen = w.zone
+        W.stuck_pos, W.stuck_since, W.last_wp, W.last_tick = nil, nil, nil, nil
+    end
     local idx = player_index()
     if idx == nil then W.last = nil; return false end
 
@@ -126,8 +135,10 @@ function W.update(w)
         return true
     end
 
-    -- Follow the drawn path when there is one; otherwise straight at the target.
-    local points = Path.to(w, t)
+    -- Follow the drawn path when there is one; otherwise straight at the target.  The last
+    -- few yalms go to the target itself, height included: a gate's trigger area is a box
+    -- a couple of yalms tall, and arriving at the grid's idea of the floor can miss it.
+    local points = (remaining > 4) and Path.to(w, t) or nil
     local nx, nz, ny = t.x, t.z, t.y
     if points ~= nil and #points >= 2 then
         local i = Path.nearest_index(points, w.x, w.z)

@@ -1214,21 +1214,51 @@ ashita.events.register('d3d_present', 'vg_present', function ()
             -- Walking: re-aim at the current target every frame (a step that completes, or
             -- a zone crossed, moves it) and take one run-speed step along the line.
             if (Walk.active and rec.target ~= nil) then
-                if (Walk.target.x ~= rec.target.x or Walk.target.z ~= rec.target.z) then
+                if (not vg.walk_back and (Walk.target.x ~= rec.target.x or Walk.target.z ~= rec.target.z)) then
                     Walk.target = { x = rec.target.x, z = rec.target.z, y = rec.target.y };
                 end
                 if (Walk.update(w)) then
+                    if (vg.walk_back) then
+                        vg.walk_back = false;
+                        Walk.start(rec.target, 'back to the crossing');
+                        vg.walk_wait.since = os.time();
+                        return;
+                    end
                     U.print(('walk: arrived (%s)'):format(step.text or ''));
                     if (vg.walk_auto and rec.mode == 'travel') then
-                        -- A zone line: the crossing happens on its own once we stand on it.
-                        Walk.start(rec.target, 'zoning');
+                        -- A zone line or a gate: the crossing happens on its own once we
+                        -- stand on it (the gate's event is auto-ended).  Wait here, quietly,
+                        -- and resume when the zone or the target changes.
+                        vg.walk_wait = { zone = w.zone, x = rec.target.x, z = rec.target.z, since = os.time() };
                     end
+                end
+            elseif (vg.walk_auto and vg.walk_wait ~= nil and rec.target ~= nil) then
+                local ww = vg.walk_wait;
+                if (w.zone ~= ww.zone or rec.target.x ~= ww.x or rec.target.z ~= ww.z) then
+                    vg.walk_wait = nil;
+                    Walk.start(rec.target, (rec.mode == 'travel') and U.zone_name(rec.leg and rec.leg.to) or step.text);
+                elseif (os.time() - ww.since > 8 and (ww.retries or 0) < 2) then
+                    -- A gate only fires when you *enter* its area, and a gate that turned us
+                    -- away (rank, mission) will not fire again while we stand in it.  Step
+                    -- back a dozen yalms and walk in again; twice, then give up.
+                    ww.retries = (ww.retries or 0) + 1;
+                    ww.since = os.time() + 6;
+                    local dx, dz = w.x - ww.x, w.z - ww.z;
+                    local d = math.sqrt(dx * dx + dz * dz);
+                    if (d < 0.5) then dx, dz, d = math.cos(w.yaw or 0), -math.sin(w.yaw or 0), 1; end
+                    ww.back = { x = ww.x + dx / d * 12, z = ww.z + dz / d * 12, y = w.y };
+                    U.print(('walk: the crossing did not open; stepping back to try again (%d)'):format(ww.retries));
+                    Walk.start(ww.back, 'stepping back');
+                    vg.walk_back = true;
+                elseif (os.time() - ww.since > 20) then
+                    vg.walk_wait = nil; vg.walk_auto = false;
+                    U.print('walk: stood at the crossing for 20 s and nothing happened; stopping');
                 end
             elseif (Walk.active and rec.target == nil) then
                 Walk.stop('the step has no place');
                 U.print('walk: stopped, the step has no place to walk to');
             end
-            if (not Walk.active and vg.walk_auto) then
+            if (not Walk.active and vg.walk_auto and vg.walk_wait == nil) then
                 vg.walk_auto = false;
                 if (vg.walk_event_auto_was ~= nil) then event.auto = vg.walk_event_auto_was; vg.walk_event_auto_was = nil; end
             end
