@@ -105,7 +105,7 @@ function N.load(zone)
     g.oz      = i32(s, 13) / 10
     g.w       = u16(s, 17)
     g.h       = u16(s, 19)
-    if g.version ~= 1 or g.cell <= 0 or g.w == 0 or g.h == 0 then
+    if (g.version ~= 1 and g.version ~= 2) or g.cell <= 0 or g.w == 0 or g.h == 0 then
         N.missing[zone] = true
         return nil
     end
@@ -114,8 +114,20 @@ function N.load(zone)
     local mask_runs = u32(s, at); at = at + 4
     g.mask, at = expand(s, at, mask_runs, 1, g.w * g.h)
     local h_runs = u32(s, at); at = at + 4
-    g.height = expand(s, at, h_runs, 2, g.w * g.h)
+    g.height, at = expand(s, at, h_runs, 2, g.w * g.h)
     if #g.mask < g.w * g.h then N.missing[zone] = true; return nil end
+    -- Version 2 carries a second floor: cells where a bridge, rampart or upper walk lies
+    -- over the ground.  Without it (version 1) every cell has one floor.
+    if g.version >= 2 and at + 4 <= #s then
+        local m2 = u32(s, at); at = at + 4
+        g.mask2, at = expand(s, at, m2, 1, g.w * g.h)
+        local h2 = u32(s, at); at = at + 4
+        g.height2 = expand(s, at, h2, 2, g.w * g.h)
+        if #g.mask2 < g.w * g.h then g.mask2, g.height2 = nil, nil end
+    end
+    g.layers = (g.mask2 ~= nil) and 2 or 1
+    -- A step between two cells: anything taller is a wall or a drop, not a floor.
+    g.step = math.max(3, 1.5 * g.cell)
 
     N.loaded, N.grid = zone, g
     return g
@@ -124,18 +136,49 @@ end
 -- ---------------------------------------------------------------------------------
 -- the grid
 
-local function walkable(g, cx, cz)
+-- A cell is (cx, cz) and a *floor* is (cx, cz, layer): layer 0 is the ground, layer 1 the
+-- bridge or rampart over it where the file says there is one.  Nodes in the search are
+-- (cz * w + cx) * 2 + layer, so a cell with two floors is two nodes that do not touch.
+local function walkable(g, cx, cz, layer)
     if cx < 0 or cz < 0 or cx >= g.w or cz >= g.h then return false end
-    return g.mask:byte(cz * g.w + cx + 1) == 1
+    if (layer or 0) == 0 then return g.mask:byte(cz * g.w + cx + 1) == 1 end
+    return g.mask2 ~= nil and g.mask2:byte(cz * g.w + cx + 1) == 1
 end
 
-local function height_at(g, cx, cz)
+local function height_at(g, cx, cz, layer)
     local i = (cz * g.w + cx) * 2 + 1
-    local lo, hi = g.height:byte(i, i + 1)
+    local arr = ((layer or 0) == 1) and g.height2 or g.height
+    if arr == nil then return 0 end
+    local lo, hi = arr:byte(i, i + 1)
     if lo == nil then return 0 end
     local v = lo + hi * 256
     if v >= 32768 then v = v - 65536 end
     return v / 4
+end
+
+--- Of the floors in a cell, the one nearest a height (nil = the ground).
+local function floor_near(g, cx, cz, y)
+    local best, best_d
+    for layer = 0, g.layers - 1 do
+        if walkable(g, cx, cz, layer) then
+            if y == nil then return layer end
+            local d = math.abs(height_at(g, cx, cz, layer) - y)
+            if best_d == nil or d < best_d then best, best_d = layer, d end
+        end
+    end
+    return best
+end
+
+--- Can you step from a floor at height `y` onto a floor in this cell?  Returns the layer.
+local function step_onto(g, cx, cz, y)
+    local best, best_d
+    for layer = 0, g.layers - 1 do
+        if walkable(g, cx, cz, layer) then
+            local d = math.abs(height_at(g, cx, cz, layer) - y)
+            if d <= g.step and (best_d == nil or d < best_d) then best, best_d = layer, d end
+        end
+    end
+    return best
 end
 
 local function to_cell(g, x, z)
@@ -149,14 +192,18 @@ end
 --- The nearest walkable cell to one that is not, searched outwards in rings.  A player
 --- standing on a ledge the mesh does not cover -- or a zone line whose recorded coordinate is
 --- a yalm inside the wall -- is the normal case, not the exception.
-local function snap(g, cx, cz, radius)
-    if walkable(g, cx, cz) then return cx, cz end
+--- Returns cx, cz, layer.  With a height, the floor nearest it: a player on the bridge
+--- snaps to the bridge, not to the street underneath.
+local function snap(g, cx, cz, y, radius)
+    local l = floor_near(g, cx, cz, y)
+    if l ~= nil then return cx, cz, l end
     for r = 1, (radius or 8) do
         for d = -r, r do
-            if walkable(g, cx + d, cz - r) then return cx + d, cz - r end
-            if walkable(g, cx + d, cz + r) then return cx + d, cz + r end
-            if walkable(g, cx - r, cz + d) then return cx - r, cz + d end
-            if walkable(g, cx + r, cz + d) then return cx + r, cz + d end
+            for _, c in ipairs({ { cx + d, cz - r }, { cx + d, cz + r },
+                                 { cx - r, cz + d }, { cx + r, cz + d } }) do
+                l = floor_near(g, c[1], c[2], y)
+                if l ~= nil then return c[1], c[2], l end
+            end
         end
     end
     return nil
@@ -207,7 +254,7 @@ local DIRS = {
 }
 
 --- Start a search, or keep the one already running if it is for the same journey.
-function N.request(zone, x1, z1, x2, z2)
+function N.request(zone, x1, z1, x2, z2, y1, y2)
     local g = N.load(zone)
     if g == nil then return false end
     if search ~= nil and search.zone == zone
@@ -216,8 +263,10 @@ function N.request(zone, x1, z1, x2, z2)
         return true
     end
 
-    local scx, scz = snap(g, to_cell(g, x1, z1))
-    local tcx, tcz = snap(g, to_cell(g, x2, z2))
+    local ax, az = to_cell(g, x1, z1)
+    local scx, scz, sl = snap(g, ax, az, y1)
+    local bx, bz = to_cell(g, x2, z2)
+    local tcx, tcz, tl = snap(g, bx, bz, y2)
     if scx == nil or tcx == nil then
         -- One end is nowhere the mesh knows about.  Say so once and let the straight line
         -- stand; this is a fact about the target, not a failure to try.
@@ -226,8 +275,8 @@ function N.request(zone, x1, z1, x2, z2)
         return true
     end
 
-    local start = scz * g.w + scx
-    local goal  = tcz * g.w + tcx
+    local start = (scz * g.w + scx) * 2 + sl
+    local goal  = (tcz * g.w + tcx) * 2 + tl
     search = {
         zone = zone, g = g, sx = x1, sz = z1, tx = x2, tz = z2,
         start = start, goal = goal, gx = tcx, gz = tcz,
@@ -276,22 +325,29 @@ function N.step(budget)
                 N.state = 'gave up'
                 return 'fail'
             end
-            local cz = math.floor(node / w)
-            local cx = node - cz * w
+            local layer = node % 2
+            local cell = (node - layer) / 2
+            local cz = math.floor(cell / w)
+            local cx = cell - cz * w
+            local y = height_at(g, cx, cz, layer)
             local base = gscore[node]
             for i = 1, 8 do
                 local d = DIRS[i]
                 local nx, nz = cx + d[1], cz + d[2]
-                if walkable(g, nx, nz) then
+                -- The floor next door you can actually step onto from this height: on a
+                -- bridge that is the bridge, and the street under it is a different node.
+                local nl = step_onto(g, nx, nz, y)
+                if nl ~= nil then
                     -- No cutting corners: a diagonal is only a step if both of the squares
                     -- beside it are open, or the path clips the corner of a building and the
                     -- line drawn from it goes through a wall.
                     local okd = true
                     if d[1] ~= 0 and d[2] ~= 0 then
-                        okd = walkable(g, cx + d[1], cz) and walkable(g, cx, cz + d[2])
+                        okd = step_onto(g, cx + d[1], cz, y) ~= nil
+                          and step_onto(g, cx, cz + d[2], y) ~= nil
                     end
                     if okd then
-                        local nnode = nz * w + nx
+                        local nnode = (nz * w + nx) * 2 + nl
                         local ng = base + d[3] * g.cell
                         if gscore[nnode] == nil or ng < gscore[nnode] then
                             gscore[nnode] = ng
@@ -308,13 +364,17 @@ end
 
 --- Is there a clear run of walkable cells between two of them?  Bresenham, used to throw
 --- away the staircase A* produces and keep only the corners.
-local function line_of_sight(g, x0, z0, x1, z1)
+local function line_of_sight(g, x0, z0, x1, z1, y)
     local dx, dz = math.abs(x1 - x0), math.abs(z1 - z0)
     local sx = (x0 < x1) and 1 or -1
     local sz = (z0 < z1) and 1 or -1
     local err = dx - dz
     while true do
-        if not walkable(g, x0, z0) then return false end
+        -- Follow the floor: each cell must have a surface within a step of the last one,
+        -- so a sight line cannot hop from the bridge to the street below it.
+        local l = step_onto(g, x0, z0, y)
+        if l == nil then return false end
+        y = height_at(g, x0, z0, l)
         if x0 == x1 and z0 == z1 then return true end
         local e2 = err * 2
         if e2 > -dz then err = err - dz; x0 = x0 + sx end
@@ -325,7 +385,7 @@ end
 --- The finished path, as world points, or nil while the search is still running.
 --- Second return is true when the caller should ask again.
 function N.provide(zone, x1, z1, y1, x2, z2, y2)
-    if not N.request(zone, x1, z1, x2, z2) then return nil, false end
+    if not N.request(zone, x1, z1, x2, z2, y1, y2) then return nil, false end
     if search.state == 'working' then return nil, true end
     if search.state ~= 'done' then return nil, false end
     if search.points ~= nil then return search.points, false end
@@ -343,13 +403,18 @@ function N.provide(zone, x1, z1, y1, x2, z2, y2)
     -- Keep a cell only when the line from the last kept one to the *next* one is blocked.
     -- Eighty staircase steps become five corners, and the drawn line stops looking like a
     -- flight of stairs laid on the ground.
+    local function unpack_node(n)
+        local layer = n % 2
+        local c = (n - layer) / 2
+        local cz = math.floor(c / g.w)
+        return c - cz * g.w, cz, layer
+    end
     local kept = { cells[1] }
     local anchor = 1
     for i = 3, #cells do
-        local a, b = cells[anchor], cells[i]
-        local az, ax = math.floor(a / g.w), a % g.w
-        local bz, bx = math.floor(b / g.w), b % g.w
-        if not line_of_sight(g, ax, az, bx, bz) then
+        local ax, az, al = unpack_node(cells[anchor])
+        local bx, bz = unpack_node(cells[i])
+        if not line_of_sight(g, ax, az, bx, bz, height_at(g, ax, az, al)) then
             kept[#kept + 1] = cells[i - 1]
             anchor = i - 1
         end
@@ -361,27 +426,32 @@ function N.provide(zone, x1, z1, y1, x2, z2, y2)
     -- between the ends and buries itself in the first one.  Sample the grid along the way.
     local stride = math.max(1, math.floor(6 / g.cell))
     local points = {}
-    local function emit(cx, cz)
+    local function emit(cx, cz, layer)
         local wx, wz = to_world(g, cx, cz)
-        points[#points + 1] = { x = wx, z = wz, y = height_at(g, cx, cz) }
+        points[#points + 1] = { x = wx, z = wz, y = height_at(g, cx, cz, layer) }
     end
     for i = 1, #kept do
-        local node2 = kept[i]
-        local cz = math.floor(node2 / g.w)
-        local cx = node2 - cz * g.w
+        local cx, cz, layer = unpack_node(kept[i])
         if i > 1 then
-            local prev = kept[i - 1]
-            local pz = math.floor(prev / g.w)
-            local px = prev - pz * g.w
+            local px, pz, pl = unpack_node(kept[i - 1])
+            -- Between two corners the floor is followed cell by cell, so a sample on a
+            -- bridge takes the bridge's height and not the street's.
+            local y = height_at(g, px, pz, pl)
             local steps = math.max(math.abs(cx - px), math.abs(cz - pz))
             local k = stride
             while k < steps do
                 local t = k / steps
-                emit(math.floor(px + (cx - px) * t + 0.5), math.floor(pz + (cz - pz) * t + 0.5))
+                local sx = math.floor(px + (cx - px) * t + 0.5)
+                local sz = math.floor(pz + (cz - pz) * t + 0.5)
+                local l = step_onto(g, sx, sz, y) or floor_near(g, sx, sz, y)
+                if l ~= nil then
+                    y = height_at(g, sx, sz, l)
+                    emit(sx, sz, l)
+                end
                 k = k + stride
             end
         end
-        emit(cx, cz)
+        emit(cx, cz, layer)
     end
     -- The ends are the real ones, not the middle of whatever cell they landed in.
     points[1] = { x = x1, z = z1, y = y1 or points[1].y }
@@ -402,8 +472,9 @@ function N.status()
     if N.grid == nil then
         return 'navmesh: none loaded (see docs/NAVMESH.md)'
     end
-    return ('navmesh: zone %d, %dx%d at %.0f yalms, %s (%d cells searched)')
-        :format(N.grid.zone, N.grid.w, N.grid.h, N.grid.cell, N.state, N.searched)
+    return ('navmesh: zone %d, %dx%d at %.0f yalms, %d floor%s, %s (%d cells searched)')
+        :format(N.grid.zone, N.grid.w, N.grid.h, N.grid.cell, N.grid.layers,
+                N.grid.layers == 1 and '' or 's', N.state, N.searched)
 end
 
 --- Forget everything.  The tests move between zones faster than a player can.
