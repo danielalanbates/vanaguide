@@ -59,7 +59,34 @@ local L = {
     -- points down, so this is subtracted.  Half a yalm is enough to clear a paving stone
     -- and little enough that the line still reads as lying on the road.
     lift = 0.5,
+    -- How far along the route the line is drawn, in yalms.  A guide's line is a hint about
+    -- the next stretch of road, not a map of the whole journey: drawn to the end, a route
+    -- that goes round a building shows every bend of it *through* the building, because the
+    -- overlay has no depth buffer.  Cut it short and it reads as "this way, to the corner",
+    -- which is all a walker can act on anyway.  Zero means no limit.
+    horizon = 40,
 }
+
+--- Cut a polyline to its first `limit` yalms, interpolating the last point so the end
+--- lands exactly on the horizon rather than at whichever vertex came before it.
+--- Returns the trimmed list and whether anything was cut off.
+local function within_horizon(live, limit)
+    if limit == nil or limit <= 0 or #live < 2 then return live, false end
+    local out, walked = { live[1] }, 0
+    for i = 2, #live do
+        local a, b = live[i - 1], live[i]
+        local d = U.dist(a.x, a.z, b.x, b.z)
+        if walked + d > limit then
+            local t = (limit - walked) / math.max(d, 1e-6)
+            out[#out + 1] = { x = a.x + (b.x - a.x) * t, z = a.z + (b.z - a.z) * t,
+                              y = (a.y or 0) + ((b.y or a.y or 0) - (a.y or 0)) * t }
+            return out, true
+        end
+        out[#out + 1] = b
+        walked = walked + d
+    end
+    return out, false
+end
 
 local function with_alpha(rgb, a)
     local alpha = math.floor(math.max(0, math.min(1, a)) * 255)
@@ -101,6 +128,8 @@ function L.draw(w, target, label)
     local live = { { x = w.x, z = w.z, y = w.y or points[start].y } }
     for i = start + 1, #points do live[#live + 1] = points[i] end
     if #live < 2 then live[#live + 1] = { x = target.x, z = target.z, y = target.y or w.y or 0 } end
+    local cut
+    live, cut = within_horizon(live, L.horizon)
 
     local total = U.dist(w.x, w.z, target.x, target.z)
     local rgb = colour_for(total)
@@ -127,6 +156,9 @@ function L.draw(w, target, label)
                     local t = (i - 1) / math.max(1, n - 1)
                     local wide = L.width * scale * (1 - 0.6 * t)
                     local fade = L.alpha * (1 - 0.45 * t)
+                    -- A cut line tapers to nothing rather than stopping dead in the road,
+                    -- so the end reads as "and onwards", not as the destination.
+                    if cut and t > 0.7 then fade = fade * (1 - t) / 0.3 end
                     dl:AddLine({ x1, y1 }, { x2, y2 }, COL_SHELL, wide + 2 * scale)
                     dl:AddLine({ x1, y1 }, { x2, y2 }, with_alpha(rgb, fade), wide)
                 end
@@ -144,17 +176,20 @@ function L.draw(w, target, label)
                     local t = (i - 1) / math.max(1, n - 1)
                     local pulse = ((i / 3) + phase) % 1
                     local r = (2.2 + 2.2 * (1 - pulse)) * (1 - 0.5 * t) * scale
-                    dl:AddCircleFilled({ sx, sy }, r,
-                        with_alpha(rgb, L.alpha * (1 - 0.4 * t) * (0.35 + 0.65 * (1 - pulse))), 8)
+                    local a = L.alpha * (1 - 0.4 * t) * (0.35 + 0.65 * (1 - pulse))
+                    if cut and t > 0.7 then a = a * (1 - t) / 0.3 end
+                    dl:AddCircleFilled({ sx, sy }, r, with_alpha(rgb, a), 8)
                 end
             end
         end
 
         -- The destination itself: a ring on the ground with a post standing out of it, so it
         -- is findable when the ring is edge-on, plus how far away it is.
+        -- Only when the destination is actually within the drawn stretch: a ring at the
+        -- horizon would mark a spot in the road as the place to be.
         local last = live[n]
         local gx, gy, gw = Pr.point(last.x, last.z, (last.y or 0) - lift)
-        if gw > 0.05 then
+        if not cut and gw > 0.05 then
             local top_x, top_y = Pr.point(last.x, last.z, (last.y or 0) - lift - 2.4)
             if dl.AddCircle ~= nil then
                 dl:AddCircle({ gx, gy }, 9 * scale, COL_SHELL, 16, 4 * scale)
@@ -201,6 +236,12 @@ function L.set(what, value)
         end
         L.style = value
         return 'line style ' .. value
+    elseif what == 'horizon' then
+        local n = tonumber(value)
+        if n == nil then return 'horizon takes a number of yalms (0 = whole route)' end
+        L.horizon = math.max(0, math.min(500, n))
+        return (L.horizon > 0) and ('line horizon %d yalms'):format(L.horizon)
+                                or 'line horizon off (whole route)'
     elseif what == 'width' then
         local n = tonumber(value)
         if n == nil then return 'width takes a number of pixels' end
@@ -259,8 +300,9 @@ function L.status()
     if not L.enabled then
         return 'line: off' .. (L.off_reason and (' (' .. L.off_reason .. ')') or '')
     end
-    return ('line: on, %s, camera %s (%d frames), path %s')
-        :format(L.style, Pr.ok and 'ok' or ('failing: ' .. tostring(Pr.reason)),
+    return ('line: on, %s, horizon %s, camera %s (%d frames), path %s')
+        :format(L.style, (L.horizon > 0) and (('%dy'):format(L.horizon)) or 'off',
+                Pr.ok and 'ok' or ('failing: ' .. tostring(Pr.reason)),
                 Pr.frames, Path.source)
 end
 
