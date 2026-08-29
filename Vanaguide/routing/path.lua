@@ -91,9 +91,22 @@ function Path.to(w, target)
     if w == nil or target == nil or w.x == nil or w.zone == nil then return nil end
     if target.x == nil or target.z == nil then return nil end
 
-    local moved = (cache.ax == nil) or (U.dist(w.x, w.z, cache.ax, cache.az) > 12)
+    -- A path is recomputed when the player has *left* it, not merely walked along it: the
+    -- line is drawn from the nearest point forward, so a route being followed stays right
+    -- for its whole length.  Recomputing every dozen yalms made the line blink -- each search
+    -- takes a few frames, and a straight line stood in for it -- which looked like a glitch
+    -- about every third stride.  The one exception is a straight (no-mesh) path, which is
+    -- cheap and is re-aimed as before.
     local retargeted = (cache.tx == nil)
         or (math.abs(target.x - cache.tx) > 2) or (math.abs(target.z - cache.tz) > 2)
+    local moved
+    if cache.points ~= nil and cache.source == 'navmesh' then
+        local near = Path.nearest_index(cache.points, w.x, w.z)
+        local off = U.dist(w.x, w.z, cache.points[near].x, cache.points[near].z)
+        moved = off > 10 or U.dist(w.x, w.z, cache.ax, cache.az) > 80
+    else
+        moved = (cache.ax == nil) or (U.dist(w.x, w.z, cache.ax, cache.az) > 12)
+    end
     if cache.points ~= nil and cache.zone == w.zone and not moved and not retargeted
         and not cache.pending then
         return cache.points, cache.source
@@ -114,6 +127,13 @@ function Path.to(w, target)
         elseif ok and again then
             pending = true
         end
+    end
+    if points == nil and pending and cache.points ~= nil and cache.zone == w.zone
+        and cache.source == 'navmesh' and not retargeted then
+        -- The search is still running: keep showing the bent path we had rather than a
+        -- straight line that points somewhere else for three frames.
+        cache.pending = true
+        return cache.points, cache.source
     end
     if points == nil then
         points = subdivide(w.x, w.z, w.y or 0, target.x, target.z, ty,
