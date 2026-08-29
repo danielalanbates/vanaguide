@@ -24,8 +24,11 @@ Consequences worth knowing:
 
 * A fresh character routes badly in areas it has never walked. This is expected and it
   fixes itself.
-* Learned edges are per character. Sharing them (an account-wide or community-wide graph)
-  is listed in [PATHWAYS.md](PATHWAYS.md) and is the single highest-value thing left to do.
+* Learned edges are account-wide (`core/learned.lua`): every crossing is written to one
+  shared `addons/Vanaguide/learned.lua`, merged in for whoever logs in, so a second
+  character starts with every road the first already walked. A per-character `learned` set
+  saved before this is migrated into the shared file on first load. A community-wide graph
+  is the next step up and is still listed in [PATHWAYS.md](PATHWAYS.md).
 * A learned edge has no direction restriction, which is wrong for one-way drops. The cost
   of that error is a route that suggests walking up a cliff you fell down; it is on the
   known-wrong list.

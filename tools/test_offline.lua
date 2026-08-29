@@ -147,6 +147,44 @@ ok(graph.learn(230, 299), 'a new zone line is learned')
 ok(not graph.learn(230, 299), 'and only learned once')
 ok(graph.route(230, 299) ~= nil, 'learning opens the route')
 
+-- ---- account-wide learned graph (core/learned.lua) ----------------------------
+local Learned = require('core.learned')
+
+-- serialize -> parse is a round trip, and parse rejects junk without throwing.
+local seed = { ['1:2'] = true, ['2:1'] = true, ['300:301'] = true }
+local back = Learned.parse(Learned.serialize(seed))
+eq(back['1:2'], true, 'serialize/parse keeps a learned key')
+eq(back['300:301'], true, 'serialize/parse keeps a far key')
+eq(next(Learned.parse('this is not lua { ')), nil, 'parse of garbage is empty, not an error')
+eq(next(Learned.parse('return 7')), nil, 'parse of a non-table chunk is empty')
+eq(Learned.parse("return { ['9:9']=true, bad=true, ['x:y']=true }")['9:9'], true,
+    'parse keeps well-formed keys')
+eq(Learned.parse("return { bad=true, ['x:y']=true }")['bad'], nil,
+    'parse drops keys that are not from:to')
+
+-- merge is a union; both directions and both sources survive.
+local m = Learned.merge({ ['1:2'] = true }, { ['3:4'] = true, ['1:2'] = true })
+eq(m['1:2'], true, 'merge keeps a shared key'); eq(m['3:4'], true, 'merge adds the other source')
+local mc = 0; for _ in pairs(m) do mc = mc + 1 end
+eq(mc, 2, 'merge de-duplicates')
+
+-- pairs_list de-duplicates both directions to one from<to pair and sorts.
+local pl = Learned.pairs_list({ ['5:2'] = true, ['2:5'] = true, ['1:9'] = true })
+eq(#pl, 2, 'pairs_list collapses both directions to one pair')
+eq(pl[1][1], 1, 'pairs_list is sorted'); eq(pl[1][2], 9, 'and keeps from<to')
+eq(pl[2][1], 2, 'second pair low is the min'); eq(pl[2][2], 5, 'second pair high is the max')
+
+-- dump_block is valid Lua that returns the pairs, and names zones when asked.
+local block = Learned.dump_block({ ['230:300'] = true }, function (id) return zones.name[id] end)
+ok(block:find('Z.learned_walk') ~= nil, 'dump names the table')
+ok(block:find('{ 230, 300 }') ~= nil, 'dump lists the pair')
+ok(block:find("Southern San d'Oria") ~= nil, 'dump names the zone in a comment')
+local chunk = loadstring('local Z = {}\n' .. block .. '\nreturn Z.learned_walk')
+ok(chunk ~= nil, 'the dumped block is loadable Lua')
+if chunk ~= nil then eq(chunk()[1][1], 230, 'and evaluates to the pair list') end
+eq(Learned.dump_block({}):find('0 crossings') ~= nil and true or false, true,
+    'an empty dump says so')
+
 -- ---- recommendation -----------------------------------------------------------
 WORLD.zone, WORLD.x, WORLD.z, WORLD.yaw = 230, 0, 0, 0
 local rec = R.recommend(steps[1], C.world())
