@@ -29,7 +29,7 @@ local function walkStep(player, tx, ty, tz, speed, gen, last)
     -- and os.clock() here is CPU time, which is useless for pacing (it made 5 yalms/s come
     -- out at 1.4).  Size the hop for the period that was measured.
     local now = 0
-    local hop = speed * 0.4
+    local hop = speed * 0.8
     if d <= hop then
         player:setPos(tx, ty, tz, player:getRotPos())
         player:setLocalVar('walkto_gen', 0)
