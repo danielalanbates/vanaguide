@@ -124,6 +124,62 @@ def parse_docks(root, names):
     return docks
 
 
+DOOR_AREA = re.compile(r'register(Cuboid|Cylindrical)TriggerArea\(\s*(\d+)\s*,([^)]*)\)')
+DOOR_CASE = re.compile(r'\[\s*(\d+)\s*\]\s*=\s*function\s*\(\)(.*?)\n\s{8}end,', re.S)
+DOOR_START = re.compile(r'startEvent\(\s*(\d+)')
+DOOR_FINISH = re.compile(r'csid\s*==\s*(\d+)\s*(?:then|or|and)(.*?)(?=\n\s{4}(?:elseif|end)\b)', re.S)
+DOOR_SETPOS = re.compile(r'setPos\(\s*([-\d.]+)\s*,\s*([-\d.]+)\s*,\s*([-\d.]+)\s*,\s*[-\d.]+\s*,\s*(\d+)\s*\)')
+
+
+def parse_doors(root, names):
+    """-> {from_zone: [(to_zone, x, z, y), ...]} for doors that are not zone lines.
+
+    A city's inner gate -- the Chateau d'Oraguille from Northern San d'Oria, the Metalworks,
+    Heavens Tower -- is not in zonelines.sql.  It is a *trigger area* in the zone's Zone.lua:
+    stepping into a cuboid starts a gatekeeper event, and when that event finishes the
+    server moves the player into the other zone with setPos(..., zoneId).  Read the three
+    parts and join them: area id -> events started -> zone the finish leads to.  The walk-to
+    point is the middle of the area.  Only areas whose event finish carries a zone id count;
+    quest trigger areas start events too, and lead nowhere.
+    """
+    doors = {}
+    by_name = {v.replace(' ', '_'): k for k, v in names.items()}
+    zdir = os.path.join(root, 'scripts', 'zones')
+    if not os.path.isdir(zdir):
+        return doors
+    for d in sorted(os.listdir(zdir)):
+        zone = by_name.get(d)
+        path = os.path.join(zdir, d, 'Zone.lua')
+        if zone is None or not os.path.exists(path):
+            continue
+        text = open(path, encoding='utf-8', errors='replace').read()
+        areas = {}
+        for m in DOOR_AREA.finditer(text):
+            nums = [float(v) for v in re.findall(r'-?\d+(?:\.\d+)?', m.group(3))]
+            if m.group(1) == 'Cuboid' and len(nums) >= 6:
+                x1, y1, z1, x2, y2, z2 = nums[:6]
+                areas[int(m.group(2))] = ((x1 + x2) / 2, (z1 + z2) / 2, (y1 + y2) / 2)
+            elif m.group(1) == 'Cylindrical' and len(nums) >= 3:
+                areas[int(m.group(2))] = (nums[0], nums[1], 0.0)
+        finish = {}
+        for m in DOOR_FINISH.finditer(text):
+            sp = DOOR_SETPOS.search(m.group(2))
+            if sp:
+                finish[int(m.group(1))] = int(sp.group(4))
+        for m in DOOR_CASE.finditer(text):
+            aid = int(m.group(1))
+            if aid not in areas:
+                continue
+            for ev in DOOR_START.findall(m.group(2)):
+                to = finish.get(int(ev))
+                if to is not None and to != zone:
+                    x, z, y = areas[aid]
+                    row = (to, x, z, y)
+                    if row not in doors.setdefault(zone, []):
+                        doors[zone].append(row)
+    return doors
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('root', help='a LandSandBoat checkout')
@@ -137,6 +193,12 @@ def main():
     exits = parse_zonelines(src)
     names = parse_zone_names(args.root)
     docks = parse_docks(args.root, names)
+    doors = parse_doors(args.root, names)
+    ndoors = 0
+    for zone, rows in doors.items():
+        for r in rows:
+            exits.setdefault(zone, []).append(r)
+            ndoors += 1
 
     out = [
         '-- Vanaguide :: data/zonepoints.lua',
@@ -190,8 +252,8 @@ def main():
     out += ['}', '', 'return Z', '']
 
     open(args.out, 'w', encoding='utf-8').write('\n'.join(out))
-    print('%d exits across %d zones, %d docks -> %s'
-          % (total, len(exits), len(docks), args.out))
+    print('%d exits across %d zones (%d of them doors), %d docks -> %s'
+          % (total, len(exits), ndoors, len(docks), args.out))
 
 
 if __name__ == '__main__':
