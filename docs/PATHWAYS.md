@@ -18,8 +18,18 @@ walking there works (it teleports).
 
 ## 2. A shared travel graph
 
-The graph learns zone lines from play and saves them per character
-([ROUTING.md](ROUTING.md)). Three escalating options:
+**The generated zone-line table is now wired into the graph (2026-08-29).** For a long time
+`routing/zonegraph.lua` built only from the 76-pair hand-written `data/travel.lua` seed and the
+230-crossing `data/zonelines.lua` — generated from LandSandBoat by `tools/gen_zonelines.py`
+precisely to fix this — was never required by anything. It is now, deduplicated against the seed,
+and Dijkstra prefers coordinate-backed legs over blind ones so a phantom seed edge can no longer
+shadow the real walkable chain (the cause of the 2026-08-29 teleport). See [ROUTING.md](ROUTING.md).
+Remaining: a *learned* edge still carries no coordinate, so it routes but the arrow can't point
+along it — recording the from-position at the crossing (`Z.learn(from,to,x,z,y)`) so a learned
+edge is drawable and dumps a zonepoint too is the clean next step.
+
+The graph also learns zone lines from play and saves them, now account-wide
+([ROUTING.md](ROUTING.md)). Escalating options:
 
 * **Account-wide** — DONE (2026-08-29, `core/learned.lua`). `learned` now lives in one shared
   `addons/Vanaguide/learned.lua`, not the per-character settings tree; it is merged in on

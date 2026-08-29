@@ -147,6 +147,42 @@ ok(graph.learn(230, 299), 'a new zone line is learned')
 ok(not graph.learn(230, 299), 'and only learned once')
 ok(graph.route(230, 299) ~= nil, 'learning opens the route')
 
+-- ---- generated zone lines wired into the graph + coordinate-backed preference --
+-- The graph used to build from the 76-pair hand-written seed alone, which carried a phantom
+-- direct Southern<->Port San d'Oria walk the server data contradicts (the real geometry is the
+-- chain Port-Northern-Southern) and shadowed the correct route with a shorter blind hop -- the
+-- cause of the 2026-08-29 run teleporting its last leg. data/zonelines.lua (230 real crossings)
+-- is now wired in, and routing prefers coordinate-backed legs over blind ones.
+local function legs_zones(legs) local s = {}; for _, l in ipairs(legs) do s[#s + 1] = l.to end; return s end
+local function count_blind(legs) local n = 0; for _, l in ipairs(legs) do if l.blind then n = n + 1 end end; return n end
+
+local p2s, p2c = graph.route(232, 230)   -- Port -> Southern San d'Oria
+ok(p2s ~= nil, 'Port -> Southern routes')
+eq(#p2s, 2, 'Port -> Southern is two legs (via Northern), not the phantom direct hop')
+eq(p2s[1].to, 231, 'first leg is into Northern San d\'Oria')
+eq(p2s[2].to, 230, 'second leg is into Southern San d\'Oria')
+eq(count_blind(p2s), 0, 'and neither leg is blind -- both have a doorway to walk to')
+eq(p2c, 180, 'the honest travel cost is two walk legs (180), not inflated by the blind bias')
+
+local s2p = graph.route(230, 232)        -- and the reverse
+eq(#s2p, 2, 'Southern -> Port is also two legs via Northern')
+eq(count_blind(s2p), 0, 'reverse is fully walkable too')
+
+-- {231,232} exists ONLY in the generated zonelines table, not the hand-written seed: proof the
+-- generated data is actually wired into the graph now.
+local n2p = graph.route(231, 232)
+ok(n2p ~= nil and #n2p == 1 and n2p[1].to == 232, 'Northern -> Port is a direct generated crossing')
+
+-- A blind edge is still usable when it is the only way (learned edges have no coordinate):
+-- routing must fall back to it, just no longer prefer it.
+ok(graph.route(230, 598) == nil, 'still no route to an unconnected zone')
+graph.learn(230, 598)
+local blindroute, blindcost = graph.route(230, 598)
+ok(blindroute ~= nil, 'a learned (blind) edge still opens a route')
+eq(count_blind(blindroute), 1, 'and that leg is correctly flagged blind')
+ok(blindcost ~= nil and blindcost < 10000000,
+    'the returned cost is the honest travel cost, not the blind-biased internal weight')
+
 -- ---- account-wide learned graph (core/learned.lua) ----------------------------
 local Learned = require('core.learned')
 

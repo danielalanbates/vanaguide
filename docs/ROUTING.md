@@ -4,6 +4,23 @@
 zone line you can walk across (cost: 90 seconds, the same for all of them) or a transit
 link with its own cost — an airship is 420 seconds because you wait for it.
 
+The walk edges come from **two** sources, deduplicated: the 230-crossing table generated from
+LandSandBoat's own zone lines (`data/zonelines.lua`, via `tools/gen_zonelines.py`) *and* the
+76-pair hand-written seed (`data/travel.lua`) for anything the generated table lacks. For a long
+time only the seed was wired in — which both missed ~180 quests' worth of zones and carried edges
+the server data contradicts (a direct Southern↔Port San d'Oria walk that does not exist; the real
+geometry is the chain Port–Northern–Southern). Wiring the generated table in fixed the coverage;
+the next paragraph fixes the contradiction.
+
+**The distance minimised is lexicographic: blind legs first, then cost.** A *blind* leg is a
+crossing with no doorway coordinate in `data/zonepoints.lua` — a phantom seed edge, or a learned
+one — which the guide can name ("Zone into X") but cannot point an arrow at or auto-walk. A route
+made entirely of coordinate-backed legs always beats one containing a blind hop, however much
+shorter the blind route is, because a route the guide can actually walk you along is strictly more
+useful than a shorter one it can only describe. Blind edges are still used when they are the only
+way. This is what stopped the phantom direct San d'Oria edge from shadowing the real walkable
+chain (it was the cause of a guided run teleporting its last leg, 2026-08-29).
+
 `routing/router.lua` turns the result into one instruction:
 
 * **here** — the step is in this zone. The arrow gets a bearing and a distance.
