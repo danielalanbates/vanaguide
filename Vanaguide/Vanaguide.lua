@@ -805,6 +805,9 @@ ashita.events.register('command', 'vg_command', function (e)
         local label = (rec.mode == 'travel') and U.zone_name(rec.leg and rec.leg.to) or step.text;
         Walk.start(rec.target, label);
         vg.walk_auto = (what == 'auto');
+        -- Auto-walking ends every event it runs into: a city gate is a gatekeeper event whose
+        -- finish is what moves the character through the door.  Restored when the walk ends.
+        if (vg.walk_auto) then vg.walk_event_auto_was = event.auto; event.auto = true; end
         U.print(Walk.status());
         return;
     end
@@ -1224,6 +1227,10 @@ ashita.events.register('d3d_present', 'vg_present', function ()
             elseif (Walk.active and rec.target == nil) then
                 Walk.stop('the step has no place');
                 U.print('walk: stopped, the step has no place to walk to');
+            end
+            if (not Walk.active and vg.walk_auto) then
+                vg.walk_auto = false;
+                if (vg.walk_event_auto_was ~= nil) then event.auto = vg.walk_event_auto_was; vg.walk_event_auto_was = nil; end
             end
 
             -- The line first, so the arrow is drawn on top of it rather than under it.
