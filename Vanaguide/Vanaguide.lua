@@ -13,6 +13,7 @@
 *   /vg nav                    whether a navigation grid is loaded for this zone
 *   /vg line on | off          the line on the ground that shows the way
 *   /vg line style solid|dots|both, /vg line width <px>, /vg line horizon <yalms>
+*   /vg walk [auto|stop|status|speed <y/s>]   walk the character to the target (LOCAL WORLD ONLY)
 *   /vg mark <name>            record where you are standing into marks.txt (guide authoring)
 *   /vg arrow flip             flip the arrow's rotation if it points the wrong way
 *   /vg arrow nudge <degrees>  rotate the arrow by a fixed offset
@@ -76,6 +77,7 @@ local Project = require('ui.project');
 -- The navigation grid is optional: with no data/nav/<zone>.vgnav it answers "no" and the
 -- line stays straight.  See docs/NAVMESH.md -- the grids are generated, never shipped.
 local Nav    = require('routing.navgrid');
+local Walk   = require('core.walk');
 
 require('guides.init');
 
@@ -564,6 +566,7 @@ ashita.events.register('command', 'vg_command', function (e)
                     tostring((pcall(require, 'imgui')))));
         U.print(Line.status());
         U.print(Nav.status());
+        U.print(Walk.status());
         U.print(('exits known out of this zone: %d'):format(points.count(U.zone())));
         return;
     end
@@ -757,6 +760,52 @@ ashita.events.register('command', 'vg_command', function (e)
         U.print(('going to %s: %s'):format(U.zone_name(id), rec.text or '?'));
         local summary = R.summary(rec);
         if (summary ~= nil) then U.print('  ' .. summary); end
+        return;
+    end
+
+    -- Walk the character to the current target.  Local world only: writing the player's
+    -- position is a bannable offence anywhere that is not our own server.
+    if (sub == 'walk') then
+        local what = (#args > 2) and args[3]:lower() or '';
+        if (what == 'stop' or what == 'off') then
+            Walk.stop('stopped');
+            U.print(Walk.status());
+            return;
+        end
+        if (what == 'status') then U.print(Walk.status()); return; end
+        if (what == 'mode' and #args > 3) then
+            Walk.mode = args[4]:lower();
+            U.print('walk mode ' .. Walk.mode);
+            return;
+        end
+        if (what == 'tick' and #args > 3) then
+            Walk.tick = math.max(0.1, math.min(2, tonumber(args[4]) or 0.25));
+            U.print(('walk tick %.2f s'):format(Walk.tick));
+            return;
+        end
+        if (what == 'speed' and #args > 3) then
+            Walk.speed = math.max(0.5, math.min(20, tonumber(args[4]) or 5));
+            U.print(('walk speed %.1f yalms/s'):format(Walk.speed));
+            return;
+        end
+        if (what == 'allow') then
+            vg.walk_allowed = true;
+            U.print('walk: allowed on this world');
+            return;
+        end
+        if (not vg.walk_allowed) then
+            U.print('walk: only on the local world. /vg walk allow  says this is it (never on a hosted server).');
+            return;
+        end
+        local step = vg.goto_step or P.step();
+        if (step == nil) then U.print('walk: no step'); return; end
+        local w = C.world(); w.yaw = U.heading();
+        local rec = R.recommend(step, w);
+        if (rec.target == nil) then U.print('walk: the step has no place to walk to (' .. tostring(rec.text) .. ')'); return; end
+        local label = (rec.mode == 'travel') and U.zone_name(rec.leg and rec.leg.to) or step.text;
+        Walk.start(rec.target, label);
+        vg.walk_auto = (what == 'auto');
+        U.print(Walk.status());
         return;
     end
 
@@ -1157,6 +1206,24 @@ ashita.events.register('d3d_present', 'vg_present', function ()
                 vg.goto_step = nil;
                 Window.destination = nil;
                 Path.forget();
+            end
+
+            -- Walking: re-aim at the current target every frame (a step that completes, or
+            -- a zone crossed, moves it) and take one run-speed step along the line.
+            if (Walk.active and rec.target ~= nil) then
+                if (Walk.target.x ~= rec.target.x or Walk.target.z ~= rec.target.z) then
+                    Walk.target = { x = rec.target.x, z = rec.target.z, y = rec.target.y };
+                end
+                if (Walk.update(w)) then
+                    U.print(('walk: arrived (%s)'):format(step.text or ''));
+                    if (vg.walk_auto and rec.mode == 'travel') then
+                        -- A zone line: the crossing happens on its own once we stand on it.
+                        Walk.start(rec.target, 'zoning');
+                    end
+                end
+            elseif (Walk.active and rec.target == nil) then
+                Walk.stop('the step has no place');
+                U.print('walk: stopped, the step has no place to walk to');
             end
 
             -- The line first, so the arrow is drawn on top of it rather than under it.
