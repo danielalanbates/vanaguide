@@ -12,7 +12,7 @@
 *   /vg goto <zone>            route to any zone, guide or no guide; /vg goto off to stop
 *   /vg nav                    whether a navigation grid is loaded for this zone
 *   /vg line on | off          the line on the ground that shows the way
-*   /vg line style solid|dots|both, /vg line width <px>
+*   /vg line style solid|dots|both, /vg line width <px>, /vg line horizon <yalms>
 *   /vg mark <name>            record where you are standing into marks.txt (guide authoring)
 *   /vg arrow flip             flip the arrow's rotation if it points the wrong way
 *   /vg arrow nudge <degrees>  rotate the arrow by a fixed offset
@@ -86,7 +86,7 @@ local default_settings = T{
     arrow = T{ visible = true, calibration = 1, offset = 0, x = ARROW_X, y = ARROW_Y, scale = ARROW_SCALE },
     -- The line is on by default: it is the thing that makes the guide readable at a glance,
     -- and it turns itself off and says why if the device will not project (ui/line.lua).
-    line = T{ visible = true, style = 'both', width = 4 },
+    line = T{ visible = true, style = 'both', width = 4, horizon = 40 },
     window = T{ visible = true },
 };
 
@@ -142,6 +142,7 @@ local function apply_settings(s)
     Line.enabled = vg.settings.line.visible ~= false;
     Line.style   = vg.settings.line.style or 'both';
     Line.width   = vg.settings.line.width or 4;
+    Line.horizon = vg.settings.line.horizon or 40;
     Window.open[1] = vg.settings.window.visible ~= false;
     if (vg.settings.guide ~= nil and vg.settings.guide ~= '') then
         load_guide(vg.settings.guide);
@@ -771,13 +772,14 @@ ashita.events.register('command', 'vg_command', function (e)
         end
         local said = Line.set(what, (#args > 3) and args[4]:lower() or nil);
         if (said == nil) then
-            U.print('/vg line on | off | style solid|dots|both | width <px>');
+            U.print('/vg line on | off | style solid|dots|both | width <px> | horizon <yalms>');
             U.print(Line.status());
             return;
         end
         vg.settings.line.visible = Line.enabled;
         vg.settings.line.style = Line.style;
         vg.settings.line.width = Line.width;
+        vg.settings.line.horizon = Line.horizon;
         settings.save();
         U.print(said);
         U.print(Line.status());
