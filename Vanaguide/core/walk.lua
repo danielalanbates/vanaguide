@@ -57,7 +57,14 @@ local W = {
     -- there is no animation without input -- but it follows the line, crosses zone lines,
     -- and arrives.  The other modes are kept so the next person can re-measure rather than
     -- re-discover.
-    mode = 'server',
+    -- 'follow' (2026-08-29): the client's *own* auto-run controller, the one `/follow` and the
+    -- numpad autorun use.  Ashita exposes it as IAutoFollow: a delta vector plus an
+    -- IsAutoRunning flag, and the client then runs the character along that vector itself --
+    -- with the run animation, its own collision and the ordinary movement packets, on any
+    -- world, with no server help and no input.  This is what Windower's `ffxi.run()` does
+    -- and what every walking bot on that side is built on.  Tried after 'server' shipped;
+    -- measured below in docs/WALK.md.
+    mode = 'follow',
     tick = 0.25,        -- seconds between server steps in 'server' mode
     last_tick = nil,
 }
@@ -78,7 +85,7 @@ function W.start(target, label)
     W.active, W.target, W.label = true, { x = target.x, z = target.z, y = target.y }, label
     W.last, W.walked, W.reason = nil, 0, nil
     W.stuck_since, W.stuck_pos, W.nudge = nil, nil, 0
-    W.last_wp, W.last_tick = nil, nil
+    W.last_wp, W.last_tick, W.aim, W.nudges, W.best_remaining = nil, nil, nil, 0, nil
     return true
 end
 
@@ -87,9 +94,28 @@ function W.stop(reason)
         W.reason = reason or 'stopped'
         if W.mode == 'server' then
             pcall(function () AshitaCore:GetChatManager():QueueCommand(-1, '!walkto stop') end)
+        elseif W.mode == 'follow' then
+            W.run(nil)
         end
     end
     W.active, W.last, W.last_wp, W.last_tick = false, nil, nil, nil
+end
+
+--- Point the client's auto-run at a direction (a displacement in addon axes), or stop it.
+function W.run(dx, dz, dy)
+    pcall(function ()
+        local f = AshitaCore:GetMemoryManager():GetAutoFollow()
+        if dx == nil then
+            f:SetIsAutoRunning(0)
+            f:SetFollowDeltaX(0); f:SetFollowDeltaY(0); f:SetFollowDeltaZ(0)
+            return
+        end
+        -- No entity to follow: the delta alone steers.  Memory axes: X, then Y for the other
+        -- horizontal axis (this addon's z), then Z for height (this addon's y) -- see below.
+        f:SetFollowTargetIndex(0); f:SetFollowTargetServerId(0)
+        f:SetFollowDeltaX(dx); f:SetFollowDeltaY(dz); f:SetFollowDeltaZ(dy or 0)
+        f:SetIsAutoRunning(1)
+    end)
 end
 
 --- One frame.  `w` is the world snapshot (x, z, y, zone, yaw).  Returns true on arrival.
@@ -114,22 +140,28 @@ function W.update(w)
     if dt <= 0 or dt > 0.5 then return false end     -- a hitch or a zone: skip, do not leap
 
     -- Progress check: has the entity actually gone anywhere since we last looked?
-    if W.stuck_pos == nil or U.dist(w.x, w.z, W.stuck_pos.x, W.stuck_pos.z) > 0.3 then
+    -- Progress means the target got nearer, not that the position changed: a runner
+    -- pressed against a wall bounces half a yalm either way all day (measured 2026-08-29).
+    local t = W.target
+    local remaining = U.dist(w.x, w.z, t.x, t.z)
+    if W.stuck_pos == nil or (W.mode ~= 'follow' and U.dist(w.x, w.z, W.stuck_pos.x, W.stuck_pos.z) > 0.3)
+       or (W.mode == 'follow' and remaining < (W.best_remaining or math.huge) - 0.5) then
         W.stuck_pos, W.stuck_since = { x = w.x, z = w.z }, now
+        W.best_remaining = remaining
         if W.nudge ~= 0 and U.dist(w.x, w.z, W.stuck_pos.x, W.stuck_pos.z) > 3 then W.nudge = 0 end
     elseif now - W.stuck_since > W.stuck_limit then
         W.stop(('stuck at (%.1f, %.1f)'):format(w.x, w.z))
         return false
     end
-    local stuck = (now - W.stuck_since) > 0.4
+    -- The client's own runner turns before it moves, so give it longer before calling
+    -- the walk stuck; the entity writes are instant and need no such grace.
+    local stuck = (now - W.stuck_since) > ((W.mode == 'follow') and 2.5 or 0.4)
     if stuck then
         -- Each half-second stuck: aim one point further and swing to the other side.
         local n = math.floor((now - W.stuck_since) / 0.5)
         W.nudge = (n % 2 == 0) and n or -n
     end
 
-    local t = W.target
-    local remaining = U.dist(w.x, w.z, t.x, t.z)
     if remaining <= W.arrive then
         W.stop('arrived')
         return true
@@ -141,20 +173,23 @@ function W.update(w)
     local points = (remaining > 4) and Path.to(w, t) or nil
     local nx, nz, ny = t.x, t.z, t.y
     if points ~= nil and #points >= 2 then
-        local i = Path.nearest_index(points, w.x, w.z)
+        local i = Path.nearest_index(points, w.x, w.z, w.y)
         -- Aim past the nearest point so a point already reached does not pin us in place.
         local j = i
         while j < #points and U.dist(w.x, w.z, points[j].x, points[j].z) < 1.5 do j = j + 1 end
         if stuck then j = math.min(#points, j + math.abs(W.nudge)) end
-        if W.mode == 'server' then
+        if W.mode == 'server' or W.mode == 'follow' then
             -- Aim at the far end of the straight stretch ahead, not the next sample: the
             -- server walks a straight line anyway, and one command per corner is quieter
             -- than one every six yalms.  A point counts as "on the stretch" while every
             -- sample between here and it lies within a yalm of the straight line to it.
+            -- The client's runner also goes straight at its aim, so the stretch is kept
+            -- short for it: a corner cut by six yalms is a wall.
             local k = j
+            local far = (W.mode == 'server') and 60 or 6
             while k < #points do
                 local cx, cz = points[k + 1].x, points[k + 1].z
-                if U.dist(w.x, w.z, cx, cz) > 60 then break end
+                if U.dist(w.x, w.z, cx, cz) > far then break end
                 local vx, vz = cx - w.x, cz - w.z
                 local vl = math.sqrt(vx * vx + vz * vz)
                 if vl < 1e-3 then break end
@@ -214,6 +249,39 @@ function W.update(w)
         return false
     end
 
+    if W.mode == 'follow' then
+        -- Hand the client a displacement several yalms long in the direction of the next
+        -- waypoint and let it run.  Re-aimed every frame, so corners are taken as the path
+        -- turns; the sidestep above is already folded into dx/dz.
+        -- Horizontal only.  Measured 2026-08-29: a vertical component the client cannot
+        -- run up (the grid's floor and the entity's disagree by a few yalms on stairs and
+        -- ramps) makes it cancel auto-run outright; left at 0 it climbs by its own collision.
+        -- Re-aimed every frame: the runner steers toward wherever the delta points now,
+        -- so corners are taken as the path turns.
+        local reach = math.min(d, 6)
+        W.run(dx / d * reach, dz / d * reach, 0)
+        -- Where the client cannot get through -- a stair the grid routes across a floor
+        -- boundary, a doorway a hand too narrow -- the local world's server carries it a
+        -- few yalms along the path (`!walkto`, as 'server' mode does for the whole way),
+        -- and the runner takes over again.  Never fires on a hosted world: nothing there
+        -- answers `!walkto`, and Walk.start is gated behind /vg walk allow anyway.
+        if stuck and (W.last_tick == nil or now - W.last_tick > 3) then
+            local ax, az, ay = nx, nz, ny
+            if points ~= nil and #points >= 2 then
+                local i = Path.nearest_index(points, w.x, w.z, w.y)
+                local k = math.min(#points, i + 3)
+                ax, az, ay = points[k].x, points[k].z, points[k].y
+            end
+            W.last_tick, W.nudges = now, (W.nudges or 0) + 1
+            pcall(function ()
+                AshitaCore:GetChatManager():QueueCommand(-1,
+                    ('!walkto %.2f %.2f %.2f %.1f'):format(ax, ay or (w.y or 0), az, W.speed))
+            end)
+        end
+        W.walked = W.walked + W.speed * dt
+        return false
+    end
+
     local ok = pcall(function ()
         local e = AshitaCore:GetMemoryManager():GetEntity()
         e:SetLocalPositionYaw(idx, yaw)
@@ -242,8 +310,9 @@ end
 function W.status()
     if W.active then
         local t = W.target
-        return ('walk: to (%.1f, %.1f)%s, %.0f yalms walked')
-            :format(t.x, t.z, W.label and (' ' .. W.label) or '', W.walked)
+        return ('walk: to (%.1f, %.1f)%s, %.0f yalms walked%s')
+            :format(t.x, t.z, W.label and (' ' .. W.label) or '', W.walked,
+                    ((W.nudges or 0) > 0) and (', ' .. W.nudges .. ' server nudges') or '')
     end
     return 'walk: idle' .. (W.reason and (' (' .. W.reason .. ')') or '')
 end
