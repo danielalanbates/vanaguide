@@ -57,6 +57,17 @@ local R      = require('routing.router');
 local L      = require('core.lookup');
 local Verify = require('core.verify');
 local Arrow  = require('ui.arrow');
+
+-- Where the arrow sits by default, as a fraction of the screen, and how big it is.
+-- Centred horizontally and low on the screen: Daniel asked for it directly under the macro
+-- bar rather than up in the middle of the view, where it covered what he was walking into.
+-- Measured from a real 2560x1600 frame, not guessed -- see docs/ARROW.md.
+-- The arrow lives at the top, under the game's command bar. It used to sit at 0.86 -- down
+-- among the chat log, the party list and the target bar, competing with all of them for the
+-- one glance it exists to catch. Daniel asked for it moved on 2026-08-25.
+local ARROW_X, ARROW_Y = 0.5, 0.12
+local ARROW_Y_OLD = 0.86        -- the position being migrated away from; see apply_settings
+local ARROW_SCALE = 0.6
 local Window = require('ui.window');
 local Line   = require('ui.line');
 local Path   = require('routing.path');
@@ -72,7 +83,7 @@ local default_settings = T{
     guide = '',
     progress = T{},          -- [guide name] = { index, checked, skipped }
     learned = T{},           -- zone lines this character has crossed
-    arrow = T{ visible = true, calibration = 1, offset = 0, x = 0.5, y = 0.28 },
+    arrow = T{ visible = true, calibration = 1, offset = 0, x = ARROW_X, y = ARROW_Y, scale = ARROW_SCALE },
     -- The line is on by default: it is the thing that makes the guide readable at a glance,
     -- and it turns itself off and says why if the device will not project (ui/line.lua).
     line = T{ visible = true, style = 'both', width = 4 },
@@ -118,7 +129,15 @@ local function apply_settings(s)
     graph.load_learned(vg.settings.learned);
     Arrow.calibration = vg.settings.arrow.calibration or 1;
     Arrow.offset = vg.settings.arrow.offset or 0;
-    Arrow.move(vg.settings.arrow.x or 0.5, vg.settings.arrow.y or 0.28);
+    -- A saved position wins over the default, which would have left every existing install
+    -- sitting at the old spot for ever. Anyone still on the old default is moved once; a
+    -- position somebody actually chose is left alone, because it will not be exactly 0.86.
+    if (vg.settings.arrow.y == ARROW_Y_OLD) then
+        vg.settings.arrow.y = ARROW_Y;
+    end
+    Arrow.move(vg.settings.arrow.x or ARROW_X, vg.settings.arrow.y or ARROW_Y);
+    Arrow.scale = vg.settings.arrow.scale or ARROW_SCALE;
+    Arrow.locked = vg.settings.arrow.locked ~= false;
     if (vg.settings.line == nil) then vg.settings.line = T{ visible = true, style = 'both', width = 4 }; end
     Line.enabled = vg.settings.line.visible ~= false;
     Line.style   = vg.settings.line.style or 'both';
@@ -162,9 +181,154 @@ ashita.events.register('unload', 'vg_unload', function ()
     settings.save();
 end);
 
+-- The event the server currently has open on this client.
+--
+-- Talking to an NPC does not end when the NPC has spoken: the client is left holding an
+-- event, waiting for the player to press Enter. Nothing scripted can press Enter, so the
+-- second `/vg talk` in a row did nothing at all and looked exactly like the first one having
+-- failed -- see docs/DRIVING_THE_CLIENT.md, which is where that cost a day.
+--
+-- The way out is to end the event the way the client does: outgoing packet 0x05B. That needs
+-- the ids the server sent when it opened the event, so they are kept here.
+--   0x032  UniqueNo(0x04) ActIndex(0x08) EventNum(0x0A)  -- a plain event
+--   0x034  same three fields in the same places          -- an event with numeric parameters
+-- Declared here, above the packet handler, and not beside the chat tap further down.
+-- Lua closes over the local that exists at the point the closure is written: with the table
+-- declared later, `chatlog` inside the packet handler resolved to the *global* of that name,
+-- which is nil, and the addon unloaded itself on the first packet with
+-- "attempt to index global 'chatlog' (a nil value)".
+local chatlog = { path = nil, all_in = false };
+
+local event = { open = false, unique = 0, index = 0, num = 0, auto = false, pending = false };
+
+local function u16(data, off) return data:byte(off + 1) + data:byte(off + 2) * 256; end
+local function u32(data, off)
+    return u16(data, off) + u16(data, off + 2) * 65536;
+end
+
 ashita.events.register('packet_in', 'vg_packet_in', function (e)
     story.on_packet(e.id, e.data, e.size);
+
+    if (chatlog.all_in and chatlog.path ~= nil) then
+        local f = io.open(chatlog.path, 'ab');
+        if (f ~= nil) then
+            local h = {};
+            for i = 1, math.min(24, e.size) do h[i] = ('%02X'):format(e.data:byte(i)); end
+            f:write(('[in ] id=0x%03X size=%d %s\n'):format(e.id, e.size, table.concat(h, ' ')));
+            f:close();
+        end
+    end
+
+    if ((e.id == 0x032 or e.id == 0x034) and e.size >= 0x10) then
+        if (chatlog.path ~= nil) then
+            local f = io.open(chatlog.path, 'ab');
+            if (f ~= nil) then
+                local h = {};
+                for i = 1, math.min(32, e.size) do h[i] = ('%02X'):format(e.data:byte(i)); end
+                f:write(('[in ] id=0x%03X size=%d %s\n'):format(e.id, e.size, table.concat(h, ' ')));
+                f:close();
+            end
+        end
+        event.open   = true;
+        event.unique = u32(e.data, 0x04);
+        event.index  = u16(e.data, 0x08);
+        -- 0x0C, not 0x0A. LandSandBoat's struct lists EventNum immediately after ActIndex, but
+        -- on the wire 0x0A carries something else and the event id is two bytes further on.
+        -- Measured 2026-08-25 from a real packet, talking to Ambrotien:
+        --
+        --   32 0A DD 00 | 62 60 0E 01 | 62 00 | E6 00 | E9 07 00 00 | E6 00 00 00
+        --                  UniqueNo     ActIndex  230    0x07E9=2025
+        --
+        -- and the server had already said which of those two it wanted, by rejecting the
+        -- other one: "Invalid GP_CLI_COMMAND_EVENTEND packet: Event ID mismatch 2025 != 230".
+        event.num    = u16(e.data, 0x0C);
+        -- Unattended mode. The client latches on an event and waits for Enter, and on this
+        -- build no synthetic key reaches it -- Ashita's WNDPROC hook never sees a posted
+        -- WM_KEYDOWN at all (`/winecursor` reports "real key events 0" straight after one).
+        -- So do not let the client open the event: block the packet that starts it and end
+        -- the event server-side instead. The NPC's words are NOT in this packet -- they
+        -- arrive separately as ordinary chat -- so nothing is lost from the narration, which
+        -- is the whole reason this works.
+        --
+        -- Off by default: a person playing wants their cutscenes.
+        if (event.auto) then
+            e.blocked = true;
+            event.pending = true;
+        end
+    elseif (e.id == 0x052) then
+        -- EVENTUCOFF: the server acknowledging the end of an event.
+        event.open = false;
+    end
 end);
+
+--- Send 0x05B to end (mode 0) or update (mode 1) the open event.
+--- `option` is the menu choice; 0 is "just carry on", which is what advancing dialogue is.
+local function event_end(mode, option)
+    if (not event.open) then return false, 'no event is open'; end
+    local u, i, n, o = event.unique, event.index, event.num, option or 0;
+    local pkt = { 0, 0, 0, 0 };
+    local function put16(v) pkt[#pkt+1] = bit.band(v, 0xFF); pkt[#pkt+1] = bit.band(bit.rshift(v, 8), 0xFF); end
+    local function put32(v) put16(bit.band(v, 0xFFFF)); put16(bit.band(bit.rshift(v, 16), 0xFFFF)); end
+    put32(u);            -- 0x04 UniqueNo
+    put32(o);            -- 0x08 EndPara: the option chosen
+    put16(i);            -- 0x0C ActIndex
+    put16(mode);         -- 0x0E Mode: 0 = End, 1 = UpdatePending
+    put16(n);            -- 0x10 EventNum
+    put16(n);            -- 0x12 EventPara: the server reads THIS as the event id it is ending
+    AshitaCore:GetPacketManager():AddOutgoingPacket(0x05B, pkt);
+    return true, ('event %d on index %d: %s, option %d')
+        :format(n, i, mode == 0 and 'end' or 'update', o);
+end
+
+-- Everything the game says, copied to a file.
+--
+-- A script driving the client through cmd.txt is deaf: `/vg tee` mirrors Vanaguide's own
+-- prints, but Ashita's core replies -- "addon not found", a Lua error from a freshly written
+-- addon, the server's answer to a GM command -- go to chat and nowhere else, so a command
+-- that failed looked exactly like a command that worked. That cost most of a morning.
+--
+-- The tap is off unless asked for (`/vg chatlog on`), appends, and strips FFXI's colour and
+-- auto-translate bytes so the file is readable text rather than a field of question marks.
+
+local function chat_strip(text)
+    if (text == nil) then return ''; end
+    return (text:gsub('[\30\31].', '')          -- colour prefixes: marker + one byte
+                :gsub('\239[\39\41].', '')     -- auto-translate brackets
+                :gsub('[%z\1-\8\11\12\14-\29]', ''));
+end
+
+-- Outgoing packet ids, to the same file. `/vg talk` builds a 0x01A and hands it to Ashita;
+-- until this existed there was no way to tell "the packet was sent and the server ignored it"
+-- from "the packet never left", and those two need completely different fixes.
+ashita.events.register('packet_out', 'vg_packet_out', function (e)
+    if (chatlog.path == nil) then return; end
+    local f = io.open(chatlog.path, 'ab');
+    if (f == nil) then return; end
+    local head = {};
+    for i = 1, math.min(16, e.size) do head[i] = ('%02X'):format(e.data:byte(i)); end
+    f:write(('[out] id=0x%03X size=%d injected=%s %s\n')
+        :format(e.id, e.size, tostring(e.injected), table.concat(head, ' ')));
+    f:close();
+end);
+
+ashita.events.register('text_in', 'vg_text_in', function (e)
+    if (chatlog.path == nil) then return; end
+    local line = chat_strip(e.message_modified ~= '' and e.message_modified or e.message);
+    if (line:match('^%s*$')) then return; end
+    local f = io.open(chatlog.path, 'ab');
+    if (f ~= nil) then f:write(('[%d] %s\n'):format(e.mode or -1, line)); f:close(); end
+end);
+
+--- Turn the chat tap on or off. Exposed to the command handler below.
+local function chatlog_set(name)
+    if (name == nil or name:lower() == 'off') then
+        chatlog.path = nil;
+        return 'chatlog off';
+    end
+    local base = AshitaCore:GetInstallPath():gsub('[\\/]$', '');
+    chatlog.path = ('%s\\addons\\Vanaguide\\%s'):format(base, name);
+    return 'chatlog -> ' .. name;
+end
 
 ashita.events.register('command', 'vg_command', function (e)
     local args = e.command:args();
@@ -398,6 +562,13 @@ ashita.events.register('command', 'vg_command', function (e)
     -- commands it can check are the ones that happen to write a file of their own.
     --   /vg tee answers.txt   -> addons/Vanaguide/answers.txt
     --   /vg tee off
+    -- `/vg chatlog chat.txt` starts copying every incoming chat line to that file;
+    -- `/vg chatlog off` stops. See the tap above for why this exists.
+    if (sub == 'chatlog') then
+        U.print(chatlog_set((#args > 2) and args[3] or 'off'));
+        return;
+    end
+
     if (sub == 'tee') then
         local name = (#args > 2) and args[3] or 'off';
         if (name:lower() == 'off') then
@@ -541,6 +712,111 @@ ashita.events.register('command', 'vg_command', function (e)
         return;
     end
 
+    -- Talk to an NPC: the one thing a guide could describe but never do.  Every other
+    -- command here reads the world; this one acts on it, and it is what turns the guide from
+    -- a list into a run -- the step says "Ask Ambrotien", and this asks him.
+    --
+    --   /vg talk              the NPC the current step names
+    --   /vg talk Ambrotien    by name, or any unique part of one
+    --
+    -- FFXI has no "interact" command.  Talking is outgoing packet 0x01A -- the action packet
+    -- -- with category 0, which is the same thing the client sends when a player presses
+    -- Enter on a targeted NPC.  Ashita's AddOutgoingPacket takes the whole packet including
+    -- its four-byte header, so the payload starts at index 5 (offset 0x04):
+    --
+    --   0x04  uint32  the target's SERVER id (not its entity index -- using the index here
+    --                 is silently ignored by the server, which looks exactly like the NPC
+    --                 refusing to talk)
+    --   0x08  uint16  the target's entity index
+    --   0x0A  uint16  the action id, 0 = Talk (interact with an NPC)
+    --   0x0C  16 bytes  the action union -- unused for Talk, but it must be THERE
+    --
+    -- The whole packet is 28 bytes, and that is not negotiable. A 16-byte one is dropped by
+    -- the server before any handler sees it, with no reply and nothing on screen:
+    --
+    --   [map][warn] Bad packet size for GP_CLI_COMMAND_ACTION (0x01a) from Test:
+    --                got 16, expected [28, 28]
+    --
+    -- which is indistinguishable, from inside the client, from injection being broken. It
+    -- cost this project a day (docs/DRIVING_THE_CLIENT.md). The size comes from
+    -- GP_CLI_COMMAND_ACTION in LandSandBoat's src/map/packets/c2s/0x01a_action.h: four bytes
+    -- of header, UniqueNo, ActIndex, ActionID, then a 16-byte union big enough for the
+    -- largest action (a spell cast, which carries a target position).
+    --
+    -- The server answers with the event, and the event's text arrives as ordinary chat --
+    -- which is what VanaVoice reads aloud.  So this is also how an unattended run proves the
+    -- narrator: talk, and something should speak.
+    if (sub == 'talk') then
+        local want = (#args > 2) and table.concat({ unpack(args, 3) }, ' ') or nil;
+        if (want == nil) then
+            local step = P.step();
+            want = step and step.npc or nil;
+            if (want == nil and step ~= nil and step.note ~= nil) then
+                -- The generated guides put the name in the note as "Ask <npc>." / "Starts
+                -- with <npc>." -- the only place it survives for a generated step.
+                want = step.note:match('Ask ([^.]+)%.') or step.note:match('Starts with ([^.]+)%.');
+            end
+        end
+        if (want == nil or want == '') then
+            U.print('/vg talk <npc>   (this step names nobody to talk to)');
+            return;
+        end
+
+        local px, pz = U.position();
+        if (px == nil) then U.print('talk: not in the world'); return; end
+
+        local needle = want:lower();
+        local best;
+        for _, e in ipairs(Verify.nearby(px, pz)) do
+            if (e.name:lower():find(needle, 1, true) ~= nil) then best = e; break; end
+        end
+        if (best == nil) then
+            U.print(('talk: no "%s" loaded here (nearest is %s)'):format(
+                want, (Verify.nearby(px, pz)[1] or { name = 'nothing' }).name));
+            return;
+        end
+
+        -- Out of range reads as silence, not as an error, so say the distance either way.
+        local ents = AshitaCore:GetMemoryManager():GetEntity();
+        local sid = ents:GetServerId(best.index);
+        local pkt = { 0, 0, 0, 0,                                       -- 0x00 header
+            bit.band(sid, 0xFF), bit.band(bit.rshift(sid, 8), 0xFF),    -- 0x04 UniqueNo
+            bit.band(bit.rshift(sid, 16), 0xFF), bit.band(bit.rshift(sid, 24), 0xFF),
+            bit.band(best.index, 0xFF), bit.band(bit.rshift(best.index, 8), 0xFF), -- 0x08 ActIndex
+            0, 0 };                                                     -- 0x0A ActionID 0 = Talk
+        for _ = 1, 16 do pkt[#pkt + 1] = 0; end                          -- 0x0C the action union
+        AshitaCore:GetPacketManager():AddOutgoingPacket(0x01A, pkt);
+        U.print(('talk -> %s (index %d, server id %d) at %.1f yalms'):format(
+            best.name, best.index, sid, best.dist or -1));
+        return;
+    end
+
+    -- `/vg advance [option]` is the scripted Enter. It closes the event the NPC opened, so
+    -- the next `/vg talk` is heard instead of being swallowed. `/vg pick <n>` answers a menu.
+    -- `/vg auto on` makes every NPC event end itself, so an unattended run can walk a whole
+    -- guide without a keyboard. `/vg auto off` gives cutscenes back to the player.
+    -- `/vg packets on` logs every incoming packet id into the chat log. Very noisy; it is
+    -- how the event packet's real layout gets found when a struct and the wire disagree.
+    if (sub == 'packets') then
+        chatlog.all_in = (args[3] or 'on'):lower() == 'on';
+        U.print('packet log ' .. (chatlog.all_in and 'on' or 'off'));
+        return;
+    end
+
+    if (sub == 'auto') then
+        event.auto = (args[3] or 'on'):lower() == 'on';
+        U.print('auto-advance ' .. (event.auto and 'on' or 'off'));
+        return;
+    end
+
+    if (sub == 'advance' or sub == 'pick') then
+        local mode   = (sub == 'pick') and 1 or 0;
+        local option = tonumber(args[3] or '0') or 0;
+        local ok, why = event_end(mode, option);
+        U.print(ok and ('advance: ' .. why) or ('advance: ' .. why));
+        return;
+    end
+
     if (sub == 'mark') then
         mark(#args > 2 and table.concat({ unpack(args, 3) }, ' ') or nil);
         return;
@@ -548,6 +824,28 @@ ashita.events.register('command', 'vg_command', function (e)
 
     if (sub == 'arrow') then
         local what = (#args > 2) and args[3]:lower() or '';
+
+        -- `/vg arrow unlock`, drag it with the mouse, `/vg arrow lock` to fix it there.
+        --
+        -- HXUI's pattern (addons/HXUI/expbar.lua): the element is an ImGui window and locking
+        -- only adds ImGuiWindowFlags_NoMove. Dragging then runs on ImGui's io, which is the
+        -- one mouse path that works under wine on this build -- the WNDPROC 'mouse' event the
+        -- primitives-based panels use is dead here, which is exactly why HXUI's bars can be
+        -- dragged and `timers`/`tparty` cannot. ImGui writes the position into
+        -- config/imgui.ini by itself, so nothing about it is stored on this side.
+        if (what == 'lock' or what == 'unlock') then
+            Arrow.locked = (what == 'lock');
+            vg.settings.arrow.locked = Arrow.locked;
+            settings.save();
+            U.print(Arrow.locked and 'arrow locked'
+                    or 'arrow unlocked -- drag it with the mouse, then /vg arrow lock');
+            return;
+        end
+
+        if (what == 'why' and Arrow.last_error ~= nil) then
+            U.print('arrow draw error: ' .. Arrow.last_error);
+            return;
+        end
         if (what == 'flip') then
             Arrow.calibration = -Arrow.calibration;
             vg.settings.arrow.calibration = Arrow.calibration;
@@ -564,19 +862,30 @@ ashita.events.register('command', 'vg_command', function (e)
             local px = tonumber(args[4]);
             local py = tonumber(args[5]);
             if (px == nil or py == nil) then
-                U.print('/vg arrow move <across%> <down%>   e.g. /vg arrow move 50 28');
+                U.print('/vg arrow move <across%> <down%>   e.g. /vg arrow move 50 12');
                 return;
             end
             local rx, ry = Arrow.move(px / 100, py / 100);
             vg.settings.arrow.x, vg.settings.arrow.y = rx, ry;
+        elseif (what == 'size' and #args > 3) then
+            -- 1.0 is the arrow's original size; the default is deliberately smaller.
+            local k = tonumber(args[4]);
+            if (k == nil or k <= 0) then
+                U.print('/vg arrow size <n>   1.0 is the original size, 0.6 is the default');
+                return;
+            end
+            Arrow.scale = math.max(0.2, math.min(3, k));
+            vg.settings.arrow.scale = Arrow.scale;
         elseif (what == 'reset') then
-            local rx, ry = Arrow.move(0.5, 0.28);
+            local rx, ry = Arrow.move(ARROW_X, ARROW_Y);
             vg.settings.arrow.x, vg.settings.arrow.y = rx, ry;
+            Arrow.scale = ARROW_SCALE;
+            vg.settings.arrow.scale = ARROW_SCALE;
         end
         settings.save();
         U.print(('arrow: %s, at %.0f%% across and %.0f%% down, calibration %d, offset %.0f degrees')
             :format(vg.settings.arrow.visible and 'on' or 'off',
-                    (vg.settings.arrow.x or 0.5) * 100, (vg.settings.arrow.y or 0.28) * 100,
+                    (vg.settings.arrow.x or ARROW_X) * 100, (vg.settings.arrow.y or ARROW_Y) * 100,
                     Arrow.calibration, math.deg(Arrow.offset)));
         U.print('/vg arrow move <across%> <down%> | reset | flip | nudge <deg> | on | off');
         return;
@@ -620,6 +929,12 @@ end
 
 ashita.events.register('d3d_present', 'vg_present', function ()
     pump_commands();
+    -- The 0x05B cannot be sent from inside the packet handler: Ashita is mid-dispatch and the
+    -- outgoing queue is not reentrant. One frame later is soon enough.
+    if (event.pending) then
+        event.pending = false;
+        event_end(0, 0);
+    end
     -- Gate on being in a zone, not on GetLoginStatus(). Measured in-game 2026-08-22: the
     -- status word is not 2 on this client while standing in Southern San d'Oria, so gating on
     -- it drew nothing at all -- the commands worked and the window never appeared.

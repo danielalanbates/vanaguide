@@ -36,16 +36,21 @@ end
 
 -- ImGui packs colour as 0xAABBGGRR -- alpha, blue, green, red.  Written as ARGB the "far"
 -- blue comes out orange, which is how ui/arrow.lua found out.
-local COL_NEAR  = 0x33DD33
-local COL_MID   = 0x33DDDD
-local COL_FAR   = 0xFF9933
-local COL_SHELL = 0x66000000
+-- Muted on purpose. The first pass used fully saturated primaries, and on the ground at
+-- speed that reads as a neon stripe painted over the world rather than a hint about where to
+-- walk -- "the line is too bold colored" (Daniel, 2026-08-25). These are the same three hues
+-- pulled toward the background: still instantly distinguishable from each other and from
+-- Vana'diel's greens and greys, without shouting over the game.
+local COL_NEAR  = 0x6FBF6F
+local COL_MID   = 0x7FC8C8
+local COL_FAR   = 0xC89A6F
+local COL_SHELL = 0x44000000   -- a lighter shell, to match the lighter line
 
 local L = {
     enabled = true,
     style = 'both',        -- 'solid' | 'dots' | 'both'
     width = 4,             -- pixels at the player's feet; tapers with distance
-    alpha = 0.85,
+    alpha = 0.55,   -- was 0.85; see the colour note above
     -- Give up after this many consecutive frames where the device would not answer.  Three
     -- is enough to be sure and few enough that nobody sees three bad frames.
     give_up_after = 3,

@@ -187,6 +187,17 @@ rec = R.recommend(steps[1], C.world())
 eq(rec.mode, 'travel', 'step elsewhere recommends travel')
 ok(rec.hops >= 1, 'travel has at least one leg')
 
+do -- a talk step is not "arrived" until the NPC is in talk range
+    local talk = { kind = 'accept', zone = 230, pos = { x = 0, z = 0, r = 60 } }
+    WORLD.zone, WORLD.x, WORLD.z = 230, 40, 0
+    ok(not R.recommend(talk, C.world()).arrived, 'wide radius does not stop a talk step at 40y')
+    WORLD.x = 4
+    ok(R.recommend(talk, C.world()).arrived, 'talk step arrives within talk range')
+    local walk = { kind = 'run', zone = 230, pos = { x = 0, z = 0, r = 60 } }
+    WORLD.x = 40
+    ok(R.recommend(walk, C.world()).arrived, 'a run step keeps its own radius')
+end
+
 -- ---- shipped guides -----------------------------------------------------------
 require('guides.init')
 local shipped = 0
@@ -228,16 +239,29 @@ ok(guard < 100, 'and it terminates')
 -- unnegated mirrors the arrow — left targets get a right-pointing arrow.
 do
     local lines = {}
-    _G.imgui = { GetForegroundDrawList = function()
-        return { AddLine = function(_, a, b, _, width)
-            if width == 3 then lines[#lines + 1] = { a[1], a[2], b[1], b[2] } end
-        end }
-    end }
+    -- The arrow draws inside an ImGui window (so it can be dragged); the fake window sits
+    -- where the arrow's centre lands on 100,100.
+    _G.bit = _G.bit or require('bit')
+    for _, f in ipairs({ 'ImGuiWindowFlags_NoDecoration', 'ImGuiWindowFlags_NoBackground',
+        'ImGuiWindowFlags_NoFocusOnAppearing', 'ImGuiWindowFlags_NoNav',
+        'ImGuiWindowFlags_NoBringToFrontOnFocus', 'ImGuiWindowFlags_NoMove',
+        'ImGuiCond_FirstUseEver' }) do _G[f] = _G[f] or 0 end
+    local dl = { AddLine = function(_, a, b, _, width)
+        if width == 3 then lines[#lines + 1] = { a[1], a[2], b[1], b[2] } end
+    end, AddRect = function() end }
+    _G.imgui = {
+        GetForegroundDrawList = function() return dl end,
+        GetWindowDrawList = function() return dl end,
+        SetNextWindowPos = function() end, SetNextWindowSize = function() end,
+        Begin = function() return true end, End = function() end,
+        GetWindowPos = function() return 25, 56 end,
+    }
     local A = require('ui.arrow')
     local function tip(bearing)
         lines = {}
-        A.pos_x, A.pos_y = 100, 100
+        A.scale = 1.0
         A.draw(bearing, 10, nil, nil)
+        assert(lines[1], 'arrow drew nothing: ' .. tostring(A.last_error))
         -- the tip is the point two of the coloured lines share
         return lines[1][1], lines[1][2]
     end
