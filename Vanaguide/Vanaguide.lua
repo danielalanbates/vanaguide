@@ -23,7 +23,7 @@
 --]]
 
 addon.name    = 'Vanaguide';
-addon.author  = 'Bates LLC';
+addon.author  = 'BatesAI';
 addon.version = '0.1.0';
 addon.desc    = 'Step-by-step quest and mission guides with a routing arrow.';
 addon.link    = 'https://batesai.org';

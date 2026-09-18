@@ -21,3 +21,10 @@ __pycache__/
 # generated on the machine that has them and never committed here. See docs/NAVMESH.md.
 Vanaguide/data/nav/
 *.vgnav
+
+# Secrets / local credentials
+accounts.json
+.dbpass
+*.dbpass
+.env
+.env.*
