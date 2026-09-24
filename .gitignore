@@ -10,3 +10,10 @@ Vanaguide/settings/
 Vanaguide/config/
 # generated from LandSandBoat navmeshes (GPL + SE geometry): build locally, never ship
 Vanaguide/data/nav/
+
+# personal / local-server secrets if staged into this tree by mistake
+accounts.json
+**/.dbpass
+.dbpass
+*.dbpass
+*.personal.json

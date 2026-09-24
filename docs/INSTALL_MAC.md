@@ -1,3 +1,8 @@
+> **Launcher wiring (2026-09-17 PT):** HorizonXI-on-Mac now has first-class LSB-only install via
+> `Guide.swift` — toggle **Quest guide (Vanaguide, local LSB only)** on the Local server world.
+> Prefer that over the manual `lsb.txt` steps below. See HorizonXI-on-Mac `docs/VANAGUIDE.md`.
+> Cross-project plan: HorizonXI-on-Mac `docs/FUTURE_AI_VANASTACK_PLAN.md`.
+
 # Installing on the Mac port (FFXI-on-Mac), and keeping it off the servers that ban it
 
 Done on Daniel's machine 2026-08-22. Vanaguide is **installed** in the live client and wired
