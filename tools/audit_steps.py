@@ -84,6 +84,47 @@ LAUNCHER = '/Applications/FFXI-on-Mac.app/Contents/MacOS/FFXI-on-Mac'
 LOCAL_LOADER = 'horizon-loader.exe --server 127.0.0.1'
 
 
+HOSTS_LINES = ('127.0.0.1 ffxi00.pol.com', '127.0.0.1 pp000.pol.com', '127.0.0.1 macbookpro.lan')
+
+
+def ensure_hosts(game):
+    """Point FFXI's hard-coded POL names at the local machine in the prefix's hosts file.
+
+    Wine resets that file to its default when it updates the prefix during a relaunch, and each
+    missing name then costs a 30-90 s DNS timeout at login.
+    """
+    path = os.path.join(os.path.dirname(os.path.dirname(game)), 'drive_c', 'windows', 'system32',
+                        'drivers', 'etc', 'hosts')
+    if not os.path.isdir(os.path.dirname(path)):
+        path = os.path.join(os.path.dirname(game), 'windows', 'system32', 'drivers', 'etc', 'hosts')
+    try:
+        text = open(path, encoding='utf-8', errors='replace').read() if os.path.exists(path) else ''
+        missing = [l for l in HOSTS_LINES if l not in text]
+        if missing:
+            with open(path, 'a') as fh:
+                fh.write(('' if text.endswith('\n') or not text else '\n') + '\n'.join(missing) + '\n')
+    except OSError:
+        pass
+
+
+def wait_zone_in(game, log_path, zones_before, timeout=900):
+    end = time.time() + timeout
+    fixed_at = (time.time() + 30, time.time() + 90)
+    while time.time() < end:
+        time.sleep(5)
+        if any(abs(time.time() - t) < 5 for t in fixed_at):
+            ensure_hosts(game)
+        try:
+            count = open(log_path, errors='replace').read().count('IncreaseZoneCounter')
+        except OSError:
+            count = 0
+        if count > zones_before or count < zones_before:
+            if count > 0 and count != zones_before:
+                time.sleep(25)
+                return True
+    return False
+
+
 def fps_healthy(game, window=40, floor=2.0):
     """False when the local client has been under `floor` fps for the last `window` samples.
 
@@ -127,16 +168,11 @@ def restart_client(game, log_path, before=None):
     if local_client_running():
         subprocess.run(['/usr/bin/pkill', '-f', LOCAL_LOADER])
         time.sleep(8)
+    ensure_hosts(game)
     zones_before = open(log_path, errors='replace').read().count('IncreaseZoneCounter')
     subprocess.Popen([LAUNCHER, '--world', 'Local server', '--play'],
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    end = time.time() + 600
-    while time.time() < end:
-        time.sleep(5)
-        if open(log_path, errors='replace').read().count('IncreaseZoneCounter') > zones_before:
-            time.sleep(25)
-            return True
-    return False
+    return wait_zone_in(game, log_path, zones_before)
 
 
 def event_locked(game):
@@ -169,16 +205,11 @@ def hard_reset(game, log_path, db_pass, before=None):
            "(SELECT charid FROM chars WHERE charname='Test');")
     subprocess.run(['/opt/homebrew/opt/mariadb/bin/mariadb', '-uxiuser', f'-p{db_pass}', 'xidb', '-e', sql],
                    capture_output=True)
+    ensure_hosts(game)
     zones_before = open(log_path, errors='replace').read().count('IncreaseZoneCounter')
     subprocess.Popen([LAUNCHER, '--world', 'Local server', '--play'],
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    end = time.time() + 600
-    while time.time() < end:
-        time.sleep(5)
-        if open(log_path, errors='replace').read().count('IncreaseZoneCounter') > zones_before:
-            time.sleep(25)
-            return True
-    return False
+    return wait_zone_in(game, log_path, zones_before)
 
 
 def clear_for(s):
