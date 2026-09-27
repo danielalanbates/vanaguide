@@ -184,11 +184,16 @@ def event_locked(game):
     path = os.path.join(game, 'addons', 'cmdpipe', 'chat.txt')
     try:
         with open(path, 'rb') as fh:
-            fh.seek(max(0, os.path.getsize(path) - 2000))
-            tail = fh.read().decode('utf-8', 'replace').splitlines()[-6:]
+            fh.seek(max(0, os.path.getsize(path) - 6000))
+            tail = fh.read().decode('utf-8', 'replace').splitlines()
     except OSError:
         return False
-    return any('A command error occurred' in line for line in tail)
+    # The answer to the most recent server command: audit lines may follow it, so look at what
+    # came after the last "!" command rather than at the last few lines.
+    last = max((i for i, line in enumerate(tail) if '>> /say !' in line or ' : !' in line), default=None)
+    if last is None:
+        return False
+    return any('A command error occurred' in line for line in tail[last + 1:last + 4])
 
 
 def hard_reset(game, log_path, db_pass, before=None):
@@ -342,6 +347,7 @@ def main():
     audited = 0
     last_restart_at = 0
     for n, s in enumerate(todo, 1):
+        mirror()
         g, i = s['guide'], s['step']
         if s.get('zone') in skipz:
             print(f'   {g}/{i} skipped: zone {s["zone"]} is on the skip list', flush=True)
