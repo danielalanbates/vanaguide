@@ -197,6 +197,21 @@ def event_locked(game):
     return any('A command error occurred' in line for line in tail[last + 1:last + 4])
 
 
+def character_dead(game):
+    """True when the client answered a recent command with "You cannot use that command while
+    unconscious."  In the 2026-09-27 recheck the Davoi Mush killed Test on 5/10 and every
+    !zone after it got that answer: 44/41 .. 11/4 (ten steps) never moved, and zones 159, 175
+    and 176 went on the skip list as "refused" though nothing had refused them."""
+    path = os.path.join(game, 'addons', 'cmdpipe', 'chat.txt')
+    try:
+        with open(path, 'rb') as fh:
+            fh.seek(max(0, os.path.getsize(path) - 3000))
+            tail = fh.read().decode('utf-8', 'replace').splitlines()
+    except OSError:
+        return False
+    return any('while unconscious' in line for line in tail[-12:])
+
+
 def hard_reset(game, log_path, db_pass, before=None):
     """Free a character stuck in an event: close the local client, move Test to Southern
     San d'Oria in the database (the local server is ours), start it again."""
@@ -237,8 +252,28 @@ def npc_indexes(steps, db_pass):
             if n:
                 rows.setdefault((int(p[0]), n), []).append((int(p[1]), float(p[4]), float(p[5]), p[6]))
     found = {}
+    # Markers ("???", qm*, _xyz) normalise to '' or to a name the step does not carry, so they
+    # never got an index and fell back to "any named entity within 10 yalms" -- which fails
+    # where this client's DAT names that index nothing or something else (44/35: qm_cetus,
+    # zone 89 #878, sits exactly on the marker; the nearest *named* entity was 13 yalms off).
+    # Take the spawned marker-like row within 3 yalms of the marker instead.
+    markers = {}
+    for line in out.splitlines():
+        p = line.split('\t')
+        if len(p) < 7 or not p[0].isdigit():
+            continue
+        if p[6] == '0' and (p[2] == '???' or p[3].startswith('qm') or p[3].startswith('_')):
+            markers.setdefault(int(p[0]), []).append((int(p[1]), float(p[4]), float(p[5])))
     for s in steps:
         if s.get('zone') is None or s.get('x') is None or not s.get('npc'):
+            continue
+        npc = s['npc']
+        if npc == '???' or npc.startswith('qm') or npc.startswith('_'):
+            near = [c for c in markers.get(s['zone'], [])
+                    if (c[1] - s['x']) ** 2 + (c[2] - s['z']) ** 2 <= 9.0]
+            if near:
+                best = min(near, key=lambda c: (c[1] - s['x']) ** 2 + (c[2] - s['z']) ** 2)
+                found[(s['guide'], s['step'])] = best[0]
             continue
         cands = [c for c in rows.get((s['zone'], norm(s['npc'])), []) if c[3] == '0'] or rows.get((s['zone'], norm(s['npc'])), [])
         if cands:
@@ -260,7 +295,35 @@ def clear_for(s):
         return [f'!delmission {MISSION_LOG[area]} {i}']
     if c == 'MA' and area in MISSION_LOG: return [f'!delmission {MISSION_LOG[area]} {i}']
     if c == 'KI' and s.get('ki') is not None: return [f'!delkeyitem {s["ki"]}']
+    # `!delitem` removes one (scripts/commands/delitem.lua).  Without it every IT step left its
+    # item behind: the 30-slot bag filled and `!additem 609` (12/5) got "You cannot obtain the
+    # item. Come back after sorting your inventory." (additem.lua, getFreeSlotsCount() == 0).
+    if c == 'IT' and s.get('item') is not None: return [f'!delitem {s["item"]}'] * (s.get('item_n') or 1)
     return []
+
+
+def cleanup_for(s):
+    """Sent after the 'done' rows: take back what gm_for() handed out that takes up room."""
+    if s['cond'] == 'IT' and s.get('item') is not None:
+        return [f'!delitem {s["item"]}'] * (s.get('item_n') or 1)
+    return []
+
+
+# LandSandBoat sends a character only its *own* nation's current mission (0x056_mission.cpp:
+# NationMission = m_missionLog[profile.nation].current).  Test is San d'Oria (chars.nation = 0),
+# so `!addmission BASTOK 0` was answered "Added Bastok mission 0 to Test." and the client never
+# heard of it: 10/1 11/1 12/1 13/1 14/1 stayed open.  Completed bits cover all three nations
+# (page 0x00D0), so `M` steps pass either way; `MA` needs the home nation switched for the step.
+# setNation sends nothing by itself; the step's own !delmission/!addmission pushes 0xFFFF.
+NATION_ID = {'sandoria': 0, 'bastok': 1, 'windurst': 2}
+HOME_NATION = 0     # the Test character's own nation, put back after every switched step
+
+
+def nation_for(s):
+    """The home nation the step needs, or None when the character's own will do."""
+    if s['cond'] == 'MA' and NATION_ID.get(s.get('area'), HOME_NATION) != HOME_NATION:
+        return NATION_ID[s['area']]
+    return None
 
 
 def arm_for(s):
@@ -273,11 +336,18 @@ def arm_for(s):
     return []
 
 
-# LandSandBoat's own answer to each command (scripts/commands/*.lua printToPlayer).
+# LandSandBoat's own answer to each command (scripts/commands/*.lua printToPlayer); a tuple
+# lists every answer that means the command was handled.  `!additem` has none to wait for: it
+# answers only with messageSpecial text ids, which this client's zone DATs number differently.
 REPLY = {
     'completequest': 'Quest with ID {id} for', 'addquest': 'quest {id} to', 'delquest': 'quest {id} from',
     'completemission': 'Mission with ID {id} for', 'addmission': 'mission {id} to',
     'delmission': 'mission {id} from',
+    'addkeyitem': ('Key item {id} was given to', 'already has key item {id}.'),
+    'delkeyitem': ('Key item {id} deleted from', 'does not have key item {id}.'),
+    'delitem': ('Item {id} was deleted from', 'does not have item {id}.'),
+    'setplayernation': ('home nation to',),
+    'immortal': ('is now immortal!', 'is mortal again.'),
 }
 
 
@@ -301,7 +371,8 @@ def wait_reply(game, line, since, timeout=20.0):
     if want is None:
         time.sleep(3.0)
         return 'ok'
-    want = want.format(id=rest.split()[-1])
+    arg = rest.split()[-1] if rest.split() else ''
+    wants = [w.format(id=arg) for w in (want if isinstance(want, tuple) else (want,))]
     end = time.time() + timeout
     while time.time() < end:
         try:
@@ -312,7 +383,7 @@ def wait_reply(game, line, since, timeout=20.0):
                 tail = fh.read().decode('utf-8', 'replace').splitlines()
         except OSError:
             tail = []
-        if any(want in l for l in tail):
+        if any(w in l for l in tail for w in wants):
             return 'ok'
         for n, l in enumerate(tail):
             if l.rstrip().endswith(f'>> /say {line}') and any('A command error occurred' in m for m in tail[n + 1:n + 3]):
@@ -451,7 +522,28 @@ def main():
         todo = todo[:args.limit]
     print(f'{len(steps)} steps, {len(todo)} left to audit', flush=True)
 
+    def immortal():
+        """`!immortal` toggles (scripts/commands/immortal.lua, setUnkillable, kept across logins
+        by the 'Immortal' char var), so send it and send it again if it answered 'mortal'."""
+        for _ in range(2):
+            since = chat_size(args.game)
+            if not gm('!immortal'):
+                return False
+            try:
+                with open(chat_path(args.game), 'rb') as fh:
+                    fh.seek(since)
+                    tail = fh.read().decode('utf-8', 'replace')
+            except OSError:
+                tail = ''
+            if 'is now immortal!' in tail:
+                return True
+        return False
+
+    if not immortal():
+        print('   !immortal did not take -- aggressive monsters can still kill Test', flush=True)
+
     zone = None
+    nation_now = [HOME_NATION]
     silent = 0
     stuck = 0
     refused = {}
@@ -465,6 +557,15 @@ def main():
         if s.get('zone') in skipz:
             print(f'   {g}/{i} skipped: zone {s["zone"]} is on the skip list', flush=True)
             continue
+        # Every step runs as the nation it needs and every other step as Test's own, so a step
+        # that `continue`s part-way cannot leave the rest of the run on a foreign nation.
+        want_nation = nation_for(s)
+        want_nation = HOME_NATION if want_nation is None else want_nation
+        if want_nation != nation_now[0]:
+            if gm(f'!setplayernation {want_nation}'):
+                nation_now[0] = want_nation
+            else:
+                print(f'   {g}/{i}: !setplayernation {want_nation} got no answer', flush=True)
         for line in clear_for(s):
             gm(line)
         due = args.restart_every and audited and audited % args.restart_every == 0 and audited != last_restart_at
@@ -538,6 +639,14 @@ def main():
                     time.sleep(1.0)
                 time.sleep(args.zone_wait)
                 zone = s['zone']
+                # A zone-in cutscene can hold the character while GM commands still answer
+                # (event_locked() never sees it).  39/3's gm_for leaves SoA 5 current and
+                # soa/1_4 Heartwings onZoneIn returns csid 2 in Western Adoulin; 16/10 .. 39/99
+                # then found no NPC near markers their NPC stands on.  !release ends a
+                # server-side event (lua_base_entity.cpp release -> endCurrentEvent) and says
+                # "Event skipped" only when there was one, which shows in chat.txt.
+                send('!release')
+                consumed()
             if s.get('x') is not None:
                 pos_to()
             time.sleep(args.step_wait)
@@ -548,7 +657,10 @@ def main():
         before = fsize()
         send(audit_cmd(g, i))
         consumed()
-        if not row_after(before):
+        # Right after a zone-in or a client restart the addon can answer late, and that row then
+        # stood as the step's last 'pre' row (24/40: 827 yalms off, 179 frames).  Wait once
+        # more, so the landing check below can move the character again instead of skipping.
+        if not row_after(before) and not row_after(before, 20.0):
             silent += 1
             print(f'   {g}/{i}: no audit row', flush=True)
             if silent >= 8:
@@ -595,6 +707,10 @@ def main():
             if len(b) > 5 and b[5] != str(s['zone']):
                 stuck += 1
                 zone = None
+                if character_dead(args.game):
+                    print(f'   {g}/{i}: Test is unconscious ("You cannot use that command while '
+                          'unconscious.") -- stopping; raise or home-point it and rerun --only', flush=True)
+                    break
                 if not event_locked(args.game):
                     refused[s['zone']] = refused.get(s['zone'], 0) + 1
                 print(f'   {g}/{i}: still in zone {b[5]} -- skipped', flush=True)
@@ -647,9 +763,13 @@ def main():
                 if len(row) > 14 and row[2] == 'done' and row[14] == 'done':
                     break
                 time.sleep(3.0)
+        for line in cleanup_for(s):
+            gm(line)
         mirror()
         if n % 25 == 0:
             print(f'   {n}/{len(todo)} ...', flush=True)
+    if nation_now[0] != HOME_NATION:
+        gm(f'!setplayernation {HOME_NATION}')
     mirror()
     print('done', flush=True)
 

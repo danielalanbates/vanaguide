@@ -128,11 +128,20 @@ function U.nation()
     return ok and n or nil
 end
 
+--- Ashita's HasKeyItem first; when it says no, the server's own 0x055 tables (core/story.lua).
+--- On this client Ashita's `player.haskeyitem` pointer does not resolve, so HasKeyItem is
+--- always false and only the packet answer is real.
 function U.has_key_item(id)
     local p = player()
-    if p == nil then return false end
-    local ok, v = pcall(function() return p:HasKeyItem(id) end)
-    return ok and v == true
+    if p ~= nil then
+        local ok, v = pcall(function() return p:HasKeyItem(id) end)
+        if ok and v == true then return true end
+    end
+    local ok, story = pcall(require, 'core.story')
+    if ok and type(story) == 'table' and story.has_key_item ~= nil then
+        return story.has_key_item(id) == true
+    end
+    return false
 end
 
 function U.has_spell(id)

@@ -24,6 +24,9 @@ local S = {
     packets = 0,
     pages = {},
     unknown_pages = {},
+    -- Key items, from 0x055: table index -> set of owned key item ids.  nil for a table the
+    -- server has not sent since login (it sends every table on each zone-in, 0x00C gameok).
+    key_items = {},
 }
 
 -- log page id -> what it is
@@ -133,8 +136,41 @@ local function flags(data, off, count)
     return set
 end
 
---- Feed one incoming packet.  Anything that is not 0x056 is ignored cheaply.
+--- 0x055 GP_SERV_COMMAND_SCENARIOITEM: one key item table.  LandSandBoat
+--- (src/map/packets/s2c/0x055_scenarioitem.h) sends GetItemFlag[16] (owned, 512 bits) at
+--- 0x04, LookItemFlag[16] (seen) at 0x44 and the table index (uint16) at 0x84; key item id =
+--- table * 512 + bit (charutils::addKeyItem).  addKeyItem/delKeyItem push the changed table
+--- at once (lua_base_entity.cpp addKeyItem), and every table is sent on zone-in
+--- (0x00c_gameok.cpp -> charutils::SendKeyItems).
+---
+--- Why the addon reads it itself: Ashita's IPlayer:HasKeyItem needs the `player.haskeyitem`
+--- pointer, and its signature does not match this client -- the Ashita logs say
+--- "Pointer: (00000000) [Error!] player.haskeyitem" -- so HasKeyItem is always false and every
+--- key item step read as open (audit 2026-09-27: 0 of 250 KI 'done' rows read done).
+local KEY_ITEM_PACKET = 0x055
+local KEY_ITEMS_PER_TABLE = 512
+
+local function on_key_items(data, size)
+    if data == nil or (size or #data) < 0x86 then return end
+    local lo, hi = data:byte(0x84 + 1, 0x84 + 2)
+    if lo == nil or hi == nil then return end
+    local tbl = lo + hi * 0x100
+    local set = {}
+    for bit in pairs(flags(data, 0x04, 64)) do set[tbl * KEY_ITEMS_PER_TABLE + bit] = true end
+    S.key_items[tbl] = set
+end
+
+--- true / false from the server's last 0x055 for that table; nil when it has not been sent.
+function S.has_key_item(id)
+    if type(id) ~= 'number' then return nil end
+    local set = S.key_items[math.floor(id / KEY_ITEMS_PER_TABLE)]
+    if set == nil then return nil end
+    return set[id] == true
+end
+
+--- Feed one incoming packet.  Anything that is not 0x055/0x056 is ignored cheaply.
 function S.on_packet(id, data, size)
+    if id == KEY_ITEM_PACKET then return on_key_items(data, size) end
     if id ~= 0x056 or data == nil or (size or #data) < 40 then return end
     S.packets = S.packets + 1
     local page = u32(data, 0x24)
@@ -190,6 +226,12 @@ function S.on_packet(id, data, size)
         cur.adoulin = unoffset(i32(data, 0x1C), SOA_BASE, SOA_SCALE)
         cur.rov     = unoffset(i32(data, 0x20), ROV_BASE)
         local area = NATION_AREA[nation]
+        -- Only the player's own nation's current mission is sent (0x056_mission.cpp:
+        -- NationMission = m_missionLog[profile.nation].current).  Forget the other two, so a
+        -- nation change does not leave a stale number behind.
+        for _, a in pairs(NATION_AREA) do
+            if a ~= area then cur[a] = nil end
+        end
         if area ~= nil then cur[area] = cur.nation end
         S.seen = true
         return
@@ -259,6 +301,7 @@ function S.reset()
     S.packets = 0
     S.pages = {}
     S.unknown_pages = {}
+    S.key_items = {}
 end
 
 return S
