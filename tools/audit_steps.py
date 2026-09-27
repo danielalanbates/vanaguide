@@ -84,7 +84,7 @@ LAUNCHER = '/Applications/FFXI-on-Mac.app/Contents/MacOS/FFXI-on-Mac'
 LOCAL_LOADER = 'horizon-loader.exe --server 127.0.0.1'
 
 
-def fps_healthy(game, window=15, floor=2.0):
+def fps_healthy(game, window=40, floor=2.0):
     """False when the local client has been under `floor` fps for the last `window` samples.
 
     After a couple of hours of zone hopping the client's footprint passes 2 GB on an 8 GB Mac,
@@ -96,10 +96,15 @@ def fps_healthy(game, window=15, floor=2.0):
             return False
         with open(path, encoding='utf-8', errors='replace') as fh:
             rows = fh.read().strip().splitlines()[-window:]
-        vals = sorted(float(r.split(',')[2]) for r in rows if r[:1].isdigit())
+        seq = [float(r.split(',')[2]) for r in rows if r[:1].isdigit()]
     except (OSError, ValueError, IndexError):
         return True
-    return not vals or vals[len(vals) // 2] >= floor
+    if len(seq) < 10:
+        return True
+    # A zone load drops the rate for 10-20 s every time; stuck means the median of ~80 s and
+    # every one of the last ten samples are under the floor.
+    vals = sorted(seq)
+    return vals[len(vals) // 2] >= floor or any(v >= floor for v in seq[-10:])
 
 
 def local_client_running():
@@ -253,6 +258,7 @@ def main():
     stuck = 0
     refused = {}
     restarts = 0
+    bad_checks = 0
     audited = 0
     last_restart_at = 0
     for n, s in enumerate(todo, 1):
@@ -264,7 +270,10 @@ def main():
             send(line)
             consumed()
         due = args.restart_every and audited and audited % args.restart_every == 0 and audited != last_restart_at
-        if (n % 10 == 0 and not fps_healthy(args.game)) or due:
+        if n % 10 == 0:
+            bad_checks = 0 if fps_healthy(args.game) else bad_checks + 1
+        if bad_checks >= 2 or due:
+            bad_checks = 0
             if restarts >= args.max_restarts:
                 print(f'!! client needs a restart but the cap of {args.max_restarts} is used -- stopping', flush=True)
                 break
