@@ -150,7 +150,10 @@ end
 --- Markers ("???", qm*, _xyz doors) match anything within 10 yalms, as V.entry does.
 function V.presence(npc, px, pz)
     local list = V.nearby(px, pz)
-    local nearest = (#list > 0) and list[1].name or ''
+    -- With its target index: the client names an NPC from its own DAT by index, and where
+    -- that DAT is older than the server's npc_list the name belongs to another NPC
+    -- (tools/client_names.py). The index can be checked against npc_list; the name cannot.
+    local nearest = (#list > 0) and ('%s#%d'):format(list[1].name, list[1].index) or ''
     if #list == 0 then return false, nil, '', 'nothing loaded yet' end
     npc = npc or ''
     local marker = npc:match('^qm') ~= nil or npc:match('^_') ~= nil or npc:find('%?%?%?') ~= nil
@@ -160,8 +163,17 @@ function V.presence(npc, px, pz)
         return ok, near and near.dist, nearest, marker and 'marker' or 'no npc named'
     end
     local want = normalize(npc)
+    local far = nil
     for _, e in ipairs(list) do
-        if normalize(e.name) == want then return true, e.dist, nearest, 'found' end
+        if normalize(e.name) == want then
+            -- Everything within ~50 yalms of the player is loaded, so a name match only says
+            -- something about the marker within the same ten yalms the marker check uses.
+            if (e.dist or 1e9) <= 10 then return true, e.dist, nearest, ('found #%d'):format(e.index) end
+            far = far or e
+        end
+    end
+    if far ~= nil then
+        return false, far.dist, nearest, ('found %.0f yalms from the marker (#%d)'):format(far.dist or -1, far.index)
     end
     return false, nil, nearest, ('not loaded (%d entities)'):format(#list)
 end
