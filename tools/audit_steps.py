@@ -218,6 +218,35 @@ def hard_reset(game, log_path, db_pass, before=None):
     return wait_zone_in(game, log_path, zones_before)
 
 
+def npc_indexes(steps, db_pass):
+    """(guide, step) -> the server's target index for the step's NPC: the spawned npc_list row with
+    that name in the step's zone, nearest the marker."""
+    import re as _re
+    if not db_pass:
+        return {}
+    out = subprocess.run(['/opt/homebrew/opt/mariadb/bin/mariadb', '-N', '-B', '-uxiuser', f'-p{db_pass}', 'xidb', '-e',
+                          'SELECT (npcid>>12)&0xFFF, npcid&0xFFF, polutils_name, name, pos_x, pos_z, status FROM npc_list'],
+                         capture_output=True, text=True, errors='replace').stdout
+    norm = lambda x: _re.sub(r'[^a-z0-9]', '', (x or '').lower())
+    rows = {}
+    for line in out.splitlines():
+        p = line.split('\t')
+        if len(p) < 7 or not p[0].isdigit():
+            continue
+        for n in {norm(p[2]), norm(p[3])}:
+            if n:
+                rows.setdefault((int(p[0]), n), []).append((int(p[1]), float(p[4]), float(p[5]), p[6]))
+    found = {}
+    for s in steps:
+        if s.get('zone') is None or s.get('x') is None or not s.get('npc'):
+            continue
+        cands = [c for c in rows.get((s['zone'], norm(s['npc'])), []) if c[3] == '0'] or rows.get((s['zone'], norm(s['npc'])), [])
+        if cands:
+            best = min(cands, key=lambda c: (c[1] - s['x']) ** 2 + (c[2] - s['z']) ** 2)
+            found[(s['guide'], s['step'])] = best[0]
+    return found
+
+
 def clear_for(s):
     """Undo the step's condition first, so the 'pre' row can show it open."""
     c, area, i = s['cond'], s.get('area'), s.get('id')
@@ -312,6 +341,7 @@ def main():
                     help='restart the client after this many audited steps (0 = never)')
     ap.add_argument('--mirror', default=os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'results', 'audit-mirror.csv'),
                     help='append-only copy of audit.csv outside the addon folder, which the launcher replaces on every Play')
+    ap.add_argument('--only', help='file of guide/step pairs to (re)audit, one per line; ignores earlier rows')
     ap.add_argument('--db-pass', default=os.environ.get('XI_DB_PASS', ''))
     ap.add_argument('--map-log', default=os.path.expanduser('~/Games/lsb/run/xi_map.log'))
     args = ap.parse_args()
@@ -358,6 +388,10 @@ def main():
                 return True
             time.sleep(0.25)
         return False
+
+    def audit_cmd(g, i, mode='pre'):
+        idx = index_of.get((g, i))
+        return f'/vg audit {g} {i} {mode}' + (f' {idx}' if idx is not None else '')
 
     def fsize():
         try:
@@ -407,6 +441,10 @@ def main():
             if len(b) > 5 and b[2] == 'pre' and (b[4] == '' or b[4] == b[5]):
                 done.add((b[0], b[1]))
     todo = [s for s in steps if (str(s['guide']), str(s['step'])) not in done]
+    if args.only:
+        want = {tuple(l.strip().split('/')) for l in open(args.only) if '/' in l}
+        todo = [s for s in steps if (str(s['guide']), str(s['step'])) in want]
+    index_of = npc_indexes(steps, args.db_pass)
     # Zone order: a zone load costs ~20 s and there are far fewer zones than steps.
     todo.sort(key=lambda s: (s.get('zone') is None, s.get('zone') or 0, s['guide'], s['step']))
     if args.limit:
@@ -508,7 +546,7 @@ def main():
 
         move()
         before = fsize()
-        send(f'/vg audit {g} {i}')
+        send(audit_cmd(g, i))
         consumed()
         if not row_after(before):
             silent += 1
@@ -525,7 +563,7 @@ def main():
             for _ in range(5):
                 time.sleep(4.0)
                 before = fsize()
-                send(f'/vg audit {g} {i}')
+                send(audit_cmd(g, i))
                 consumed()
                 row_after(before)
                 b = last_row(csv).split(',')
@@ -541,7 +579,7 @@ def main():
             zone = None
             move()
             before = fsize()
-            send(f'/vg audit {g} {i}')
+            send(audit_cmd(g, i))
             consumed()
             row_after(before)
             b = last_row(csv).split(',') if os.path.exists(csv) else b
@@ -550,7 +588,7 @@ def main():
             zone = None
             move(force_zone=True)
             before = fsize()
-            send(f'/vg audit {g} {i}')
+            send(audit_cmd(g, i))
             consumed()
             row_after(before)
             b = last_row(csv).split(',')
@@ -582,15 +620,17 @@ def main():
             pos_to()
             time.sleep(args.step_wait)
             before = fsize()
-            send(f'/vg audit {g} {i}')
+            send(audit_cmd(g, i))
             consumed()
             row_after(before)
-        for _ in range(3):
-            if 'nothing loaded yet' not in last_row(csv):
+        for _ in range(4):
+            r_ = next(csvmod.reader([last_row(csv)]), [])
+            absent = len(r_) > 11 and r_[10] != '' and r_[11] == 'absent'
+            if 'nothing loaded yet' not in last_row(csv) and not absent:
                 break
             time.sleep(6.0)
             before = fsize()
-            send(f'/vg audit {g} {i}')
+            send(audit_cmd(g, i))
             consumed()
             row_after(before)
         cmds = gm_for(s, nxt)
@@ -600,7 +640,7 @@ def main():
             # done, up to five times.
             for _ in range(5 if answered else 1):
                 before = fsize()
-                send(f'/vg audit {g} {i} done')
+                send(audit_cmd(g, i, 'done'))
                 consumed()
                 row_after(before)
                 row = next(csvmod.reader([last_row(csv)]), [])

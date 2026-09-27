@@ -656,6 +656,10 @@ ashita.events.register('command', 'vg_command', function (e)
     if (sub == 'audit' and #args > 3) then
         local gi, si = tonumber(args[3]), tonumber(args[4]);
         local mode = (#args > 4) and args[5]:lower() or 'pre';
+        -- Optional 6th word: the server's target index for the step's NPC (npc_list), which the
+        -- harness looks up. Matching by index sidesteps a client whose NPC-name DAT is older
+        -- than the server's list (tools/client_names.py).
+        local want_index = (#args > 5) and tonumber(args[6]) or nil;
         local g = gi and G.list()[gi] or nil;
         if (g == nil or si == nil or g.steps[si] == nil) then
             U.print(('audit: no step %s of guide %s'):format(tostring(args[4]), tostring(args[3])));
@@ -681,7 +685,7 @@ ashita.events.register('command', 'vg_command', function (e)
         local npc = G.npc_of(step, q) or '';
         local present, ndist, nearest, why = false, nil, '', 'not in the step zone';
         if (step.zone ~= nil and step.zone == w.zone and step.pos ~= nil) then
-            present, ndist, nearest, why = Verify.presence(npc, step.pos.x, step.pos.z);
+            present, ndist, nearest, why = Verify.presence(npc, step.pos.x, step.pos.z, want_index);
         elseif (step.zone == nil) then
             why = 'step has no location';
         elseif (step.pos == nil and step.zone == w.zone) then
