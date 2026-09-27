@@ -22,6 +22,7 @@ Copyright (c) 2026 Bates LLC.  All rights reserved.
 import argparse
 import json
 import os
+import subprocess
 import sys
 import time
 
@@ -79,6 +80,58 @@ def gm_for(s, nxt=None):
     return []
 
 
+LAUNCHER = '/Applications/FFXI-on-Mac.app/Contents/MacOS/FFXI-on-Mac'
+LOCAL_LOADER = 'horizon-loader.exe --server 127.0.0.1'
+
+
+def fps_healthy(game, window=15, floor=2.0):
+    """False when the local client has been under `floor` fps for the last `window` samples.
+
+    After a couple of hours of zone hopping the client's footprint passes 2 GB on an 8 GB Mac,
+    macOS compresses most of it, and it falls to ~0.1 fps: every check after that times out.
+    """
+    path = os.path.join(game, 'fps-local-server.csv')
+    try:
+        if time.time() - os.path.getmtime(path) > 30:
+            return False
+        with open(path, encoding='utf-8', errors='replace') as fh:
+            rows = fh.read().strip().splitlines()[-window:]
+        vals = sorted(float(r.split(',')[2]) for r in rows if r[:1].isdigit())
+    except (OSError, ValueError, IndexError):
+        return True
+    return not vals or vals[len(vals) // 2] >= floor
+
+
+def local_client_running():
+    return subprocess.run(['/usr/bin/pgrep', '-f', LOCAL_LOADER], capture_output=True).returncode == 0
+
+
+def restart_client(game, log_path):
+    """Log the Test character out, then start the local world again through the launcher.
+
+    Only the local-world client, only by its --server address, and /shutdown first.
+    """
+    pipe = os.path.join(game, 'addons', 'cmdpipe', 'cmd.txt')
+    with open(pipe, 'w') as fh:
+        fh.write('/shutdown\n')
+    end = time.time() + 90
+    while local_client_running() and time.time() < end:
+        time.sleep(3)
+    if local_client_running():
+        subprocess.run(['/usr/bin/pkill', '-f', LOCAL_LOADER])
+        time.sleep(8)
+    zones_before = open(log_path, errors='replace').read().count('IncreaseZoneCounter')
+    subprocess.Popen([LAUNCHER, '--world', 'Local server', '--play'],
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    end = time.time() + 300
+    while time.time() < end:
+        time.sleep(5)
+        if open(log_path, errors='replace').read().count('IncreaseZoneCounter') > zones_before:
+            time.sleep(25)
+            return True
+    return False
+
+
 def clear_for(s):
     """Undo the step's condition first, so the 'pre' row can show it open."""
     c, area, i = s['cond'], s.get('area'), s.get('id')
@@ -108,6 +161,10 @@ def main():
     ap.add_argument('--zone-wait', type=float, default=10.0)
     ap.add_argument('--step-wait', type=float, default=4.0)
     ap.add_argument('--skip-zones', default='178')
+    ap.add_argument('--max-restarts', type=int, default=8)
+    ap.add_argument('--restart-every', type=int, default=200,
+                    help='restart the client after this many audited steps (0 = never)')
+    ap.add_argument('--map-log', default=os.path.expanduser('~/Games/lsb/run/xi_map.log'))
     args = ap.parse_args()
 
     addon = os.path.join(args.game, 'addons', 'Vanaguide')
@@ -168,6 +225,9 @@ def main():
     silent = 0
     stuck = 0
     refused = {}
+    restarts = 0
+    audited = 0
+    last_restart_at = 0
     for n, s in enumerate(todo, 1):
         g, i = s['guide'], s['step']
         if s.get('zone') in skipz:
@@ -176,10 +236,38 @@ def main():
         for line in clear_for(s):
             send(line)
             consumed()
+        due = args.restart_every and audited and audited % args.restart_every == 0 and audited != last_restart_at
+        if (n % 10 == 0 and not fps_healthy(args.game)) or due:
+            if restarts >= args.max_restarts:
+                print(f'!! client needs a restart but the cap of {args.max_restarts} is used -- stopping', flush=True)
+                break
+            restarts += 1
+            last_restart_at = audited
+            print(f'   restarting the local client ({restarts}/{args.max_restarts}): '
+                  + ('scheduled' if due else 'under 2 fps'), flush=True)
+            if not restart_client(args.game, args.map_log):
+                print('!! the client did not come back -- stopping', flush=True)
+                break
+            zone = None
         send(f'/vg audit {g} {i} jump')
         if not consumed():
-            print('!! the client stopped reading cmd.txt -- stopping', flush=True)
-            break
+            if restarts < args.max_restarts:
+                restarts += 1
+                print(f'   the client stopped reading cmd.txt -- restarting it ({restarts}/{args.max_restarts})', flush=True)
+                if restart_client(args.game, args.map_log):
+                    zone = None
+                    send(f'/vg audit {g} {i} jump')
+                    if consumed():
+                        pass
+                    else:
+                        print('!! still not reading cmd.txt after a restart -- stopping', flush=True)
+                        break
+                else:
+                    print('!! the client did not come back -- stopping', flush=True)
+                    break
+            else:
+                print('!! the client stopped reading cmd.txt -- stopping', flush=True)
+                break
         def move(force_zone=False):
             nonlocal zone
             if s.get('zone') is None:
@@ -210,6 +298,7 @@ def main():
                 break
             continue
         silent = 0
+        audited += 1
         b = last_row(csv).split(',')
         if s.get('zone') is not None and len(b) > 5 and b[5] != str(s['zone']):
             # A zone load can outlast the wait: look again (every 4 s, up to 20 s) before moving again.
