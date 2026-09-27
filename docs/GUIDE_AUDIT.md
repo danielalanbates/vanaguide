@@ -19,7 +19,7 @@ The 50 guides hold **1,210 steps**, and the audit checks all of them. `/vg list`
 | Issue | Steps | What it means |
 |---|---|---|
 | No location | 316 | The arrow cannot point anywhere. Mostly mission steps whose script gives no position. |
-| No route from the previous step's zone | 169 | 169 of the 376 zone changes. The zone graph lacks Adoulin (256↔257), the [S] era cities (80↔87), and the Aht Urhgan ferries (50↔53↔54). |
+| No route from the previous step's zone | 0 (was 169) | Was 169 of the 376 zone changes. `routing/zonegraph.lua` only read the hand-written `data/travel.lua`; the generated `data/zonelines.lua` was never loaded, and the NPC crossings (Cavernous Maws, waypoints, Home Points, Promyvion and Ra'Kaznar gates) were not in any table. Both fixed; see [ROUTING.md](ROUTING.md). 14 of the 376 routes now need a Home Point warp and 59 cross something with a condition (a maw to open, a waypoint to attune, a mission reached), which the leg's text states. 10 have a leg the arrow cannot point at. |
 | NPC not in `npc_list` at all | 33 | Mostly generator mistakes in `data/missions.lua`: the NPC field holds a place or an instruction ("Batallia Downs", "1. Enter Lower Delkfutt", "Port Bastok HP"). |
 | Zone but no marker | 26 | Travel steps. |
 | NPC in a different zone | 11 | Hand-written guides 10–14 take "Argus" / "Rakoh Buuma" from their notes, but those NPCs are in zones 15/236 and 241. |
