@@ -29,6 +29,18 @@ AREA_LOG = {
     'ahtUrhgan': 'ahturhgan', 'crystalWar': 'wotg', 'abyssea': 'abyssea',
     'adoulin': 'adoulin', 'coalition': 'coalition',
 }
+# A prerequisite names its log the server's way (CRYSTAL_WAR); the guides key it the client's
+# way (wotg). data/quests.lua carries the same table as Q.canonical_area.
+AREA_ALIASES = {
+    'other_areas': 'other', 'otherareas': 'other',
+    'aht_urhgan': 'ahturhgan',
+    'crystal_war': 'wotg', 'crystalwar': 'wotg',
+}
+
+
+def canonical_area(area):
+    value = str(area).lower()
+    return AREA_ALIASES.get(value, value)
 
 
 def parse_ids(root):
@@ -91,18 +103,22 @@ def parse_quest(path, ids, key_items, item_ids):
     lines = text.splitlines()
     title = lines[1].lstrip('- ').strip() if len(lines) > 1 else const.title()
 
-    # Header comments: "-- Balasiel : !pos -136 -11 64 230".  The first one is where the
-    # quest is taken, which is the only coordinate a guide can state without guessing.
+    # Header comments: "-- Balasiel : !pos -136 -11 64 230". Preserve every marker as
+    # reference data, but use only the first named marker for the quest-giver waypoint. Some
+    # markers identify objectives or key items and are not necessarily safe interaction targets.
     npc = None
+    locations = []
     for line in lines[:40]:
         m = re.match(r"--\s*(.+?)\s*:\s*!pos\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(\d+)", line)
         if m:
-            npc = {
+            location = {
                 'name': m.group(1).strip(),
                 'x': float(m.group(2)), 'y': float(m.group(3)), 'z': float(m.group(4)),
                 'zone': int(m.group(5)),
             }
-            break
+            locations.append(location)
+            if npc is None:
+                npc = location
 
     reward_ki = None
     m = re.search(r"keyItem\s*=\s*xi\.ki\.([A-Z0-9_]+)", text)
@@ -134,13 +150,14 @@ def parse_quest(path, ids, key_items, item_ids):
         p_log, _, p_const = m.groups()
         p_id = ids.get(p_log, {}).get(p_const)
         if p_id is not None:
-            prereq = (AREA_LOG.get(p_log.lower().replace('_', ''), p_log.lower()), p_id)
+            prereq = (canonical_area(p_log), p_id)
 
     return {
-        'area': AREA_LOG.get(id_area, id_area.lower()),
+        'area': canonical_area(AREA_LOG.get(id_area, id_area)),
         'id': qid,
         'name': title,
         'npc': npc,
+        'locations': locations,
         'key_item': reward_ki,
         'items': reward_items,
         'level': level,
@@ -186,7 +203,8 @@ def main():
 --
 --   name    the quest's name
 --   zone    where it is taken, and x/z/y there (nil when the script states no position)
---   npc     who to talk to
+--   npc     first header marker (the usual quest giver)
+--   locations  every parsed header !pos marker for reference; may include objectives, not just NPCs
 --   ki      the key item it awards, when it awards one
 --   level   the level the script checks for, when it checks one
 --   prereq  { area, id } of the quest it requires, when it requires one
@@ -211,6 +229,13 @@ local Q = {}
                     bits.append('z = %.1f' % n['z'])
                     bits.append('y = %.1f' % n['y'])
                     bits.append('npc = %s' % lua_str(n['name']))
+                if q['locations']:
+                    locations = []
+                    for location in q['locations']:
+                        locations.append('{ name = %s, zone = %d, x = %.1f, z = %.1f, y = %.1f }' % (
+                            lua_str(location['name']), location['zone'], location['x'],
+                            location['z'], location['y']))
+                    bits.append('locations = { %s }' % ', '.join(locations))
                 if q['key_item']:
                     bits.append('ki = %d' % q['key_item'])
                 if q['level']:
@@ -222,9 +247,20 @@ local Q = {}
                 fh.write('        [%d] = { %s },\n' % (qid, ', '.join(bits)))
             fh.write('    },\n')
         fh.write('}\n\n')
-        fh.write("""--- One quest, or nil.
+        fh.write("""local AREA_ALIASES = {
+    other_areas = 'other', otherareas = 'other',
+    aht_urhgan = 'ahturhgan', crystal_war = 'wotg', crystalwar = 'wotg',
+}
+
+function Q.canonical_area(area)
+    if type(area) ~= 'string' then return area end
+    local value = area:lower()
+    return AREA_ALIASES[value] or value
+end
+
+--- One quest, or nil.
 function Q.get(area, id)
-    local a = Q.quests[area]
+    local a = Q.quests[Q.canonical_area(area)]
     return a ~= nil and a[id] or nil
 end
 
@@ -244,7 +280,7 @@ end
 --- Every quest in an area, sorted by id.
 function Q.area(area)
     local out = {}
-    for id, q in pairs(Q.quests[area] or {}) do
+    for id, q in pairs(Q.quests[Q.canonical_area(area)] or {}) do
         out[#out + 1] = { id = id, quest = q }
     end
     table.sort(out, function(a, b) return a.id < b.id end)
