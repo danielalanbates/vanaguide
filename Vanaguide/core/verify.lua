@@ -150,6 +150,8 @@ end
 --- Markers ("???", qm*, _xyz doors) match anything within 10 yalms, as V.entry does.
 function V.presence(npc, px, pz, want_index)
     local list = V.nearby(px, pz)
+    -- Why the index did not match: never in this client's entity table, or standing elsewhere.
+    local idx_why = nil
     if want_index ~= nil then
         -- Straight from the entity table: V.nearby skips unnamed entries, and an NPC this
         -- client's DAT has no name for is exactly the case the index is here to cover.
@@ -164,6 +166,9 @@ function V.presence(npc, px, pz, want_index)
                     return true, d, ('%s#%d'):format(okn and name or '', want_index),
                            ('found by index #%d'):format(want_index)
                 end
+                idx_why = ('index #%d is %.0f yalms from the marker'):format(want_index, d)
+            elseif okx and okz and px ~= nil then
+                idx_why = ('index #%d is not in the entity table'):format(want_index)
             end
         end
     end
@@ -189,10 +194,22 @@ function V.presence(npc, px, pz, want_index)
             far = far or e
         end
     end
-    if far ~= nil then
-        return false, far.dist, nearest, ('found %.0f yalms from the marker (#%d)'):format(far.dist or -1, far.index)
+    -- Entity status 4 is an event (cutscene).  Diagnostic only: the call and the value are not
+    -- verified on this client, and pcall drops the suffix if the API differs.
+    local okme, st = pcall(function()
+        local mm = AshitaCore:GetMemoryManager()
+        return mm:GetEntity():GetStatus(mm:GetParty():GetMemberTargetIndex(0))
+    end)
+    local ev = (okme and st == 4) and '; in an event' or ''
+    if idx_why ~= nil then
+        -- With the server's index in hand a far name match is only this client's DAT naming
+        -- another NPC (#N is server N's entity), not the step's NPC standing elsewhere.
+        return false, nil, nearest, idx_why .. (far and (' (the client names #%d %s)'):format(far.index, npc) or '') .. ev
     end
-    return false, nil, nearest, ('not loaded (%d entities)'):format(#list)
+    if far ~= nil then
+        return false, far.dist, nearest, ('found %.0f yalms from the marker (#%d)'):format(far.dist or -1, far.index) .. ev
+    end
+    return false, nil, nearest, ('not loaded (%d entities)'):format(#list) .. ev
 end
 
 --- One row of the step audit (tools/audit_steps.py).
