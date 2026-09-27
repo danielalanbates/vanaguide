@@ -106,7 +106,7 @@ def main():
     if os.path.exists(csv):
         for line in open(csv, encoding='utf-8', errors='replace'):
             b = line.split(',')
-            if len(b) > 2 and b[2] == 'pre':
+            if len(b) > 5 and b[2] == 'pre' and (b[4] == '' or b[4] == b[5]):
                 done.add((b[0], b[1]))
     todo = [s for s in steps if (str(s['guide']), str(s['step'])) not in done]
     # Zone order: a zone load costs ~20 s and there are far fewer zones than steps.
@@ -117,6 +117,7 @@ def main():
 
     zone = None
     silent = 0
+    stuck = 0
     for n, s in enumerate(todo, 1):
         g, i = s['guide'], s['step']
         if s.get('zone') in skipz:
@@ -130,17 +131,25 @@ def main():
         if not consumed():
             print('!! the client stopped reading cmd.txt -- stopping', flush=True)
             break
-        wait = 1.0
-        if s.get('zone') is not None:
+        def move(force_zone=False):
+            nonlocal zone
+            if s.get('zone') is None:
+                time.sleep(1.0)
+                return
+            # A cross-zone `!pos` is sometimes refused (the character stays put and every later
+            # row is taken from the wrong zone); `!zone` is not. So change zone first.
+            if s['zone'] != zone or force_zone:
+                send(f'!zone {s["zone"]}')
+                consumed()
+                time.sleep(args.zone_wait)
+                zone = s['zone']
             if s.get('x') is not None:
                 y = s.get('db_y') or 0
                 send(f'!pos {s["x"]:.3f} {y:.3f} {s["z"]:.3f} {s["zone"]}')
-            elif s['zone'] != zone:
-                send(f'!zone {s["zone"]}')
-            consumed()
-            wait = args.zone_wait if s['zone'] != zone else args.step_wait
-            zone = s['zone']
-        time.sleep(wait)
+                consumed()
+            time.sleep(args.step_wait)
+
+        move()
         before = os.path.getsize(csv) if os.path.exists(csv) else 0
         send(f'/vg audit {g} {i}')
         consumed()
@@ -152,6 +161,33 @@ def main():
                 break
             continue
         silent = 0
+        b = last_row(csv).split(',')
+        if s.get('zone') is not None and len(b) > 5 and b[5] != str(s['zone']):
+            # A zone load can outlast the wait: look again before moving again.
+            time.sleep(10.0)
+            before = os.path.getsize(csv)
+            send(f'/vg audit {g} {i}')
+            consumed()
+            row_after(before)
+            b = last_row(csv).split(',')
+        if s.get('zone') is not None and len(b) > 5 and b[5] != str(s['zone']):
+            print(f'   {g}/{i}: in zone {b[5]}, wanted {s["zone"]} -- retrying the move', flush=True)
+            zone = None
+            move(force_zone=True)
+            before = os.path.getsize(csv)
+            send(f'/vg audit {g} {i}')
+            consumed()
+            row_after(before)
+            b = last_row(csv).split(',')
+            if len(b) > 5 and b[5] != str(s['zone']):
+                stuck += 1
+                zone = None
+                print(f'   {g}/{i}: still in zone {b[5]} -- skipped', flush=True)
+                if stuck >= 5:
+                    print('!! five moves in a row did not take -- the character is wedged, stopping', flush=True)
+                    break
+                continue
+        stuck = 0
         for _ in range(3):
             if 'nothing loaded yet' not in last_row(csv):
                 break
