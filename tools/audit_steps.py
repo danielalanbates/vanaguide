@@ -139,6 +139,48 @@ def restart_client(game, log_path, before=None):
     return False
 
 
+def event_locked(game):
+    """True when the client answered the last server command with 'A command error occurred.'
+
+    That is what it says while the character is held in an event -- a zone-in cutscene, which the
+    audit's own mission changes keep triggering -- and every !zone/!pos after it fails the same way.
+    """
+    path = os.path.join(game, 'addons', 'cmdpipe', 'chat.txt')
+    try:
+        with open(path, 'rb') as fh:
+            fh.seek(max(0, os.path.getsize(path) - 2000))
+            tail = fh.read().decode('utf-8', 'replace').splitlines()[-6:]
+    except OSError:
+        return False
+    return any('A command error occurred' in line for line in tail)
+
+
+def hard_reset(game, log_path, db_pass, before=None):
+    """Free a character stuck in an event: close the local client, move Test to Southern
+    San d'Oria in the database (the local server is ours), start it again."""
+    if before is not None:
+        before()
+    subprocess.run(['/usr/bin/pkill', '-f', LOCAL_LOADER])
+    end = time.time() + 30
+    while local_client_running() and time.time() < end:
+        time.sleep(2)
+    sql = ("UPDATE chars SET pos_zone=230, pos_prevzone=230, pos_x=-100, pos_y=0, pos_z=-50 "
+           "WHERE charname='Test'; DELETE FROM accounts_sessions WHERE charid="
+           "(SELECT charid FROM chars WHERE charname='Test');")
+    subprocess.run(['/opt/homebrew/opt/mariadb/bin/mariadb', '-uxiuser', f'-p{db_pass}', 'xidb', '-e', sql],
+                   capture_output=True)
+    zones_before = open(log_path, errors='replace').read().count('IncreaseZoneCounter')
+    subprocess.Popen([LAUNCHER, '--world', 'Local server', '--play'],
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    end = time.time() + 600
+    while time.time() < end:
+        time.sleep(5)
+        if open(log_path, errors='replace').read().count('IncreaseZoneCounter') > zones_before:
+            time.sleep(25)
+            return True
+    return False
+
+
 def clear_for(s):
     """Undo the step's condition first, so the 'pre' row can show it open."""
     c, area, i = s['cond'], s.get('area'), s.get('id')
@@ -173,6 +215,7 @@ def main():
                     help='restart the client after this many audited steps (0 = never)')
     ap.add_argument('--mirror', default=os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'results', 'audit-mirror.csv'),
                     help='append-only copy of audit.csv outside the addon folder, which the launcher replaces on every Play')
+    ap.add_argument('--db-pass', default=os.environ.get('XI_DB_PASS', ''))
     ap.add_argument('--map-log', default=os.path.expanduser('~/Games/lsb/run/xi_map.log'))
     args = ap.parse_args()
 
@@ -205,10 +248,16 @@ def main():
             time.sleep(0.25)
         return False
 
+    def fsize():
+        try:
+            return os.path.getsize(csv)
+        except OSError:
+            return 0
+
     def row_after(before, timeout=10.0):
         end = time.time() + timeout
         while time.time() < end:
-            if os.path.exists(csv) and os.path.getsize(csv) > before:
+            if fsize() > before:
                 return True
             time.sleep(0.25)
         return False
@@ -323,7 +372,7 @@ def main():
             time.sleep(args.step_wait)
 
         move()
-        before = os.path.getsize(csv) if os.path.exists(csv) else 0
+        before = fsize()
         send(f'/vg audit {g} {i}')
         consumed()
         if not row_after(before):
@@ -340,18 +389,32 @@ def main():
             # A zone load can outlast the wait: look again (every 4 s, up to 20 s) before moving again.
             for _ in range(5):
                 time.sleep(4.0)
-                before = os.path.getsize(csv)
+                before = fsize()
                 send(f'/vg audit {g} {i}')
                 consumed()
                 row_after(before)
                 b = last_row(csv).split(',')
                 if len(b) > 5 and b[5] == str(s['zone']):
                     break
+        if (s.get('zone') is not None and len(b) > 5 and b[5] != str(s['zone'])
+                and event_locked(args.game) and restarts < args.max_restarts):
+            restarts += 1
+            print(f'   {g}/{i}: the character is held in an event -- freeing it ({restarts}/{args.max_restarts})', flush=True)
+            if not hard_reset(args.game, args.map_log, args.db_pass, mirror):
+                print('!! the client did not come back -- stopping', flush=True)
+                break
+            zone = None
+            move()
+            before = fsize()
+            send(f'/vg audit {g} {i}')
+            consumed()
+            row_after(before)
+            b = last_row(csv).split(',') if os.path.exists(csv) else b
         if s.get('zone') is not None and len(b) > 5 and b[5] != str(s['zone']):
             print(f'   {g}/{i}: in zone {b[5]}, wanted {s["zone"]} -- retrying the move', flush=True)
             zone = None
             move(force_zone=True)
-            before = os.path.getsize(csv)
+            before = fsize()
             send(f'/vg audit {g} {i}')
             consumed()
             row_after(before)
@@ -359,7 +422,8 @@ def main():
             if len(b) > 5 and b[5] != str(s['zone']):
                 stuck += 1
                 zone = None
-                refused[s['zone']] = refused.get(s['zone'], 0) + 1
+                if not event_locked(args.game):
+                    refused[s['zone']] = refused.get(s['zone'], 0) + 1
                 print(f'   {g}/{i}: still in zone {b[5]} -- skipped', flush=True)
                 if refused[s['zone']] >= 2:
                     skipz.add(s['zone'])
@@ -373,7 +437,7 @@ def main():
             if 'nothing loaded yet' not in last_row(csv):
                 break
             time.sleep(6.0)
-            before = os.path.getsize(csv)
+            before = fsize()
             send(f'/vg audit {g} {i}')
             consumed()
             row_after(before)
@@ -383,7 +447,7 @@ def main():
                 send(line)
                 consumed()
             time.sleep(3.0)
-            before = os.path.getsize(csv)
+            before = fsize()
             send(f'/vg audit {g} {i} done')
             consumed()
             row_after(before)
