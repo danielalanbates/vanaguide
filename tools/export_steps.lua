@@ -44,7 +44,7 @@ for gi, guide in ipairs(G.list()) do
                 or (s.spell and 'SP') or 'manual',
             area = key and key.area, id = key and key.id,
             ki = s.key_item, item = s.item and s.item.id, item_n = s.item and s.item.count,
-            level = s.level, job = s.job and s.job.id, job_lv = s.job and s.job.level, rank = s.rank, spell = s.spell,
+            ra = s.ra, level = s.level, job = s.job and s.job.id, job_lv = s.job and s.job.level, rank = s.rank, spell = s.spell,
             npc = npc, note = note, db_zone = db and db.zone, db_x = db and db.x, db_y = db and db.y, db_z = db and db.z,
         }
         print(obj(row))
