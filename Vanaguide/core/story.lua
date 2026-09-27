@@ -9,8 +9,9 @@
 -- that says "this quest is done" is answering with the server's own bookkeeping.
 --
 -- Page ids and layout follow the same reading of the packet as AndreWesleyPS/ffxi-journal
--- (MIT), which is the clearest public description of 0x056; the implementation here is our
--- own.  See docs/PACKETS.md.
+-- (MIT), which is the clearest public description of 0x056, corrected against the code that
+-- builds it in LandSandBoat (src/map/packets/s2c/0x056_*.cpp); the implementation here is
+-- our own.  See docs/PACKETS.md.
 --
 -- Copyright (c) 2026 Bates LLC.  All rights reserved.
 
@@ -51,15 +52,51 @@ local PAGES = {
     [0x0038] = { 'mission', 'completed', 'campaign_2' },
 }
 
---- The nation storyline's *completed* bitset.
+-- Which storyline sends what, as LandSandBoat builds it (src/map/packets/s2c/0x056_*.cpp,
+-- sent by charutils::SendPartialMissionLog).  Two schemes:
+--
+--   * a *completed* bitset -- San d'Oria, Bastok, Windurst, Zilart (page 0x00D0) and ToAU,
+--     WoTG (page 0x00D8).  CLuaBaseEntity::completeMission sets the bit and resets the
+--     current number, so the bit is the lasting evidence.
+--   * the *current mission number only* -- CoP, ACP, AMK, ASA, Seekers of Adoulin, RoV (page
+--     0xFFFF).  The server stores no completed bit for CoP at all, and sends none for the
+--     others; its own hasCompletedMission() for CoP is "id < current".  A mission is finished
+--     when the mission script moves `current` on to the next one (npcUtil.completeMission
+--     -> addMission(nextMission)).  `!completemission` alone resets current to 0, which is
+--     "nothing done" to the server and to us alike.
+--
+-- TVR has neither: LandSandBoat's 0xFFFE page is a stub that always carries 0.
+
+--- Page 0x00D0: completed missions of mission logs 0..3, 64 bits each.
 ---
---- Identified in-game 2026-08-22 rather than taken from anyone's table: with a fresh
---- character, `!addmission 0 0` + `!completemission 0 0` turned bit 0 of page 0x00D0 on, and
---- doing the same for mission 1 turned on bits 0,1.  It has to be handled separately from
---- PAGES because the page does not say *which* nation it is -- that comes from the 0xFFFF
---- packet -- and because completing a mission clears the current-mission number back to
---- 65535, so this bitset is the only evidence left that it was ever done.
-local NATION_COMPLETED_PAGE = 0x00D0
+--- LandSandBoat MissionComplete::Nations packs log n into Data[n*2], Data[n*2+1] -- bytes
+--- n*8 .. n*8+7 of the 32 at 0x04 (0x056_mission_other.cpp).  So the page carries all three
+--- nations and Zilart side by side; reading the whole 32 bytes as the player's own nation
+--- only happened to work for San d'Oria (measured in-game 2026-08-22 on a San d'Oria
+--- character: bit 0 for mission 0, bits 0,1 after mission 1).  A Bastok character's mission
+--- 2 is bit 66 of the page, not bit 2.
+local NATIONS_COMPLETED_PAGE = 0x00D0
+local NATIONS_SLICES = { { 'sandoria', 0 }, { 'bastok', 8 }, { 'windurst', 16 }, { 'zilart', 24 } }
+
+--- Page 0x00D8: completed ToAU missions in bytes 0..7, WoTG in bytes 8..15
+--- (MissionComplete::ToAU_WoTG in 0x056_mission_other.cpp).
+local TOAU_WOTG_COMPLETED_PAGE = 0x00D8
+local TOAU_WOTG_SLICES = { { 'toau', 0 }, { 'wotg', 8 } }
+
+--- Page 0x0080: Aht Urhgan quests *in progress*, but LandSandBoat overwrites Data[4..7] with
+--- the current Assault, ToAU, WoTG and Campaign mission numbers (QuestOffer::AhtUrghan).
+--- So only bytes 0..15 are quest flags, and ToAU / WoTG current missions sit at 0x18 / 0x1C.
+local AHTURHGAN_CURRENT_PAGE = 0x0080
+
+--- Page 0x00C0: Aht Urhgan quests *completed* in bytes 0..15; bytes 16..31 are completed
+--- Assault missions OR'd in (QuestComplete::AhtUrghan), not quests.
+local AHTURHGAN_COMPLETED_PAGE = 0x00C0
+
+--- 0xFFFF sends Seekers of Adoulin as `current*2 + 0x6E` and RoV as `current + 0x6C`, or 0
+--- when the player declined the expansion (GP_SERV_COMMAND_MISSION::MISSION).  Read raw,
+--- a character who has not started either looked 110 / 108 missions in.
+local SOA_BASE, SOA_SCALE = 0x6E, 2
+local ROV_BASE = 0x6C
 
 local NATION_AREA = { [0] = 'sandoria', [1] = 'bastok', [2] = 'windurst' }
 
@@ -76,7 +113,14 @@ local function i32(data, off)
     return v
 end
 
---- 32 bytes of flags -> set of ids that are set.  Bit n of byte b is quest id b*8+n.
+--- Undo the offset 0xFFFF puts on a storyline's current number.  nil when the raw value is
+--- below the offset (0 = expansion declined), so it reads as "nothing started".
+local function unoffset(raw, base, scale)
+    if raw == nil or raw < base then return nil end
+    return math.floor((raw - base) / (scale or 1))
+end
+
+--- `count` bytes of flags -> set of ids that are set.  Bit n of byte b is quest id b*8+n.
 local function flags(data, off, count)
     local set = {}
     for b = 0, count - 1 do
@@ -104,16 +148,30 @@ function S.on_packet(id, data, size)
         return
     end
 
-    if page == NATION_COMPLETED_PAGE then
-        local set = flags(data, 0x04, 32)
-        S.mission.completed.nation = set
-        local area = NATION_AREA[S.nation]
-        if area ~= nil then S.mission.completed[area] = set end
+    if page == NATIONS_COMPLETED_PAGE or page == TOAU_WOTG_COMPLETED_PAGE then
+        local slices = page == NATIONS_COMPLETED_PAGE and NATIONS_SLICES or TOAU_WOTG_SLICES
+        for _, s in ipairs(slices) do
+            S.mission.completed[s[1]] = flags(data, 0x04 + s[2], 8)
+        end
         S.seen = true
         return
     end
 
-    -- 0xFFFF: the current mission number of every storyline, in one packet.
+    if page == AHTURHGAN_CURRENT_PAGE then
+        S.quest.current.ahturhgan = flags(data, 0x04, 16)
+        S.mission.current.toau = i32(data, 0x18)
+        S.mission.current.wotg = i32(data, 0x1C)
+        S.seen = true
+        return
+    end
+
+    if page == AHTURHGAN_COMPLETED_PAGE then
+        S.quest.completed.ahturhgan = flags(data, 0x04, 16)
+        S.seen = true
+        return
+    end
+
+    -- 0xFFFF: the current mission number of the storylines that are not on another page.
     if page == 0xFFFF then
         local nation = i32(data, 0x04)
         S.nation = nation
@@ -121,41 +179,31 @@ function S.on_packet(id, data, size)
         cur.nation  = i32(data, 0x08)
         cur.zilart  = i32(data, 0x0C)
         cur.cop     = i32(data, 0x10)
-        local acp_mkd = data:byte(0x18 + 1)
-        if acp_mkd ~= nil then
-            cur.acp = acp_mkd % 16
-            cur.mkd = math.floor(acp_mkd / 16)
+        -- uint16 bitfield at 0x18: ACP bits 0-3, AMK bits 4-7, ASA bits 8-11.
+        local acp_amk = data:byte(0x18 + 1)
+        if acp_amk ~= nil then
+            cur.acp = acp_amk % 16
+            cur.amk = math.floor(acp_amk / 16)
         end
         local asa = data:byte(0x19 + 1)
         if asa ~= nil then cur.asa = asa % 16 end
-        cur.adoulin = i32(data, 0x1C)
-        cur.rov     = i32(data, 0x20)
+        cur.adoulin = unoffset(i32(data, 0x1C), SOA_BASE, SOA_SCALE)
+        cur.rov     = unoffset(i32(data, 0x20), ROV_BASE)
         local area = NATION_AREA[nation]
-        if area ~= nil then
-            cur[area] = cur.nation
-            -- The completed bitset may have arrived before we knew which nation this is.
-            if S.mission.completed.nation ~= nil then
-                S.mission.completed[area] = S.mission.completed.nation
-            end
-        end
+        if area ~= nil then cur[area] = cur.nation end
         S.seen = true
         return
     end
 
-    if PAGES[page] == nil and page ~= 0xFFFF and page ~= 0xFFFE and page ~= NATION_COMPLETED_PAGE then
-        S.unknown_pages[page] = (S.unknown_pages[page] or 0) + 1
-        -- Keep the bits as well as the count. A page id means nothing on its own; a page
-        -- whose bit 0 turns on exactly when you finish mission 0 identifies itself.
-        S.unknown_sets = S.unknown_sets or {}
-        S.unknown_sets[page] = flags(data, 0x04, 32)
-    end
+    -- 0xFFFE is The Voracious Resurgence (GP_SERV_COMMAND_MISSION::TVR), not Aht Urhgan:
+    -- LandSandBoat always sends 0 there, so there is nothing to read yet.
+    if page == 0xFFFE then return end
 
-    -- 0xFFFE: the "treasures of Aht Urhgan" counter, negative when nothing is active.
-    if page == 0xFFFE then
-        local v = i32(data, 0x04)
-        if v ~= nil then S.mission.current.toau = v >= 0 and v or nil end
-        return
-    end
+    S.unknown_pages[page] = (S.unknown_pages[page] or 0) + 1
+    -- Keep the bits as well as the count. A page id means nothing on its own; a page
+    -- whose bit 0 turns on exactly when you finish mission 0 identifies itself.
+    S.unknown_sets = S.unknown_sets or {}
+    S.unknown_sets[page] = flags(data, 0x04, 32)
 end
 
 --- Has this quest been completed?  `area` is a log page name ('jeuno', 'sandoria', ...).
@@ -174,10 +222,15 @@ end
 --- and what a fresh character reports for every line.  Read as a number it is larger than
 --- every real mission id, so a naive `current > id` marks the entire game finished: measured
 --- in-game on a brand-new character, which walked a 24-step guide straight to "complete".
+--- (Logs 3 and up use 0 for "none" instead -- lua_base_entity.cpp completeMission -- which
+--- `current > id` already reads as nothing done.)
 local NO_MISSION = 65535
 
 --- Is this mission finished?  Storylines are linear, so "the current mission is past it" is
---- the completion test; the nation storylines also set the completed flag page.
+--- the completion test -- the only one there is for CoP, ACP, AMK, ASA, Adoulin and RoV,
+--- exactly as the server's own hasCompletedMission() does it for CoP.  The nation lines,
+--- Zilart, ToAU and WoTG also have a completed bitset, which is what survives once the
+--- current number has been reset.
 function S.mission_done(area, id)
     local cur = S.mission.current[area]
     if cur ~= nil and cur < NO_MISSION and cur > id then return true end

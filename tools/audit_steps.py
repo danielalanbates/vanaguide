@@ -32,26 +32,65 @@ MISSION_LOG = {'sandoria': 'SANDORIA', 'bastok': 'BASTOK', 'windurst': 'WINDURST
                'cop': 'COP', 'toau': 'TOAU', 'wotg': 'WOTG', 'acp': 'ACP', 'amk': 'AMK', 'asa': 'ASA',
                'adoulin': 'SOA', 'rov': 'ROV', 'tvr': 'TVR'}
 
+# How LandSandBoat records a finished mission (src/map/lua/lua_base_entity.cpp completeMission,
+# src/map/utils/charutils.cpp SendPartialMissionLog):
+#  * `!completemission L X` does nothing unless X is L's *current* mission -- it only logs
+#    "can't complete non current mission".  So every completion is `!addmission` first.
+#  * Nations, Zilart, ToAU and WoTG then get a completed bit, which the client is sent.
+#  * CoP gets no bit at all, and ACP/AMK/ASA/SoA/RoV get none the client is ever sent: for
+#    these the only record is the current number, which completeMission resets to 0.  The
+#    mission scripts finish them with completeMission + addMission(nextMission)
+#    (scripts/globals/npc_util.lua), and LandSandBoat's own hasCompletedMission(COP, X) is
+#    `X < current` -- so the harness has to move current past X the same way.
+#  * TVR is sent nowhere (0x056_mission_tvr.cpp is a stub): no command can make it visible.
+CURRENT_ONLY = {'cop', 'acp', 'amk', 'asa', 'adoulin', 'rov'}
+NOT_SENT = {'tvr'}
 
-def gm_for(s):
+
+def next_mission(steps):
+    """(area, id) -> the next higher mission id any exported step uses in that area."""
+    ids = {}
+    for s in steps:
+        if s.get('cond') in ('M', 'MA') and s.get('area') in MISSION_LOG and s.get('id') is not None:
+            ids.setdefault(s['area'], set()).add(s['id'])
+    out = {}
+    for area, have in ids.items():
+        ordered = sorted(have)
+        for a, b in zip(ordered, ordered[1:]):
+            out[(area, a)] = b
+    return out
+
+
+def gm_for(s, nxt=None):
+    """The GM commands, in order, that make the step's condition true the way the server would."""
     c, area, i = s['cond'], s.get('area'), s.get('id')
-    if c == 'Q' and area in QUEST_LOG: return f'!completequest {QUEST_LOG[area]} {i}'
-    if c == 'QA' and area in QUEST_LOG: return f'!addquest {QUEST_LOG[area]} {i}'
-    if c == 'M' and area in MISSION_LOG: return f'!completemission {MISSION_LOG[area]} {i}'
-    if c == 'MA' and area in MISSION_LOG: return f'!addmission {MISSION_LOG[area]} {i}'
-    if c == 'KI' and s.get('ki') is not None: return f'!addkeyitem {s["ki"]}'
-    if c == 'IT' and s.get('item') is not None: return f'!additem {s["item"]} {s.get("item_n") or 1}'
-    if c == 'LV' and s.get('level'): return f'!setplayerlevel {s["level"]}'
-    return None
+    if c == 'Q' and area in QUEST_LOG: return [f'!completequest {QUEST_LOG[area]} {i}']
+    if c == 'QA' and area in QUEST_LOG: return [f'!addquest {QUEST_LOG[area]} {i}']
+    if c == 'M' and area in MISSION_LOG and area not in NOT_SENT:
+        log = MISSION_LOG[area]
+        cmds = [f'!addmission {log} {i}', f'!completemission {log} {i}']
+        if area in CURRENT_ONLY:
+            cmds.append(f'!addmission {log} {(nxt or {}).get((area, i), i + 1)}')
+        return cmds
+    if c == 'MA' and area in MISSION_LOG: return [f'!addmission {MISSION_LOG[area]} {i}']
+    if c == 'KI' and s.get('ki') is not None: return [f'!addkeyitem {s["ki"]}']
+    if c == 'IT' and s.get('item') is not None: return [f'!additem {s["item"]} {s.get("item_n") or 1}']
+    if c == 'LV' and s.get('level'): return [f'!setplayerlevel {s["level"]}']
+    return []
 
 
 def clear_for(s):
     """Undo the step's condition first, so the 'pre' row can show it open."""
     c, area, i = s['cond'], s.get('area'), s.get('id')
-    if c in ('Q', 'QA') and area in QUEST_LOG: return f'!delquest {QUEST_LOG[area]} {i}'
-    if c in ('M', 'MA') and area in MISSION_LOG: return f'!delmission {MISSION_LOG[area]} {i}'
-    if c == 'KI' and s.get('ki') is not None: return f'!delkeyitem {s["ki"]}'
-    return None
+    if c in ('Q', 'QA') and area in QUEST_LOG: return [f'!delquest {QUEST_LOG[area]} {i}']
+    # `M`: clear the bit, then make X the current mission -- open for every log, since a
+    # current number already past X would read as done.
+    if c == 'M' and area in MISSION_LOG and area not in NOT_SENT:
+        log = MISSION_LOG[area]
+        return [f'!delmission {log} {i}', f'!addmission {log} {i}']
+    if c == 'MA' and area in MISSION_LOG: return [f'!delmission {MISSION_LOG[area]} {i}']
+    if c == 'KI' and s.get('ki') is not None: return [f'!delkeyitem {s["ki"]}']
+    return []
 
 
 def last_row(csv):
@@ -100,6 +139,7 @@ def main():
         return False
 
     steps = [json.loads(l) for l in open(args.steps)]
+    nxt = next_mission(steps)
     if args.guide:
         steps = [s for s in steps if s['guide'] == args.guide]
     done = set()
@@ -122,9 +162,8 @@ def main():
         if s.get('zone') in skipz:
             print(f'   {g}/{i} skipped: zone {s["zone"]} is on the skip list', flush=True)
             continue
-        clear = clear_for(s)
-        if clear:
-            send(clear)
+        for line in clear_for(s):
+            send(line)
             consumed()
         send(f'/vg audit {g} {i} jump')
         if not consumed():
@@ -160,10 +199,11 @@ def main():
             send(f'/vg audit {g} {i}')
             consumed()
             row_after(before)
-        gm = gm_for(s)
+        gm = gm_for(s, nxt)
         if gm:
-            send(gm)
-            consumed()
+            for line in gm:
+                send(line)
+                consumed()
             time.sleep(3.0)
             before = os.path.getsize(csv)
             send(f'/vg audit {g} {i} done')

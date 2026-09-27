@@ -116,6 +116,124 @@ ok(story.mission_done('sandoria', 0), 'a completed nation mission is read from p
 ok(story.mission_done('sandoria', 1), 'and the second one')
 ok(not story.mission_done('sandoria', 9), 'but not one that is still to do')
 
+-- ---- every mission log, the way LandSandBoat packs it ----------------------------
+-- Built from src/map/packets/s2c/0x056_mission.cpp / 0x056_mission_other.cpp, and the state
+-- CLuaBaseEntity::completeMission / addMission leave behind (lua_base_entity.cpp).
+do
+    local unpk = table.unpack or unpack
+    -- a 0x056 of `page` whose 32 data bytes are zero except `u32s` ({offset = value}, offsets
+    -- from the start of the packet) and `bits` (flag ids across the 32 bytes)
+    local function pkt(page, u32s, bits)
+        local b = {}
+        for i = 1, 32 do b[i] = 0 end
+        for off, v in pairs(u32s or {}) do
+            for k = 0, 3 do b[off - 4 + k + 1] = math.floor(v / 256 ^ k) % 256 end
+        end
+        for _, id in ipairs(bits or {}) do
+            local i, bit = math.floor(id / 8) + 1, id % 8
+            b[i] = b[i] + 2 ^ bit
+        end
+        return string.char(0, 0, 0, 0) .. string.char(unpk(b, 1, 32))
+            .. string.char(page % 256, math.floor(page / 256) % 256, 0, 0) .. string.rep('\0', 8)
+    end
+    local function feed(p) story.on_packet(0x056, p, #p) end
+    -- 0xFFFF with every storyline "none" (65535 for the nation, 0 for logs 3+, SoA/RoV at
+    -- their un-started offsets), then overrides.
+    local function main(t)
+        local u = { [0x04] = t.nation or 0, [0x08] = t.nation_mission or 65535,
+                    [0x0C] = t.zilart or 0, [0x10] = t.cop or 0,
+                    [0x18] = (t.acp or 0) + (t.amk or 0) * 16 + (t.asa or 0) * 256,
+                    [0x1C] = t.soa_raw or 0x6E, [0x20] = t.rov_raw or 0x6C }
+        return pkt(0xFFFF, u)
+    end
+    story.reset()
+
+    -- Chains of Promathia, guide 43 step 8 (Ancient Vows, 248).  CoP has no completed bit
+    -- anywhere; the current number is the whole record, and LandSandBoat's own
+    -- hasCompletedMission(COP, id) is `id < current`.
+    require('guides.init')
+    local cop = G.get('Chains of Promathia - in order')
+    ok(cop ~= nil, 'the CoP storyline guide is registered')
+    local vows
+    for _, s in ipairs(cop.steps) do if s.mission and s.mission.id == 248 then vows = s end end
+    ok(vows ~= nil and vows.mission.area == 'cop', 'it has Ancient Vows as M|cop,248|')
+    local cw = { story = story }
+    feed(main({ cop = 248 }))                                   -- !addmission COP 248
+    ok(not C.done(vows, cw), 'CoP 248 is open while it is the current mission')
+    eq(story.mission_current('cop'), 248, 'and reads as the current one')
+    -- What the audit harness did: `!completemission COP 248`.  When 248 is current the server
+    -- sets current to 0 (logs above 2) and stores no bit for CoP, so 0xFFFF says CoP = 0 --
+    -- and the server itself no longer counts 248 as complete.  (When 248 is *not* current,
+    -- which the harness's `!delmission` made sure of, it only logs "can't complete non
+    -- current mission" and sends nothing.)  Open is the right answer.
+    feed(main({ cop = 0 }))
+    ok(not C.done(vows, cw), 'after a bare !completemission COP 248 the step stays open, as on the server')
+    -- What the mission script does: completeMission then addMission(nextMission), so
+    -- current becomes The Call of the Wyrmking (258).  That is what finishes a CoP mission.
+    feed(main({ cop = 258 }))
+    ok(C.done(vows, cw), 'CoP 248 is done once the current mission has moved on to 258')
+    ok(not story.mission_done('cop', 258), 'and 258 itself is not')
+    ok(story.mission_done('cop', 110), 'and every earlier CoP mission is')
+
+    -- Nations + Zilart share page 0x00D0, 8 bytes each.  A Bastok character's completed
+    -- mission 2 is bit 64+2 of the page; reading the page whole put it at id 66.
+    feed(main({ nation = 1 }))
+    feed(pkt(0x00D0, nil, { 64 + 2, 192 + 4 }))
+    ok(story.mission_done('bastok', 2), 'Bastok mission 2 is read from the Bastok bytes of 0x00D0')
+    ok(not story.mission_done('bastok', 66), 'not as Bastok mission 66')
+    ok(not story.mission_done('sandoria', 2), "and it is not a San d'Oria mission")
+    ok(story.mission_done('zilart', 4), 'Zilart completed bits are the last 8 bytes of 0x00D0')
+    ok(not story.mission_done('zilart', 0), 'and Zilart current 0 marks nothing done')
+    feed(pkt(0x00D0, nil, { 128 + 5 }))
+    ok(story.mission_done('windurst', 5), 'Windurst completed bits are bytes 16..23')
+    ok(not story.mission_done('bastok', 2), 'a fresh 0x00D0 replaces the previous one')
+
+    -- ToAU / WoTG: current numbers ride on the Aht Urhgan quest page 0x0080 (Data[5], Data[6]),
+    -- completed bits on 0x00D8.  0xFFFE is TVR's page and must not be read as ToAU.
+    feed(pkt(0x0080, { [0x18] = 3, [0x1C] = 9 }, { 5, 100 }))
+    feed(pkt(0xFFFE, { [0x04] = 0 }))
+    eq(story.mission_current('toau'), 3, 'ToAU current comes from page 0x0080, and 0xFFFE leaves it alone')
+    ok(story.mission_done('toau', 2), 'ToAU 2 is done while 3 is current')
+    ok(story.mission_done('wotg', 8), 'WoTG 8 is done while 9 is current')
+    ok(story.quest_active('ahturhgan', 5), 'Aht Urhgan quest 5 is in progress (page 0x0080)')
+    ok(story.quest_active('ahturhgan', 100), 'and quest 100')
+    -- ToAU current 3 in Data[5] is bits 160,161 if the page were read whole
+    ok(not story.quest_active('ahturhgan', 160), 'the mission numbers are not quest flags')
+    feed(pkt(0x0080, { [0x18] = 0, [0x1C] = 0 }))              -- !completemission TOAU 3
+    feed(pkt(0x00D8, nil, { 3, 64 + 9 }))
+    ok(story.mission_done('toau', 3), 'a completed ToAU mission is read from 0x00D8 bytes 0..7')
+    ok(story.mission_done('wotg', 9), 'a completed WoTG mission from bytes 8..15')
+    ok(not story.mission_done('toau', 4), 'but not the next one')
+    feed(pkt(0x00C0, nil, { 12, 128 + 1 }))
+    ok(story.quest_done('ahturhgan', 12), 'Aht Urhgan completed quests are read from 0x00C0')
+    ok(not story.quest_done('ahturhgan', 129), 'bytes 16..31 of 0x00C0 are Assault, not quests')
+
+    -- ACP / AMK / ASA nibbles: the guide area is 'amk'.
+    feed(main({ acp = 5, amk = 7, asa = 2 }))
+    ok(story.mission_done('acp', 4) and not story.mission_done('acp', 5), 'ACP from the low nibble of 0x18')
+    ok(story.mission_done('amk', 6) and not story.mission_done('amk', 7), "AMK from the high nibble, as area 'amk'")
+    ok(story.mission_done('asa', 1) and not story.mission_done('asa', 2), 'ASA from the low nibble of 0x19')
+
+    -- Seekers of Adoulin (current*2 + 0x6E) and RoV (current + 0x6C).  Read raw, a character
+    -- who had not started either had Adoulin missions 0..109 and all of RoV "done".
+    feed(main({}))
+    ok(not story.mission_done('adoulin', 0), 'an un-started Adoulin storyline has nothing done')
+    ok(not story.mission_done('rov', 0), 'nor RoV')
+    feed(main({ soa_raw = 0x6E + 9 * 2, rov_raw = 0x6C + 12 }))
+    eq(story.mission_current('adoulin'), 9, 'Adoulin current is (raw - 0x6E) / 2')
+    ok(story.mission_done('adoulin', 8) and not story.mission_done('adoulin', 100), 'and completes only what is past it')
+    eq(story.mission_current('rov'), 12, 'RoV current is raw - 0x6C')
+    ok(story.mission_done('rov', 10) and not story.mission_done('rov', 12), 'and completes only what is past it')
+    feed(main({ soa_raw = 0, rov_raw = 0 }))
+    eq(story.mission_current('adoulin'), nil, 'a declined expansion (0) is nothing started')
+
+    -- put the San d'Oria world back for the progress tests below
+    story.reset()
+    story.on_packet(0x056, packet_0056(0x0090, { 5, 12 }), 48)
+    story.on_packet(0x056, mission, #mission)
+    story.on_packet(0x056, packet_0056(0x00D0, { 0, 1 }), 48)
+end
+
 -- ---- progress -----------------------------------------------------------------
 local guide = G.register({ name = 'Test guide', steps = steps })
 P.set_guide(guide)

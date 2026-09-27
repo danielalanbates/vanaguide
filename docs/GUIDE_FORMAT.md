@@ -58,8 +58,10 @@ Add the file's name to `guides/init.lua`.
 | `N` | note, shown under the step |
 | `FIXED` | never auto-complete; always wait for the player |
 
-`area` is a quest-log page name: `sandoria bastok windurst jeuno other outlands wotg
-abyssea adoulin coalition`, and for missions also `zilart cop acp mkd asa adoulin rov`.
+`area` is a quest-log page name: `sandoria bastok windurst jeuno other outlands ahturhgan
+wotg abyssea adoulin coalition`, and for missions `sandoria bastok windurst zilart cop toau
+wotg acp amk asa adoulin rov` (`tvr` parses but never completes on its own: LandSandBoat
+does not send TVR progress, see docs/PACKETS.md).
 
 A step with **no** completion tag waits for the player to click Done — except `R` and `F`
 steps, which complete when the player reaches the `POS`.
