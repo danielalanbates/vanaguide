@@ -146,4 +146,36 @@ function V.row(r)
     }, ',')
 end
 
+--- Is `npc` loaded near (px, pz)?  Returns ok, dist, nearest, why.
+--- Markers ("???", qm*, _xyz doors) match anything within 10 yalms, as V.entry does.
+function V.presence(npc, px, pz)
+    local list = V.nearby(px, pz)
+    local nearest = (#list > 0) and list[1].name or ''
+    if #list == 0 then return false, nil, '', 'nothing loaded yet' end
+    npc = npc or ''
+    local marker = npc:match('^qm') ~= nil or npc:match('^_') ~= nil or npc:find('%?%?%?') ~= nil
+    if npc == '' or marker then
+        local near = list[1]
+        local ok = near ~= nil and (near.dist or 1e9) <= 10
+        return ok, near and near.dist, nearest, marker and 'marker' or 'no npc named'
+    end
+    local want = normalize(npc)
+    for _, e in ipairs(list) do
+        if normalize(e.name) == want then return true, e.dist, nearest, 'found' end
+    end
+    return false, nil, nearest, ('not loaded (%d entities)'):format(#list)
+end
+
+--- One row of the step audit (tools/audit_steps.py).
+function V.audit_row(t)
+    local function n(v) return v == nil and '' or ('%.1f'):format(v) end
+    local function q(v) return '"' .. tostring(v or ''):gsub('"', "'") .. '"' end
+    return table.concat({
+        tostring(t.guide), tostring(t.step), t.phase, t.kind, tostring(t.want_zone or ''),
+        tostring(t.zone or ''), t.mode or '', n(t.dist), tostring(t.radius or ''),
+        t.inside and 'inside' or 'outside', q(t.npc), t.present and 'present' or 'absent',
+        n(t.npc_dist), q(t.nearest), t.done and 'done' or 'open', q(t.path), q(t.why),
+    }, ',')
+end
+
 return V

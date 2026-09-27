@@ -14,6 +14,7 @@
 -- Tags:   Z    zone (id, or a name from data/zone_names.lua)
 --         POS  x,z[,radius]  — where in the zone; radius defaults to 10 yalms
 --         M    area,id  — done when that mission is finished
+--         MA   area,id  — done when that mission is active or finished
 --         Q    area,id  — done when that quest is completed
 --         QA   area,id  — done when that quest is *accepted* (for A steps)
 --         KI   id       — done when you hold that key item
@@ -39,6 +40,12 @@ local VERBS = {
     t = 'talk', R = 'run', U = 'use', F = 'travel', N = 'note', L = 'level',
 }
 
+local TAGS = {
+    Z = true, POS = true, M = true, MA = true, Q = true, QA = true, KI = true,
+    IT = true, LV = true, JOB = true, RANK = true, SP = true, N = true,
+    FIXED = true,
+}
+
 local function trim(s) return (s:gsub('^%s+', ''):gsub('%s+$', '')) end
 
 local function numbers(s)
@@ -61,7 +68,15 @@ function G.parse_line(line, lineno)
 
     local step = { kind = kind, text = trim(head:sub(2)), line = lineno }
 
-    for tag, value in line:gmatch('|(%u+)|([^|]*)') do
+    local seen = {}
+    for tag, value in line:gmatch('|([^|]+)|([^|]*)') do
+        if not tag:match('^[A-Z]+$') or not TAGS[tag] then
+            return nil, ('line %d: unknown tag %q'):format(lineno or 0, tag)
+        end
+        if seen[tag] then
+            return nil, ('line %d: duplicate tag %q'):format(lineno or 0, tag)
+        end
+        seen[tag] = true
         value = trim(value)
         if tag == 'Z' then
             step.zone = tonumber(value) or zones.find(value)
@@ -72,27 +87,46 @@ function G.parse_line(line, lineno)
             local n = numbers(value)
             if #n < 2 then return nil, ('line %d: POS needs x,z'):format(lineno or 0) end
             step.pos = { x = n[1], z = n[2], r = n[3] or 10 }
-        elseif tag == 'M' or tag == 'Q' or tag == 'QA' then
+        elseif tag == 'M' or tag == 'MA' or tag == 'Q' or tag == 'QA' then
             local area, id = value:match('^([%w_]+)%s*,%s*(%d+)$')
             if area == nil then
                 return nil, ('line %d: %s needs area,id'):format(lineno or 0, tag)
             end
-            step[tag == 'M' and 'mission' or (tag == 'Q' and 'quest' or 'quest_accept')] =
+            step[tag == 'M' and 'mission' or (tag == 'MA' and 'mission_accept'
+                or (tag == 'Q' and 'quest' or 'quest_accept'))] =
                 { area = area, id = tonumber(id) }
         elseif tag == 'KI' then
             step.key_item = tonumber(value)
+            if step.key_item == nil then
+                return nil, ('line %d: KI needs an id'):format(lineno or 0)
+            end
         elseif tag == 'IT' then
             local n = numbers(value)
+            if #n == 0 or n[1] < 0 or n[2] ~= nil and n[2] < 1 then
+                return nil, ('line %d: IT needs item id[,positive count]'):format(lineno or 0)
+            end
             step.item = { id = n[1], count = n[2] or 1 }
         elseif tag == 'LV' then
             step.level = tonumber(value)
+            if step.level == nil or step.level < 1 then
+                return nil, ('line %d: LV needs a positive level'):format(lineno or 0)
+            end
         elseif tag == 'JOB' then
             local n = numbers(value)
+            if #n == 0 or n[1] < 1 or n[2] ~= nil and n[2] < 1 then
+                return nil, ('line %d: JOB needs job id[,positive level]'):format(lineno or 0)
+            end
             step.job = { id = n[1], level = n[2] or 1 }
         elseif tag == 'RANK' then
             step.rank = tonumber(value)
+            if step.rank == nil or step.rank < 1 then
+                return nil, ('line %d: RANK needs a positive rank'):format(lineno or 0)
+            end
         elseif tag == 'SP' then
             step.spell = tonumber(value)
+            if step.spell == nil or step.spell < 0 then
+                return nil, ('line %d: SP needs a spell id'):format(lineno or 0)
+            end
         elseif tag == 'N' then
             step.note = value
         elseif tag == 'FIXED' then

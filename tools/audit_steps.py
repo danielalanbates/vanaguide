@@ -1,0 +1,178 @@
+#!/usr/bin/env python3
+"""Vanaguide :: tools/audit_steps.py
+
+Verify every step of every guide in a running client on the LOCAL world.
+
+For each step (tools/export_steps.lua writes the list): jump the guide to it, teleport the
+character onto its marker (or into its zone), and have the addon write one row to
+addons/Vanaguide/audit.csv (`/vg audit`): what the arrow says from here, whether the step's
+NPC is loaded, whether its condition reads as done, and what the ground line is built from.
+Then satisfy the step with the GM command a server would answer for (complete the quest or
+mission, add the key item or item, set the level) and audit again, so the row pair proves the
+guide notices the server's word.
+
+Never point this at a hosted server: it teleports and sends GM commands.
+
+    tools/audit_steps.py --game "<game dir>" --steps results/steps.jsonl [--guide N] [--limit N]
+
+Resumable: steps with a 'pre' row in audit.csv are skipped.
+
+Copyright (c) 2026 Bates LLC.  All rights reserved.
+"""
+import argparse
+import json
+import os
+import sys
+import time
+
+QUEST_LOG = {'sandoria': 'SANDORIA', 'bastok': 'BASTOK', 'windurst': 'WINDURST', 'jeuno': 'JEUNO',
+             'other': 'OTHER_AREAS', 'outlands': 'OUTLANDS', 'ahturhgan': 'AHT_URHGAN',
+             'wotg': 'CRYSTAL_WAR', 'abyssea': 'ABYSSEA', 'adoulin': 'ADOULIN', 'coalition': 'COALITION'}
+MISSION_LOG = {'sandoria': 'SANDORIA', 'bastok': 'BASTOK', 'windurst': 'WINDURST', 'zilart': 'ZILART',
+               'cop': 'COP', 'toau': 'TOAU', 'wotg': 'WOTG', 'acp': 'ACP', 'amk': 'AMK', 'asa': 'ASA',
+               'adoulin': 'SOA', 'rov': 'ROV', 'tvr': 'TVR'}
+
+
+def gm_for(s):
+    c, area, i = s['cond'], s.get('area'), s.get('id')
+    if c == 'Q' and area in QUEST_LOG: return f'!completequest {QUEST_LOG[area]} {i}'
+    if c == 'QA' and area in QUEST_LOG: return f'!addquest {QUEST_LOG[area]} {i}'
+    if c == 'M' and area in MISSION_LOG: return f'!completemission {MISSION_LOG[area]} {i}'
+    if c == 'MA' and area in MISSION_LOG: return f'!addmission {MISSION_LOG[area]} {i}'
+    if c == 'KI' and s.get('ki') is not None: return f'!addkeyitem {s["ki"]}'
+    if c == 'IT' and s.get('item') is not None: return f'!additem {s["item"]} {s.get("item_n") or 1}'
+    if c == 'LV' and s.get('level'): return f'!setplayerlevel {s["level"]}'
+    return None
+
+
+def clear_for(s):
+    """Undo the step's condition first, so the 'pre' row can show it open."""
+    c, area, i = s['cond'], s.get('area'), s.get('id')
+    if c in ('Q', 'QA') and area in QUEST_LOG: return f'!delquest {QUEST_LOG[area]} {i}'
+    if c in ('M', 'MA') and area in MISSION_LOG: return f'!delmission {MISSION_LOG[area]} {i}'
+    if c == 'KI' and s.get('ki') is not None: return f'!delkeyitem {s["ki"]}'
+    return None
+
+
+def last_row(csv):
+    with open(csv, encoding='utf-8', errors='replace') as fh:
+        rows = fh.read().strip().splitlines()
+    return rows[-1] if rows else ''
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--game', required=True)
+    ap.add_argument('--steps', required=True)
+    ap.add_argument('--guide', type=int, default=0)
+    ap.add_argument('--limit', type=int, default=0)
+    ap.add_argument('--zone-wait', type=float, default=20.0)
+    ap.add_argument('--step-wait', type=float, default=4.0)
+    ap.add_argument('--skip-zones', default='178')
+    args = ap.parse_args()
+
+    addon = os.path.join(args.game, 'addons', 'Vanaguide')
+    cmd = os.path.join(addon, 'cmd.txt')
+    csv = os.path.join(addon, 'audit.csv')
+    skipz = {int(z) for z in args.skip_zones.split(',') if z.strip().isdigit()}
+
+    def send(line):
+        with open(cmd, 'a') as fh:
+            fh.write(line + '\n')
+
+    def consumed(timeout=15.0):
+        end = time.time() + timeout
+        while time.time() < end:
+            try:
+                if os.path.getsize(cmd) == 0:
+                    return True
+            except OSError:
+                return True
+            time.sleep(0.25)
+        return False
+
+    def row_after(before, timeout=10.0):
+        end = time.time() + timeout
+        while time.time() < end:
+            if os.path.exists(csv) and os.path.getsize(csv) > before:
+                return True
+            time.sleep(0.25)
+        return False
+
+    steps = [json.loads(l) for l in open(args.steps)]
+    if args.guide:
+        steps = [s for s in steps if s['guide'] == args.guide]
+    done = set()
+    if os.path.exists(csv):
+        for line in open(csv, encoding='utf-8', errors='replace'):
+            b = line.split(',')
+            if len(b) > 2 and b[2] == 'pre':
+                done.add((b[0], b[1]))
+    todo = [s for s in steps if (str(s['guide']), str(s['step'])) not in done]
+    # Zone order: a zone load costs ~20 s and there are far fewer zones than steps.
+    todo.sort(key=lambda s: (s.get('zone') is None, s.get('zone') or 0, s['guide'], s['step']))
+    if args.limit:
+        todo = todo[:args.limit]
+    print(f'{len(steps)} steps, {len(todo)} left to audit', flush=True)
+
+    zone = None
+    silent = 0
+    for n, s in enumerate(todo, 1):
+        g, i = s['guide'], s['step']
+        if s.get('zone') in skipz:
+            print(f'   {g}/{i} skipped: zone {s["zone"]} is on the skip list', flush=True)
+            continue
+        clear = clear_for(s)
+        if clear:
+            send(clear)
+            consumed()
+        send(f'/vg audit {g} {i} jump')
+        if not consumed():
+            print('!! the client stopped reading cmd.txt -- stopping', flush=True)
+            break
+        wait = 1.0
+        if s.get('zone') is not None:
+            if s.get('x') is not None:
+                y = s.get('db_y') or 0
+                send(f'!pos {s["x"]:.3f} {y:.3f} {s["z"]:.3f} {s["zone"]}')
+            elif s['zone'] != zone:
+                send(f'!zone {s["zone"]}')
+            consumed()
+            wait = args.zone_wait if s['zone'] != zone else args.step_wait
+            zone = s['zone']
+        time.sleep(wait)
+        before = os.path.getsize(csv) if os.path.exists(csv) else 0
+        send(f'/vg audit {g} {i}')
+        consumed()
+        if not row_after(before):
+            silent += 1
+            print(f'   {g}/{i}: no audit row', flush=True)
+            if silent >= 8:
+                print('!! eight silent audits in a row -- stopping', flush=True)
+                break
+            continue
+        silent = 0
+        for _ in range(3):
+            if 'nothing loaded yet' not in last_row(csv):
+                break
+            time.sleep(6.0)
+            before = os.path.getsize(csv)
+            send(f'/vg audit {g} {i}')
+            consumed()
+            row_after(before)
+        gm = gm_for(s)
+        if gm:
+            send(gm)
+            consumed()
+            time.sleep(3.0)
+            before = os.path.getsize(csv)
+            send(f'/vg audit {g} {i} done')
+            consumed()
+            row_after(before)
+        if n % 25 == 0:
+            print(f'   {n}/{len(todo)} ...', flush=True)
+    print('done', flush=True)
+
+
+if __name__ == '__main__':
+    sys.exit(main())

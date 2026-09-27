@@ -622,6 +622,60 @@ ashita.events.register('command', 'vg_command', function (e)
         return;
     end
 
+    -- `/vg audit <guide#> <step#> [jump|done]`: jump to any step of any guide and write one
+    -- row to addons/Vanaguide/audit.csv: what the arrow says from here, whether the step's
+    -- NPC is loaded, whether its condition reads as done, and what the path is built from.
+    -- tools/audit_steps.py drives it over every step of every guide on the local world.
+    if (sub == 'audit' and #args > 3) then
+        local gi, si = tonumber(args[3]), tonumber(args[4]);
+        local mode = (#args > 4) and args[5]:lower() or 'pre';
+        local g = gi and G.list()[gi] or nil;
+        if (g == nil or si == nil or g.steps[si] == nil) then
+            U.print(('audit: no step %s of guide %s'):format(tostring(args[4]), tostring(args[3])));
+            return;
+        end
+        if (P.guide ~= g) then P.set_guide(g, nil); end
+        P.index = si;
+        R.forget();
+        if (mode == 'jump') then U.print(('audit: on %d/%d'):format(gi, si)); return; end
+        local step = P.step();
+        local w = C.world(); w.yaw = U.heading();
+        local rec = R.recommend(step, w);
+        local d = C.distance(step, w);
+        local key = step.quest or step.quest_accept or step.mission or step.mission_accept;
+        local q = nil;
+        if (step.quest or step.quest_accept) then
+            local ok, Qd = pcall(require, 'data.quests');
+            if (ok and Qd.quests and Qd.quests[key.area]) then q = Qd.quests[key.area][key.id]; end
+        elseif (step.mission or step.mission_accept) then
+            local ok, Md = pcall(require, 'data.missions');
+            if (ok and Md.get) then q = Md.get(key.area, key.id); end
+        end
+        local note = step.note or '';
+        local npc = (q and q.npc) or note:match('Ask ([^.]+)%.') or note:match('Starts with ([^.]+)%.') or '';
+        local present, ndist, nearest, why = false, nil, '', 'not in the step zone';
+        if (step.zone ~= nil and step.zone == w.zone and step.pos ~= nil) then
+            present, ndist, nearest, why = Verify.presence(npc, step.pos.x, step.pos.z);
+        elseif (step.zone == nil) then
+            why = 'step has no location';
+        elseif (step.pos == nil and step.zone == w.zone) then
+            why = 'in the step zone (zone-only step, no marker)';
+        end
+        local r = step.pos and step.pos.r or nil;
+        local row = {
+            guide = gi, step = si, phase = mode, kind = step.kind, want_zone = step.zone,
+            zone = w.zone, mode = rec.mode, dist = rec.distance or d, radius = r,
+            inside = (d ~= nil and r ~= nil and d <= r) or (step.pos == nil and step.zone ~= nil and step.zone == w.zone),
+            npc = npc, present = present,
+            npc_dist = ndist, nearest = nearest, done = C.done(step, w),
+            path = Line.status():gsub(',', ';'), why = why .. ' | ' .. (rec.text or ''),
+        };
+        Verify.log('audit.csv', Verify.audit_row(row));
+        U.print(('audit %d/%d %s: %s %s npc=%s done=%s'):format(gi, si, mode, rec.mode,
+            row.inside and 'inside' or 'outside', present and 'present' or 'absent', tostring(row.done)));
+        return;
+    end
+
     -- What is loaded around me right now: the raw material the check above works from.
     if (sub == 'nearby') then
         local x, z = U.position();
@@ -820,11 +874,11 @@ ashita.events.register('command', 'vg_command', function (e)
         end
         if (what == 'allow') then
             vg.walk_allowed = true;
-            U.print('walk: allowed on this world');
+            U.print('walk: opted in; use only on your own local world');
             return;
         end
         if (not vg.walk_allowed) then
-            U.print('walk: only on the local world. /vg walk allow  says this is it (never on a hosted server).');
+            U.print('walk: disabled; /vg walk allow is a manual opt-in, not a server check');
             return;
         end
         local step = vg.goto_step or P.step();
