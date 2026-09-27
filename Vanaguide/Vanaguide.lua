@@ -724,14 +724,16 @@ ashita.events.register('command', 'vg_command', function (e)
             local a, b = tonumber(args[3]), tonumber(args[4]);
             local key = ('%d-%d'):format(math.min(a, b), math.max(a, b));
             local set = graph.save_learned() or {};
+            -- routing/zonegraph.lua keys a learned crossing 'a:b' (and 'b:a'); this used to
+            -- look for 'a-b' and so answered "no" for every pair it had ever learned.
             U.print(('graph: %s learned = %s'):format(key,
-                (set[key] or set[('%d-%d'):format(a, b)] or set[('%d-%d'):format(b, a)])
+                (set[('%d:%d'):format(a, b)] or set[('%d:%d'):format(b, a)])
                 and 'yes' or 'no'));
             return;
         end
         -- `/vg graph suspect` lists the hand-written pairs the server's own zone line table
-        -- contradicts. They still route, at three times the cost, so a way round wins when
-        -- there is one -- see docs/ROUTING.md.
+        -- contradicts. They are left out of routing -- the server will not move a player
+        -- across them -- see docs/ROUTING.md.
         if (#args > 2 and args[3]:lower() == 'suspect') then
             local sus = graph.suspect or {};
             U.print(('%d seed pairs the server table contradicts:'):format(#sus));
@@ -760,7 +762,8 @@ ashita.events.register('command', 'vg_command', function (e)
             return;
         end
         U.print(('%s -> %s: %d legs, about %dm')
-            :format(U.zone_name(here), U.zone_name(step.zone), #legs, math.floor((cost or 0) / 60 + 0.5)));
+            :format(U.zone_name(here), U.zone_name(step.zone), #legs,
+                    math.floor((graph.eta(legs) or cost or 0) / 60 + 0.5)));
         -- One line per leg, and each says whether the router can point at it. A leg with no
         -- recorded coordinate still gets you there; it just cannot aim the arrow, and saying
         -- so is the difference between a gap and a bug.

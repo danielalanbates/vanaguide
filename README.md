@@ -15,8 +15,8 @@ not prove. Not yet run on a hosted server, and it must not be (see below).
 | Guide viewer whose steps auto-complete | ✅ `core/progress.lua` + `core/conditions.lua` |
 | Steps that know what the game knows | ✅ `core/story.lua` reads the quest/mission log out of packet `0x056` — the same bookkeeping your in-game log shows |
 | Waypoint arrow with distance | ✅ `ui/arrow.lua`, drawn on ImGui's foreground list so it works under DXVK on the Mac port |
-| Travel routing (flight paths, boats) | ✅ `routing/zonegraph.lua` — Dijkstra over the zone graph, with airships and the Selbina/Mhaura ferry as real edges |
-| A travel graph that is actually complete | ⚠️ partly. The seed graph covers the base world; **the addon learns every zone line you walk through** and saves it, so it fills itself in from play instead of from guesswork |
+| Travel routing (flight paths, boats) | ✅ `routing/zonegraph.lua` — Dijkstra over the zone graph: every zone line, airship and ferry, Cavernous Maw, Adoulin waypoint and Home Point the server has ([docs/ROUTING.md](docs/ROUTING.md)) |
+| A travel graph that is actually complete | ✅ for the shipped guides: all 376 zone changes route, generated from LandSandBoat's own tables and scripts. It cannot see storyline progress, so a leg with a condition says so; **the addon still learns every zone line you walk through** for servers that differ |
 | Gear finder / "where does this drop?" | ✅ `/vg find`, `/vg gear <slot>`, `/vg nm` over 365 notorious monsters, 1,167 purchasable items and 485 sourced equipment pieces ([docs/LOOT_AND_HUNTING.md](docs/LOOT_AND_HUNTING.md)) |
 | Guide library | **506 quests and 459 missions**, generated from server data into 25 guides — one per quest area, one per storyline ([docs/QUEST_DATABASE.md](docs/QUEST_DATABASE.md)) — plus hand-written guides in `Vanaguide/guides/` |
 | Guide editor | ❌ — but `/vg mark` writes a paste-ready guide line for wherever you are standing |

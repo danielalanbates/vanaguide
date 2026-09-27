@@ -77,7 +77,7 @@ function R.recommend(step, w)
         return rec
     end
 
-    local legs, cost = route(w.zone, zone)
+    local legs = route(w.zone, zone)
     if legs == nil then
         return {
             mode = 'unknown',
@@ -87,12 +87,12 @@ function R.recommend(step, w)
     end
     local first = legs[1]
     if first == nil then
-        return { mode = 'travel', legs = legs, eta = cost, text = 'You are there.',
+        return { mode = 'travel', legs = legs, eta = graph.eta(legs), text = 'You are there.',
                  destination = zone, hops = 0 }
     end
 
     local rec = {
-        mode = 'travel', legs = legs, eta = cost, destination = zone, hops = #legs,
+        mode = 'travel', legs = legs, eta = graph.eta(legs), destination = zone, hops = #legs,
         leg = first,
     }
     local target, verb = points.leg_target(first, w.x, w.z)

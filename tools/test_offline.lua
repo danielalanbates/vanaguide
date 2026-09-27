@@ -143,9 +143,52 @@ eq(air[1].kind, 'transit', 'and it is transit, not walking')
 ok(R.describe(air):find('Airship') ~= nil, 'route description names the airship')
 
 ok(graph.route(230, 299) == nil, 'unreachable zone routes to nil')
+local version = graph.version
 ok(graph.learn(230, 299), 'a new zone line is learned')
+ok(graph.version > version, 'learning bumps the graph version, so the router drops its cache')
 ok(not graph.learn(230, 299), 'and only learned once')
 ok(graph.route(230, 299) ~= nil, 'learning opens the route')
+
+-- The generated zone lines are in the graph, not just the hand-written seed: the two Adoulin
+-- cities touch, and nothing in data/travel.lua says so.
+local adoulin = graph.route(256, 257)
+ok(adoulin ~= nil and #adoulin == 1 and adoulin[1].kind == 'walk', 'Western Adoulin walks to Eastern Adoulin')
+
+-- A seed pair the server's table contradicts is kept out: Southern San d'Oria and Port
+-- San d'Oria do not touch, the way round is through Northern San d'Oria.
+local sandy = graph.route(230, 232)
+ok(#graph.suspect > 0, 'contradicted seed pairs are listed')
+ok(sandy ~= nil and #sandy == 2 and sandy[1].to == 231, 'no walk across a contradicted seed pair')
+
+-- NPC crossings: the Cavernous Maw is the only way to the [S] zones.
+local maw = graph.route(105, 84)
+ok(maw ~= nil and #maw == 1 and maw[1].kind == 'transit', 'Batallia Downs to Batallia Downs [S] is one maw')
+ok(maw ~= nil and maw[1].via:find('Cavernous Maw') ~= nil, 'and the leg says so')
+local maw_at = require('routing.zonepoints').leg_target(maw[1], 0, 0)
+ok(maw_at ~= nil and math.abs(maw_at.x - -45.1) < 1, 'the arrow points at the maw')
+
+-- The Lower Jeuno waypoint is the way to Adoulin.
+local wp = graph.route(245, 256)
+ok(wp ~= nil and #wp == 1 and wp[1].net == 'waypoint', 'Lower Jeuno to Western Adoulin is the waypoint')
+
+-- Home Points: a network through a hub the caller never sees.
+local hp = graph.route(244, 25)
+ok(hp ~= nil, 'Tavnazia is reachable')
+local folded = hp ~= nil
+for _, leg in ipairs(hp or {}) do
+    if type(leg.from) ~= 'number' or type(leg.to) ~= 'number' then folded = false end
+end
+ok(folded, 'the Home Point hub is folded out of the route')
+ok(hp ~= nil and hp[#hp].to == 25, 'and the route ends where it should')
+local warp = nil
+for _, leg in ipairs(hp or {}) do if leg.net == 'homepoint' then warp = leg end end
+ok(warp ~= nil and warp.via:find('Home Point') ~= nil, 'the warp leg names the Home Point')
+ok(warp ~= nil and require('routing.zonepoints').leg_target(warp, 0, 0) ~= nil,
+   'and has a Home Point to walk to')
+ok(not graph.learn(26, 236), 'a Home Point warp is not learned as a zone line')
+local _, hp_cost = graph.route(244, 25)
+ok(graph.eta(hp) ~= nil and graph.eta(hp) < hp_cost,
+   'the estimate is the warp time, not the last-resort price it was chosen by')
 
 -- ---- recommendation -----------------------------------------------------------
 WORLD.zone, WORLD.x, WORLD.z, WORLD.yaw = 230, 0, 0, 0
