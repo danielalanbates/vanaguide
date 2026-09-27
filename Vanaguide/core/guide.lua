@@ -29,6 +29,8 @@
 --                         it the step's quest or mission entry names the NPC, which is only
 --                         right for the step where that quest or mission starts.
 --         FIXED         — never skipped automatically, even if its condition already holds
+--         RA   id       — the RetroAchievements achievement this step is (guides/achievements.lua);
+--                         shown as earned or not from the launcher's snapshot, never a condition
 --
 -- A step with no completion tag is a manual step: it waits for a click, or for the player
 -- to walk into its POS radius if it has one.
@@ -47,7 +49,7 @@ local VERBS = {
 local TAGS = {
     Z = true, POS = true, M = true, MA = true, Q = true, QA = true, KI = true,
     IT = true, LV = true, JOB = true, RANK = true, SP = true, N = true, NPC = true,
-    FIXED = true,
+    FIXED = true, RA = true,
 }
 
 local function trim(s) return (s:gsub('^%s+', ''):gsub('%s+$', '')) end
@@ -138,6 +140,11 @@ function G.parse_line(line, lineno)
             step.npc = value
         elseif tag == 'FIXED' then
             step.fixed = true
+        elseif tag == 'RA' then
+            step.ra = tonumber(value)
+            if step.ra == nil or step.ra < 1 then
+                return nil, ('line %d: RA needs an achievement id'):format(lineno or 0)
+            end
         end
     end
 
