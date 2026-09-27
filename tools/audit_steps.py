@@ -20,6 +20,7 @@ Resumable: steps with a 'pre' row in audit.csv are skipped.
 Copyright (c) 2026 Bates LLC.  All rights reserved.
 """
 import argparse
+import csv as csvmod
 import json
 import os
 import subprocess
@@ -221,14 +222,74 @@ def clear_for(s):
     """Undo the step's condition first, so the 'pre' row can show it open."""
     c, area, i = s['cond'], s.get('area'), s.get('id')
     if c in ('Q', 'QA') and area in QUEST_LOG: return [f'!delquest {QUEST_LOG[area]} {i}']
-    # `M`: clear the bit, then make X the current mission -- open for every log, since a
-    # current number already past X would read as done.
+    # `M`: clear the bit only.  X is made current by arm_for() once the character stands on
+    # the step: with X current, LandSandBoat's mission scripts start a cutscene on zone-in or
+    # on entering a trigger area (cop/2_1_An_Invitation_West.lua onZoneIn 110,
+    # wotg/05_While_the_Cat_is_Away.lua onZoneIn 7, toau/08_A_Mercenary_Life.lua trigger
+    # area 3 -> 3050), and the client then refuses GM commands ("A command error occurred").
     if c == 'M' and area in MISSION_LOG and area not in NOT_SENT:
-        log = MISSION_LOG[area]
-        return [f'!delmission {log} {i}', f'!addmission {log} {i}']
+        return [f'!delmission {MISSION_LOG[area]} {i}']
     if c == 'MA' and area in MISSION_LOG: return [f'!delmission {MISSION_LOG[area]} {i}']
     if c == 'KI' and s.get('ki') is not None: return [f'!delkeyitem {s["ki"]}']
     return []
+
+
+def arm_for(s):
+    """Sent once the character is on the step: make X current, so a current number left
+    past X by an earlier step does not read as done.  Zone-in and trigger-area scripts fire
+    on arrival only, so arming after arrival does not start them."""
+    c, area, i = s['cond'], s.get('area'), s.get('id')
+    if c == 'M' and area in MISSION_LOG and area not in NOT_SENT:
+        return [f'!addmission {MISSION_LOG[area]} {i}']
+    return []
+
+
+# LandSandBoat's own answer to each command (scripts/commands/*.lua printToPlayer).
+REPLY = {
+    'completequest': 'Quest with ID {id} for', 'addquest': 'quest {id} to', 'delquest': 'quest {id} from',
+    'completemission': 'Mission with ID {id} for', 'addmission': 'mission {id} to',
+    'delmission': 'mission {id} from',
+}
+
+
+def chat_path(game):
+    return os.path.join(game, 'addons', 'cmdpipe', 'chat.txt')
+
+
+def chat_size(game):
+    try:
+        return os.path.getsize(chat_path(game))
+    except OSError:
+        return 0
+
+
+def wait_reply(game, line, since, timeout=20.0):
+    """'ok' when the server's answer to `line` is in chat.txt after byte `since`; 'refused'
+    when the client answered `>> /say <line>` with "A command error occurred"; 'silent' when
+    nothing came.  cmd.txt being emptied only proves the addon queued the line."""
+    verb, _, rest = line[1:].partition(' ')
+    want = REPLY.get(verb)
+    if want is None:
+        time.sleep(3.0)
+        return 'ok'
+    want = want.format(id=rest.split()[-1])
+    end = time.time() + timeout
+    while time.time() < end:
+        try:
+            if os.path.getsize(chat_path(game)) < since:
+                since = 0           # the client restarted and began a fresh chat.txt
+            with open(chat_path(game), 'rb') as fh:
+                fh.seek(since)
+                tail = fh.read().decode('utf-8', 'replace').splitlines()
+        except OSError:
+            tail = []
+        if any(want in l for l in tail):
+            return 'ok'
+        for n, l in enumerate(tail):
+            if l.rstrip().endswith(f'>> /say {line}') and any('A command error occurred' in m for m in tail[n + 1:n + 3]):
+                return 'refused'
+        time.sleep(0.5)
+    return 'silent'
 
 
 def last_row(csv):
@@ -272,6 +333,20 @@ def main():
             last_gm[0] = time.time()
         with open(cmd, 'a') as fh:
             fh.write(line + '\n')
+
+    def gm(line, tries=3):
+        """Send one server command and wait for the server's own answer; resend after a
+        refusal or silence (24/13, 24/19, 24/26, 24/41 echoed `!completequest` and never got
+        "Completed ... Quest"; 49/3 and 49/25 wrote 'done' before the answer arrived)."""
+        for _ in range(tries):
+            since = chat_size(args.game)
+            send(line)
+            consumed()
+            if wait_reply(args.game, line, since) == 'ok':
+                return True
+            time.sleep(5.0)
+        print(f'   {line}: no answer from the server after {tries} tries', flush=True)
+        return False
 
     def consumed(timeout=15.0):
         end = time.time() + timeout
@@ -353,8 +428,7 @@ def main():
             print(f'   {g}/{i} skipped: zone {s["zone"]} is on the skip list', flush=True)
             continue
         for line in clear_for(s):
-            send(line)
-            consumed()
+            gm(line)
         due = args.restart_every and audited and audited % args.restart_every == 0 and audited != last_restart_at
         if n % 10 == 0:
             bad_checks = 0 if fps_healthy(args.game) else bad_checks + 1
@@ -390,23 +464,47 @@ def main():
             else:
                 print('!! the client stopped reading cmd.txt -- stopping', flush=True)
                 break
+        def zone_ins():
+            try:
+                return open(args.map_log, errors='replace').read().count('IncreaseZoneCounter')
+            except OSError:
+                return 0
+
+        def pos_to():
+            # No zone argument. With one, LandSandBoat's setPos re-zones even into the zone the
+            # character already stands in (src/map/lua/lua_base_entity.cpp setPos: Disappear +
+            # requestedZoneChange): the row is taken from the old spot before the zone-in lands,
+            # and the zone-in cutscene answers the next command with 'A command error occurred.'
+            # Without it the server only sends the new position (GP_SERV_COMMAND_WPOS).
+            y = s.get('db_y') or 0
+            send(f'!pos {s["x"]:.3f} {y:.3f} {s["z"]:.3f}')
+            consumed()
+
         def move(force_zone=False):
             nonlocal zone
             if s.get('zone') is None:
                 time.sleep(1.0)
+                for line in arm_for(s):
+                    gm(line)
                 return
             # A cross-zone `!pos` is sometimes refused (the character stays put and every later
             # row is taken from the wrong zone); `!zone` is not. So change zone first.
             if s['zone'] != zone or force_zone:
+                seen = zone_ins()
                 send(f'!zone {s["zone"]}')
                 consumed()
+                # A !pos that reaches the server while the character is still zoning is lost
+                # (setPos on Status::Disappear), so wait for the zone-in before the settle.
+                end = time.time() + 90
+                while zone_ins() == seen and time.time() < end:
+                    time.sleep(1.0)
                 time.sleep(args.zone_wait)
                 zone = s['zone']
             if s.get('x') is not None:
-                y = s.get('db_y') or 0
-                send(f'!pos {s["x"]:.3f} {y:.3f} {s["z"]:.3f} {s["zone"]}')
-                consumed()
+                pos_to()
             time.sleep(args.step_wait)
+            for line in arm_for(s):
+                gm(line)
 
         move()
         before = fsize()
@@ -470,6 +568,23 @@ def main():
                     break
                 continue
         stuck = 0
+        # The row proves the move, not the command: a !pos swallowed by an event lock leaves the
+        # character on the previous step's spot, and every check in the row is about that spot.
+        for _ in range(3):
+            b = last_row(csv).split(',')
+            try:
+                off = s.get('x') is not None and float(b[7]) > float(b[8])
+            except (IndexError, ValueError):
+                off = False
+            if not off:
+                break
+            print(f'   {g}/{i}: {b[7]} yalms from the marker -- moving again', flush=True)
+            pos_to()
+            time.sleep(args.step_wait)
+            before = fsize()
+            send(f'/vg audit {g} {i}')
+            consumed()
+            row_after(before)
         for _ in range(3):
             if 'nothing loaded yet' not in last_row(csv):
                 break
@@ -478,16 +593,20 @@ def main():
             send(f'/vg audit {g} {i}')
             consumed()
             row_after(before)
-        gm = gm_for(s, nxt)
-        if gm:
-            for line in gm:
-                send(line)
+        cmds = gm_for(s, nxt)
+        if cmds:
+            answered = all([gm(line) for line in cmds])
+            # The 0x056 can trail the chat line on a slow client: audit 'done' until it reads
+            # done, up to five times.
+            for _ in range(5 if answered else 1):
+                before = fsize()
+                send(f'/vg audit {g} {i} done')
                 consumed()
-            time.sleep(3.0)
-            before = fsize()
-            send(f'/vg audit {g} {i} done')
-            consumed()
-            row_after(before)
+                row_after(before)
+                row = next(csvmod.reader([last_row(csv)]), [])
+                if len(row) > 14 and row[2] == 'done' and row[14] == 'done':
+                    break
+                time.sleep(3.0)
         mirror()
         if n % 25 == 0:
             print(f'   {n}/{len(todo)} ...', flush=True)
