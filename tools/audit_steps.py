@@ -217,6 +217,15 @@ def hard_reset(game, log_path, db_pass, before=None):
     San d'Oria in the database (the local server is ours), start it again."""
     if before is not None:
         before()
+    # /shutdown first; a client held in an event or frozen will not act on it, so pkill after 30 s.
+    try:
+        with open(os.path.join(game, 'addons', 'cmdpipe', 'cmd.txt'), 'w') as fh:
+            fh.write('/shutdown\n')
+    except OSError:
+        pass
+    end = time.time() + 30
+    while local_client_running() and time.time() < end:
+        time.sleep(2)
     subprocess.run(['/usr/bin/pkill', '-f', LOCAL_LOADER])
     end = time.time() + 30
     while local_client_running() and time.time() < end:
@@ -580,7 +589,7 @@ def main():
             last_restart_at = audited
             print(f'   restarting the local client ({restarts}/{args.max_restarts}): '
                   + ('scheduled' if due else 'under 2 fps'), flush=True)
-            if not restart_client(args.game, args.map_log, mirror):
+            if not (hard_reset(args.game, args.map_log, args.db_pass, mirror) if args.db_pass else restart_client(args.game, args.map_log, mirror)):
                 print('!! the client did not come back -- stopping', flush=True)
                 break
             zone = None
@@ -589,7 +598,7 @@ def main():
             if restarts < args.max_restarts:
                 restarts += 1
                 print(f'   the client stopped reading cmd.txt -- restarting it ({restarts}/{args.max_restarts})', flush=True)
-                if restart_client(args.game, args.map_log, mirror):
+                if (hard_reset(args.game, args.map_log, args.db_pass, mirror) if args.db_pass else restart_client(args.game, args.map_log, mirror)):
                     zone = None
                     send(f'/vg audit {g} {i} jump')
                     if consumed():
