@@ -115,7 +115,16 @@ def main():
     csv = os.path.join(addon, 'audit.csv')
     skipz = {int(z) for z in args.skip_zones.split(',') if z.strip().isdigit()}
 
+    last_gm = [0.0]
+
     def send(line):
+        # Server commands sent back to back were sometimes dropped (the first !zone after a
+        # !delquest / jump pair failed most of the time); keep them 1.5 s apart.
+        if line.startswith('!'):
+            gap = time.time() - last_gm[0]
+            if gap < 1.5:
+                time.sleep(1.5 - gap)
+            last_gm[0] = time.time()
         with open(cmd, 'a') as fh:
             fh.write(line + '\n')
 
