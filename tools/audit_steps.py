@@ -105,7 +105,7 @@ def main():
     ap.add_argument('--steps', required=True)
     ap.add_argument('--guide', type=int, default=0)
     ap.add_argument('--limit', type=int, default=0)
-    ap.add_argument('--zone-wait', type=float, default=20.0)
+    ap.add_argument('--zone-wait', type=float, default=10.0)
     ap.add_argument('--step-wait', type=float, default=4.0)
     ap.add_argument('--skip-zones', default='178')
     args = ap.parse_args()
@@ -167,6 +167,7 @@ def main():
     zone = None
     silent = 0
     stuck = 0
+    refused = {}
     for n, s in enumerate(todo, 1):
         g, i = s['guide'], s['step']
         if s.get('zone') in skipz:
@@ -211,13 +212,16 @@ def main():
         silent = 0
         b = last_row(csv).split(',')
         if s.get('zone') is not None and len(b) > 5 and b[5] != str(s['zone']):
-            # A zone load can outlast the wait: look again before moving again.
-            time.sleep(10.0)
-            before = os.path.getsize(csv)
-            send(f'/vg audit {g} {i}')
-            consumed()
-            row_after(before)
-            b = last_row(csv).split(',')
+            # A zone load can outlast the wait: look again (every 4 s, up to 20 s) before moving again.
+            for _ in range(5):
+                time.sleep(4.0)
+                before = os.path.getsize(csv)
+                send(f'/vg audit {g} {i}')
+                consumed()
+                row_after(before)
+                b = last_row(csv).split(',')
+                if len(b) > 5 and b[5] == str(s['zone']):
+                    break
         if s.get('zone') is not None and len(b) > 5 and b[5] != str(s['zone']):
             print(f'   {g}/{i}: in zone {b[5]}, wanted {s["zone"]} -- retrying the move', flush=True)
             zone = None
@@ -230,9 +234,13 @@ def main():
             if len(b) > 5 and b[5] != str(s['zone']):
                 stuck += 1
                 zone = None
+                refused[s['zone']] = refused.get(s['zone'], 0) + 1
                 print(f'   {g}/{i}: still in zone {b[5]} -- skipped', flush=True)
-                if stuck >= 5:
-                    print('!! five moves in a row did not take -- the character is wedged, stopping', flush=True)
+                if refused[s['zone']] >= 2:
+                    skipz.add(s['zone'])
+                    print(f'   zone {s["zone"]} refused twice -- skipping its remaining steps', flush=True)
+                if stuck >= 12:
+                    print('!! twelve moves in a row did not take -- the character is wedged, stopping', flush=True)
                     break
                 continue
         stuck = 0
