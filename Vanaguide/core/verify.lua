@@ -151,9 +151,19 @@ end
 function V.presence(npc, px, pz, want_index)
     local list = V.nearby(px, pz)
     if want_index ~= nil then
-        for _, e in ipairs(list) do
-            if e.index == want_index and (e.dist or 1e9) <= 10 then
-                return true, e.dist, ('%s#%d'):format(e.name, e.index), ('found by index #%d'):format(e.index)
+        -- Straight from the entity table: V.nearby skips unnamed entries, and an NPC this
+        -- client's DAT has no name for is exactly the case the index is here to cover.
+        local ok, ents = pcall(function() return AshitaCore:GetMemoryManager():GetEntity() end)
+        if ok and ents ~= nil then
+            local okx, x = pcall(function() return ents:GetLocalPositionX(want_index) end)
+            local okz, z = pcall(function() return ents:GetLocalPositionY(want_index) end)
+            if okx and okz and x ~= nil and z ~= nil and (x ~= 0 or z ~= 0) and px ~= nil then
+                local d = U.dist(px, pz, x, z)
+                if d <= 10 then
+                    local okn, name = pcall(function() return ents:GetName(want_index) end)
+                    return true, d, ('%s#%d'):format(okn and name or '', want_index),
+                           ('found by index #%d'):format(want_index)
+                end
             end
         end
     end
