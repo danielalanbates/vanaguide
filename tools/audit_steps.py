@@ -456,7 +456,7 @@ def main():
                 if not event_locked(args.game):
                     refused[s['zone']] = refused.get(s['zone'], 0) + 1
                 print(f'   {g}/{i}: still in zone {b[5]} -- skipped', flush=True)
-                if refused[s['zone']] >= 2:
+                if refused.get(s['zone'], 0) >= 2:
                     skipz.add(s['zone'])
                     print(f'   zone {s["zone"]} refused twice -- skipping its remaining steps', flush=True)
                 if stuck >= 12:
