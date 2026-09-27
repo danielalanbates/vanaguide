@@ -1,6 +1,6 @@
 # The quest database
 
-`Vanaguide/data/quests.lua` holds **506 quests across 10 log areas, 346 of them with the
+`Vanaguide/data/quests.lua` holds **505 quests across 10 log areas, 499 of them with the
 coordinates of the NPC who gives them** — generated, not typed, by `tools/gen_quests.py`.
 
 ## Where it comes from, and why not a wiki
@@ -50,6 +50,32 @@ The harness checks the result: every zone is a real zone, every id fits the 256-
 log (an id outside it could never be read back out of packet `0x056`, so the step would be
 silently dead), and the generated guides list each quest once with prerequisites first.
 
+## Reading the header against the server
+
+The header comment is somebody's summary of the script, and its label is the NPC's name only
+some of the time. `tools/lsbdata.py` reads each `!pos` line against the server's own
+`sql/npc_list.sql` and keeps whatever the server has standing there, by the name the client
+shows:
+
+| The header says | The server has | Why |
+| --- | --- | --- |
+| `Granite Door (_4fx)`, `_700 (Oaken Door)`, `qm6 (H-10/Boat)` | Granite Door, Oaken Door, ??? | the name plus the internal name |
+| `Batallia Downs : !pos -48 0.1 435 105` | Cavernous Maw, 3 yalms away | the script's section is keyed `['Cavernous_Maw']` |
+| `Nashib`, `Honoi-Gumoi` | Nahshib, Honoi-Gomoi, at the coordinate | misspelt |
+| `Hollowed Pathway : !pos 215.4 ... 267` | x = -215.4 | the comment's sign is wrong; past 5 yalms the server's row wins |
+| `Datta : !pos -43.9 -10 -2.4 237` | Datta is in Rabao | the quest-available section names Rabao |
+| `Dominion Sergeant (Nanaa Mihgo's Camp)` | `DSgt_Nanaa` | three sergeants share the name; the bracket picks one |
+| `1. Enter Lower Delkfutt`, `Port Bastok HP` | nothing | a place, kept as `place`, never as `npc` |
+
+Where the header gives no position at all, the script's first "not started yet" section
+does: the NPC whose handler moves it along, a trigger area (its middle, from the zone's
+`register...TriggerArea` call), or a zone to enter. A guide step names only an NPC with
+"Ask ..." / "Starts with ..."; a place is "First stop: ...".
+
+Hand-written guides name their NPC with the `NPC` tag (docs/GUIDE_FORMAT.md). Without it a
+step takes the database's NPC only in that entry's own zone: the database says where a quest
+starts, and a turn-in in another town is about somebody else.
+
 ## The generated guides
 
 `Vanaguide/guides/generated.lua` builds one guide per area at load time — *"San d'Oria —
@@ -67,12 +93,17 @@ guide sit in the same list and use the same format.
 ## What is missing
 
 * ~~Missions.~~ Done — `tools/gen_missions.py` reads `scripts/missions/` the same way:
-  **459 missions across 13 storylines, 327 with coordinates**, into `data/missions.lua` and
-  a guide per storyline. It immediately paid for itself: the hand-written *"San d'Oria —
-  Rank 1"* seed guide had Mission 1-1 as id 1, where the server's enum says 0. For a linear
-  storyline that is a step which waits forever. The seed guide is in `archive/`.
-* **The 60 quests whose script states no coordinates,** and the 72 files the generator
-  skipped (mostly `.todo` stubs and quests defined outside the `Quest:new` shape).
+  **459 missions across 13 storylines, 355 with coordinates and 24 more with the zone they
+  start in**, into `data/missions.lua` and a guide per storyline. It immediately paid for
+  itself: the hand-written *"San d'Oria — Rank 1"* seed guide had Mission 1-1 as id 1, where
+  the server's enum says 0. For a linear storyline that is a step which waits forever. The
+  seed guide is in `archive/`. The 80 with nothing are mostly stubs in LandSandBoat itself
+  (all 47 of The Voracious Resurgence, A Crystalline Prophecy 2-12, A Shantotto Ascension
+  6-15), and a few that start in any of several places (any nation city, Mhaura or Selbina).
+* **The 5 quests with no location** (three Mog House moogle quests, which start in any Mog House;
+  A Sea Dog's Summons, flagged by another quest; Achieving True Power, whose Shamarhaan
+  stands in two places in Bastok Markets), and the 72 files the generator skipped (mostly
+  `.todo` stubs and quests defined outside the `Quest:new` shape).
 * **Turn-in coordinates.** Only the *first* NPC in each header is recorded, which is where
   the quest is taken. The rest of the header lists everyone else involved and is thrown
   away; keeping it would let a guide point at the turn-in too.

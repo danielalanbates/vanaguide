@@ -69,6 +69,9 @@ def name_candidates(raw):
     add(clean_npc_name(raw))
     for inner in re.findall(r'\(([^)]*)\)', raw):
         add(inner)
+    # Table-style headers put the zone first: "Mhaura, Rycharde, !pos ...".
+    for part in raw.split(',')[1:]:
+        add(clean_npc_name(part))
     # The server's internal names: `_4fx`, `qm_maw`, `Ergon_Locus_3`. Written into a label
     # they are the most exact thing it says.
     for token in re.findall(r"(?<![\w'])(_\w+|qm\w*|[A-Za-z]+(?:_\w+)+)(?![\w'])", raw):
@@ -110,6 +113,7 @@ class NpcList(dict):
         super().__init__()
         self.by_internal = {}
         self.by_zone = {}
+        self.by_id = {}     # npcid -> (zone, row as in by_zone), for a header's `!gotoid`
 
 
 def parse_npc_list(root):
@@ -167,8 +171,9 @@ def parse_npc_list(root):
             out.by_internal.setdefault(
                 ((npcid >> 12) & 0xFFF, re.sub(r'[^a-z0-9]', '', internal.lower())),
                 []).append((x, y, z, name))
-            out.by_zone.setdefault((npcid >> 12) & 0xFFF, []).append(
-                (x, y, z, name, internal, bool(shown)))
+            placed = (x, y, z, name, internal, bool(shown))
+            out.by_zone.setdefault((npcid >> 12) & 0xFFF, []).append(placed)
+            out.by_id[npcid] = ((npcid >> 12) & 0xFFF, placed)
     return out
 
 
@@ -309,7 +314,8 @@ def trigger_areas(zone_dir):
     path = os.path.join(zone_dir or '', 'Zone.lua')
     if not os.path.exists(path):
         return out
-    for m in _AREA.finditer(open(path, encoding='utf-8', errors='replace').read()):
+    text = open(path, encoding='utf-8', errors='replace').read()
+    for m in _AREA.finditer(text):
         kind, aid = m.group(1), int(m.group(2))
         n = [float(v) for v in re.findall(r'-?[\d.]+', m.group(3))]
         if kind == 'Cuboid' and len(n) == 6:
@@ -318,6 +324,12 @@ def trigger_areas(zone_dir):
             out.setdefault(aid, (n[0], n[1], None))
         elif kind == 'Spherical' and len(n) == 4:
             out.setdefault(aid, (n[0], n[2], n[1]))
+    # Eastern Adoulin registers its areas through a local helper, a cube of half-width d
+    # around (x, y, z): defineZoneAroundXYZ(zone, id, x, y, z, d).
+    for m in re.finditer(r"defineZoneAroundXYZ\(\s*zone\s*,\s*(\d+)\s*,\s*(-?[\d.]+)\s*,"
+                         r"\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*,", text):
+        out.setdefault(int(m.group(1)), (float(m.group(2)), float(m.group(4)),
+                                         float(m.group(3))))
     return out
 
 
@@ -381,8 +393,296 @@ def resolve_label(label, zone, x, z, npc_list, keys=(), near=8.0):
     return None
 
 
+# --------------------------------------------------------------------------------------------
+# Where a quest or mission starts. Used by gen_missions.py and gen_quests.py.
+# --------------------------------------------------------------------------------------------
+
+class Server:
+    """The parts of a checkout a start is looked up in: zone ids, npc_list, and each zone's
+    trigger areas (read on first use)."""
+
+    def __init__(self, root):
+        self.zone_ids = parse_zone_ids(root)
+        self.zone_enum = {v: k for k, v in self.zone_ids.items()}
+        self.npcs = parse_npc_list(root)
+        self.dirs = zone_dirs(root, self.zone_ids)
+        self._areas = {}
+
+    def areas(self, zone):
+        if zone not in self._areas:
+            self._areas[zone] = trigger_areas(self.dirs.get(zone))
+        return self._areas[zone]
+
+    def script_zones(self, text):
+        """Every zone a script mentions, in the order it first mentions them."""
+        out = []
+        for enum in re.findall(r"xi\.zone\.([A-Z][A-Z0-9_]*)", text):
+            z = self.zone_ids.get(enum)
+            if z is not None and z not in out:
+                out.append(z)
+        return out
+
+
+# Header dialects. "-- Name : !pos x y z zone", and every variation on it that the scripts use:
+# a comma, an equals sign or nothing for the colon ("-- Hadahda !pos ...", "-- Milazahn =
+# !pos ..."), "!pos:", commas between the numbers, no zone ("-- Salimah : !pos -31.7 -6.8
+# -73.3"), no name ("-- !pos 200.3 -2.25 37.1 168"), no "!pos" at all ("-- Unlucky Rat :
+# -59.724 1.999 30.179 237"), an npc id instead of a position ("-- Raibaht : !gotoid
+# 17748012"), and a whole zone instead of a position ("-- Norg : !zone 252", "-- !zone 50 =
+# Whitegate"), which also says where the zone-less lines after it are.
+_HEADER_POS = re.compile(r"--\s*(.*?)\s*[,:=]?\s*!pos:?\s+(-?[\d.]+),?\s+(-?[\d.]+),?\s+"
+                         r"(-?[\d.]+)(?:,?\s+(\d+))?(?:\s.*)?$")
+_HEADER_BARE = re.compile(r"--\s*([A-Za-z][^:!]*?)\s*:\s*(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)"
+                          r"\s+(-?\d+(?:\.\d+)?)\s+(\d+)\s*$")
+_HEADER_GOTO = re.compile(r"--\s*(.*?)\s*[-:]?\s*!gotoid\s+(\d+)")
+_HEADER_ZONE = re.compile(r"--\s*(.*?)\s*[:=]?\s*!zone\s+(\d+)(?:\s*=\s*(.*))?\s*$")
+_HEADER_NAME = re.compile(r"--\s*([A-Z][A-Za-z'\- ]{2,40}?)\s*(?:\(([^)]*)\))?\s*$")
+
+
+def header_places(text, lines, server, near=8.0):
+    """Every positioned line of a script's header, in order, each read against the server:
+    [{'label', 'zone', 'x', 'y', 'z', 'hit'}], `hit` being resolve_label()'s answer or None.
+
+    `zone` is None when it cannot be told. It is the line's own, or -- for a line without
+    one -- the zone of a `!zone` line above it or of the script, whichever has the labelled
+    thing standing within `near` yalms of the coordinate. A line's own zone can be
+    wrong ("Ornate Door (_521) : !pos -700 -20.25 -303.398 89", where the door is in the Walk
+    of Echoes): another zone the script works in, with the labelled thing at the very same
+    coordinate, is the zone it meant.
+    """
+    sections = script_sections(text)
+    zones = server.script_zones(text)
+
+    def keys(zone):
+        return section_keys(sections, server.zone_enum.get(zone))
+
+    out, context = [], None
+    for raw in lines[:40]:
+        line = raw.strip()
+        if not line.startswith('--'):
+            continue
+        mz = _HEADER_ZONE.match(line)
+        if mz and '!pos' not in line:
+            context = int(mz.group(2))
+            continue
+        mg = _HEADER_GOTO.match(line)
+        if mg:
+            ent = server.npcs.by_id.get(int(mg.group(2)))
+            if ent is not None:
+                zone, r = ent
+                out.append({'label': mg.group(1), 'zone': zone, 'x': r[0], 'y': r[1], 'z': r[2],
+                            'hit': {'name': r[3], 'x': r[0], 'y': r[1], 'z': r[2],
+                                    'shown': r[5], 'how': 'id', 'dist': 0.0}})
+            continue
+        m = _HEADER_POS.match(line) or _HEADER_BARE.match(line)
+        if not m:
+            continue
+        label = m.group(1).strip()
+        x, y, z = float(m.group(2)), float(m.group(3)), float(m.group(4))
+        zone = int(m.group(5)) if m.group(5) else None
+        hit = None
+        if zone is not None:
+            hit = resolve_label(label, zone, x, z, server.npcs, keys(zone), near)
+            if hit is None:
+                for other in zones:
+                    if other == zone:
+                        continue
+                    cand = resolve_label(label, other, x, z, server.npcs, keys(other), near=1.5)
+                    if cand is not None and cand['dist'] <= 1.5:
+                        zone, hit = other, cand
+                        break
+        else:
+            for other in ([context] if context is not None else []) + zones:
+                cand = resolve_label(label, other, x, z, server.npcs, keys(other), near)
+                if cand is not None and cand['dist'] <= near:
+                    zone, hit = other, cand
+                    break
+            if zone is None:
+                zone = context
+        # Kept even when the zone cannot be told: it is still the header's first line, and a
+        # quest whose first line cannot be placed asks the script instead of the second line.
+        out.append({'label': label, 'zone': zone, 'x': x, 'y': y, 'z': z, 'hit': hit})
+    return out
+
+
+def start_from_header(place):
+    """A header_places() entry as a start: {'zone', 'x', 'y', 'z', 'npc', 'place'}.
+
+    Whatever the server has standing there is the NPC, by the name the client shows; past five
+    yalms from the comment's coordinate, the server's row is where the marker goes (the comment
+    is prose somebody typed; npc_list is what the server spawns). A label nothing answers to is
+    a place -- "1. Enter Lower Delkfutt", "Port Bastok HP" -- and is kept as one rather than
+    presented as somebody to talk to.
+    """
+    hit, label = place['hit'], place['label']
+    start = {'zone': place['zone'], 'x': place['x'], 'y': place['y'], 'z': place['z'],
+             'npc': None, 'place': None}
+    if hit is None:
+        if label and not label.startswith('!'):
+            start['place'] = clean_npc_name(label) or None
+        return start
+    if hit['shown']:
+        start['npc'] = hit['name']
+    if hit['dist'] > 5.0:
+        start.update(x=hit['x'], y=hit['y'], z=hit['z'])
+    return start
+
+
+def header_zone(lines):
+    """The first `!zone` header line's zone: "-- Norg : !zone 252"."""
+    for raw in lines[:40]:
+        m = _HEADER_ZONE.match(raw.strip())
+        if m and '!pos' not in raw:
+            return int(m.group(2))
+    return None
+
+
+def header_named(text, lines, title, server):
+    """A header that names the NPC with no coordinate at all -- "-- Dominion Sergeant (Nanaa
+    Mihgo's Camp)" -- as a start, or None.
+
+    The zone is one the script works in where the server has an NPC of that name. Several
+    rows of the name at different spots are told apart by the bracket: npc_list calls the
+    sergeant of Nanaa Mihgo's camp `DSgt_Nanaa`. If the bracket does not pick exactly one, the
+    answer is none rather than the first row: three sergeants stand in Abyssea - Altepa, and
+    taking the first sent two quests out of three to the wrong camp.
+    """
+    for raw in lines[:12]:
+        m = _HEADER_NAME.match(raw.strip())
+        if not m or m.group(1).strip().lower() == title.lower():
+            continue
+        name, hint = m.group(1).strip(), m.group(2) or ''
+        key = normalize(name)
+        for zone in server.script_zones(text):
+            rows = [r for r in server.npcs.by_zone.get(zone, []) if normalize(r[3]) == key]
+            if len({(round(r[0]), round(r[2])) for r in rows}) > 1:
+                words = [normalize(w) for w in re.findall(r"[A-Za-z]{4,}", hint)]
+                rows = [r for r in rows if any(w in normalize(r[4]) for w in words)]
+            if len({(round(r[0]), round(r[2])) for r in rows}) == 1:
+                r = rows[0]
+                return {'zone': zone, 'x': r[0], 'y': r[1], 'z': r[2],
+                        'npc': r[3] if r[5] else None, 'place': None}
+    return None
+
+
+# What moves a quest or mission along, as opposed to what only talks about it:
+# `mission:event(...)` is dialogue with no consequence, and a line of it is where nearly every
+# giver says "come back later". A handler that does none of these is not where anything starts.
+_PROGRESS = re.compile(r"progressEvent\s*\(|startEvent\s*\(|startCutscene\s*\(|"
+                       r"(?:mission|quest):(?:complete|begin)\s*\(|setMissionStatus|"
+                       r"\breturn\s+\d+|\breturn\s*\{\s*\d+")
+# A stage past the first: `missionStatus == 2`, `getVar(player, 'Status') >= 1`,
+# `mission:getVar(player, 'Retrieve') == 1`, `vars.Prog == 1` ...
+_STAGE = re.compile(r"(missionStatus|getMissionStatus\([^)]*\)|"
+                    r"getVar\(\s*player\s*,\s*'\w+'\s*\)|vars\.\w+)\s*(==|>=|>)\s*(\d+)")
+
+
+def later_stage(text):
+    """True when `text` only lets a later stage through."""
+    first = later = False
+    for m in _STAGE.finditer(text):
+        op, n = m.group(2), int(m.group(3))
+        if op == '==' and n == 0:
+            first = True
+        elif op == '>' or n >= 1:
+            later = True
+    return later and not first
+
+
+def _opening(check, kind):
+    """Is this section the quest or mission before anything has happened in it?"""
+    if kind == 'quest':
+        # "Available", or no status condition at all (Community Service's one section serves
+        # every status, `vars.Prog >= 0`).
+        return (('QUEST_AVAILABLE' in check or 'questStatus' not in check) and
+                not later_stage(check))
+    return ('hasCompleted' not in check and
+            re.search(r"currentMission\s*==\s*mission\.missionId", check) is not None and
+            not later_stage(check))
+
+
+def script_start(text, server, kind='mission'):
+    """Where a mission (or quest) starts, read from its sections when the header gives no
+    position: {'kind': 'npc'|'area'|'zone', 'zone', ...} or None.
+
+    The first section that is the mission in progress (the quest still available), not a later
+    stage, is searched in the order the script lists things for the first handler that moves it
+    along: an NPC to talk to, a trigger area to walk into, a zone to enter. Two such handlers in
+    different zones at the head of the list -- "zone into Mhaura or Selbina" -- are a choice
+    the player makes, not a place, and give no answer.
+    """
+    found = []
+    for check, zones in script_sections(text):
+        if not _opening(check, kind):
+            continue
+        for enum, entries in zones:
+            zone = server.zone_ids.get(enum)
+            if zone is None:
+                continue
+            # Events this zone block finishes or updates. `mission:event(71)` is only dialogue
+            # -- unless the block's onEventFinish does something when 71 ends, and then it is
+            # the mission moving on (A Shantotto Ascension's zone-in cutscenes are all this).
+            handled = {int(n) for key, body in entries if key in ('onEventFinish', 'onEventUpdate')
+                       for n in re.findall(r"\[\s*(\d+)\s*\]\s*=", body)}
+            for key, body in entries:
+                if key in ('onEventFinish', 'onEventUpdate', 'onMobDeath', 'onTrade'):
+                    continue
+                m = _PROGRESS.search(body)
+                ev = next((e for e in re.finditer(r"(?:mission|quest):event\s*\(\s*(\d+)", body)
+                           if int(e.group(1)) in handled), None)
+                if m is None or (ev is not None and ev.start() < m.start()):
+                    m = ev
+                if m is None or later_stage(body[:m.start()]):
+                    continue
+                if key == 'onZoneIn':
+                    # "Enter X from Y" only when Y is the one way in; a choice of ways is no
+                    # instruction.
+                    came = set(re.findall(r"prevZone\s*==\s*xi\.zone\.([A-Z0-9_]+)", body))
+                    found.append({'kind': 'zone', 'zone': zone,
+                                  'from': server.zone_ids.get(came.pop()) if len(came) == 1
+                                  else None})
+                elif key == 'onTriggerAreaEnter':
+                    areas = server.areas(zone)
+                    spot = next((areas[int(a)] for a in re.findall(r"\[\s*(\d+)\s*\]\s*=", body)
+                                 if int(a) in areas), None)
+                    if spot is not None:
+                        found.append({'kind': 'area', 'zone': zone,
+                                      'x': spot[0], 'z': spot[1], 'y': spot[2]})
+                elif not key.startswith('on'):
+                    n = normalize(key)
+                    rows = [r for r in server.npcs.by_zone.get(zone, [])
+                            if n in (normalize(r[3]), normalize(r[4]))]
+                    if rows:
+                        r = rows[0]
+                        found.append({'kind': 'npc', 'zone': zone, 'x': r[0], 'y': r[1],
+                                      'z': r[2], 'name': r[3], 'shown': r[5],
+                                      'places': {(round(p[0]), round(p[2])) for p in rows}})
+        if found:
+            break
+    if not found:
+        return None
+    head = found[0]
+    if len(found) > 1 and found[1]['kind'] == head['kind'] and found[1]['zone'] != head['zone']:
+        return None
+    if head['kind'] == 'npc' and len(head['places']) > 1:
+        return None     # the same name standing in two places: which one is not said
+    return head
+
+
+def start_from_script(found):
+    """A script_start() answer as a start: {'zone', 'x', 'y', 'z', 'npc', 'place', 'from'}."""
+    start = {'zone': found['zone'], 'x': found.get('x'), 'y': found.get('y'),
+             'z': found.get('z'), 'npc': None, 'place': None, 'from': found.get('from')}
+    if found['kind'] == 'npc' and found['shown']:
+        start['npc'] = found['name']
+    return start
+
+
 def find_npc(text, lines, title, zone_ids, npc_list, allow_zone_only=False):
     """Who to talk to, and where they stand, from a quest or mission script.
+
+    Superseded by header_places() / header_named() / script_start() above, which the
+    generators use; kept for its notes on the header dialects.
 
     Six header dialects, then the script's own section tables, then a last pass that lets the
     server's npc_list overrule a position the comment states wrongly. Returns None only when

@@ -49,200 +49,27 @@ def parse_ids(root):
     return out
 
 
-class Server:
-    """The parts of the checkout the start of a mission is looked up in: zone ids, npc_list,
-    and each zone's trigger areas (read on first use)."""
-
-    def __init__(self, root):
-        self.zone_ids = lsbdata.parse_zone_ids(root)
-        self.npcs = lsbdata.parse_npc_list(root)
-        self.dirs = lsbdata.zone_dirs(root, self.zone_ids)
-        self._areas = {}
-
-    def areas(self, zone):
-        if zone not in self._areas:
-            self._areas[zone] = lsbdata.trigger_areas(self.dirs.get(zone))
-        return self._areas[zone]
-
-
-# Header lines: "-- Name : !pos x y z zone". The name is sometimes absent ("-- !pos x y z zone"),
-# the zone sometimes absent ("-- Jugner Forest (S) : !pos x y z"), and "!zone N" stands in for a
-# position when the place is a whole zone ("-- Norg : !zone 252").
-_HEADER_POS = re.compile(r"--\s*(.*?)\s*[,:]?\s*!pos:?\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)"
-                         r"(?:\s+(\d+))?(?:\s.*)?$")
-_HEADER_ZONE = re.compile(r"--\s*(.+?)\s*:\s*!zone\s+(\d+)\s*$")
-
-# What moves a mission along, as opposed to what only talks about it: `mission:event(...)` is
-# dialogue with no consequence, and a line of it is where nearly every mission's giver says
-# "come back later". A handler that does none of these is not where a mission starts.
-_PROGRESS = re.compile(r"progressEvent\s*\(|startEvent\s*\(|startCutscene\s*\(|"
-                       r"mission:complete\s*\(|mission:begin\s*\(|setMissionStatus|"
-                       r"\breturn\s+\d+")
-# A stage past the first: `missionStatus == 2`, `getVar(player, 'Status') >= 1`,
-# `mission:getVar(player, 'Retrieve') == 1`, `vars.Status == 1` ...
-_STAGE = re.compile(r"(missionStatus|getMissionStatus\([^)]*\)|"
-                    r"getVar\(\s*player\s*,\s*'\w+'\s*\)|vars\.\w+)\s*(==|>=|>)\s*(\d+)")
-
-
-def _later_stage(text):
-    """True when `text` only lets a later stage of the mission through."""
-    first = later = False
-    for m in _STAGE.finditer(text):
-        op, n = m.group(2), int(m.group(3))
-        if op == '==' and n == 0:
-            first = True
-        elif op == '>' or n >= 1:
-            later = True
-    return later and not first
-
-
-def script_start(text, server):
-    """Where the mission starts, read from its sections when the header gives no position.
-
-    The first section that is the mission in progress (not "already finished", not a later
-    stage) is searched in the order the script lists things, for the first handler that
-    moves the mission along: an NPC to talk to, a trigger area to walk into, a zone to enter.
-    Two such handlers in different zones at the head of the list -- the seven Cermet
-    Headstones, "zone into Mhaura or Selbina" -- are a choice the player makes, not a place,
-    and give no answer.
-    """
-    found = []
-    for check, zones in lsbdata.script_sections(text):
-        if 'hasCompleted' in check or not re.search(r"currentMission\s*==\s*mission\.missionId",
-                                                    check):
-            continue
-        if _later_stage(check):
-            continue
-        for enum, entries in zones:
-            zone = server.zone_ids.get(enum)
-            if zone is None:
-                continue
-            # Events this zone block finishes or updates. `mission:event(71)` is only dialogue
-            # -- unless the block's onEventFinish does something when 71 ends, and then it is
-            # the mission moving on (A Shantotto Ascension's zone-in cutscenes are all this).
-            handled = {int(n) for key, body in entries if key in ('onEventFinish', 'onEventUpdate')
-                       for n in re.findall(r"\[\s*(\d+)\s*\]\s*=", body)}
-            for key, body in entries:
-                if key in ('onEventFinish', 'onEventUpdate', 'onMobDeath', 'onTrade'):
-                    continue
-                m = _PROGRESS.search(body)
-                ev = next((e for e in re.finditer(r"mission:event\s*\(\s*(\d+)", body)
-                           if int(e.group(1)) in handled), None)
-                if m is None or (ev is not None and ev.start() < m.start()):
-                    m = ev
-                if m is None or _later_stage(body[:m.start()]):
-                    continue
-                if key == 'onZoneIn':
-                    # "Enter X from Y" only when Y is the one way in; a choice of ways is no
-                    # instruction.
-                    came = set(re.findall(r"prevZone\s*==\s*xi\.zone\.([A-Z0-9_]+)", body))
-                    found.append({'kind': 'zone', 'zone': zone,
-                                  'from': server.zone_ids.get(came.pop()) if len(came) == 1
-                                  else None})
-                elif key == 'onTriggerAreaEnter':
-                    areas = server.areas(zone)
-                    spot = next((areas[int(a)] for a in re.findall(r"\[\s*(\d+)\s*\]\s*=", body)
-                                 if int(a) in areas), None)
-                    if spot is not None:
-                        found.append({'kind': 'area', 'zone': zone,
-                                      'x': spot[0], 'z': spot[1], 'y': spot[2]})
-                elif not key.startswith('on'):
-                    n = lsbdata.normalize(key)
-                    rows = [r for r in server.npcs.by_zone.get(zone, [])
-                            if n in (lsbdata.normalize(r[3]), lsbdata.normalize(r[4]))]
-                    if rows:
-                        r = rows[0]
-                        found.append({'kind': 'npc', 'zone': zone, 'x': r[0], 'y': r[1],
-                                      'z': r[2], 'name': r[3], 'shown': r[5],
-                                      'places': {(round(p[0]), round(p[2])) for p in rows}})
-        if found:
-            break
-    if not found:
-        return None
-    head = found[0]
-    if len(found) > 1 and found[1]['kind'] == head['kind'] and found[1]['zone'] != head['zone']:
-        return None
-    if head['kind'] == 'npc' and len(head['places']) > 1:
-        return None     # the same name standing in two places: which one is not said
-    return head
-
-
 def mission_start(text, lines, title, server):
     """Where the mission starts: {'zone', 'x', 'y', 'z', 'npc', 'place', 'from'} or None.
 
     The header's first positioned line, as it has always been -- mission headers list places
-    in the order the mission visits them -- but with its label read for what it is. The label
-    is the NPC's name only some of the time: it is also a door with its internal name
-    ("Granite Door (_4fx)"), the zone the NPC is in ("Batallia Downs"), a home point ("Port
-    Bastok HP"), a step of instructions ("1. Enter Lower Delkfutt"), or the NPC's name misspelt
-    ("Nashib"). Whatever the server has standing there is the NPC; a label nothing answers to
-    is a place, and is kept as one rather than presented as somebody to talk to.
+    in the order the mission visits them -- but with its label read for what it is (see
+    lsbdata.header_places and start_from_header): the label is the NPC's name only some of the
+    time, and also a door with its internal name ("Granite Door (_4fx)"), the zone the NPC is
+    in ("Batallia Downs"), a home point ("Port Bastok HP"), a step of instructions ("1. Enter
+    Lower Delkfutt"), or the NPC's name misspelt ("Nashib").
+
+    With no positioned header, the script's own sections say where it starts; failing that, a
+    "-- Norg : !zone 252" header says which zone.
     """
-    sections = None
-
-    def keys(enum_zone):
-        nonlocal sections
-        if sections is None:
-            sections = lsbdata.script_sections(text)
-        enum = next((e for e, z in server.zone_ids.items() if z == enum_zone), None)
-        return lsbdata.section_keys(sections, enum)
-
-    script_zones = []
-    for enum in re.findall(r"xi\.zone\.([A-Z][A-Z0-9_]*)", text):
-        z = server.zone_ids.get(enum)
-        if z is not None and z not in script_zones:
-            script_zones.append(z)
-
-    for line in lines[:40]:
-        m = _HEADER_POS.match(line.strip())
-        if not m:
-            continue
-        label = m.group(1).strip()
-        x, y, z = float(m.group(2)), float(m.group(3)), float(m.group(4))
-        zone = int(m.group(5)) if m.group(5) else None
-        hit = None
-        if zone is not None:
-            hit = lsbdata.resolve_label(label, zone, x, z, server.npcs, keys(zone))
-        if hit is None:
-            # A header can give the wrong zone ("Ornate Door (_521) ... 89", where the door is
-            # in the Walk of Echoes) or none at all. Another zone the script works in, with the
-            # labelled thing standing at the very same coordinate, is the zone it meant.
-            for other in script_zones:
-                if other == zone:
-                    continue
-                cand = lsbdata.resolve_label(label, other, x, z, server.npcs, keys(other),
-                                             near=1.5)
-                if cand is not None and cand['dist'] <= 1.5:
-                    zone, hit = other, cand
-                    break
-        if zone is None:
-            continue
-        place = lsbdata.clean_npc_name(label) if label and not label.startswith('!') else None
-        start = {'zone': zone, 'x': x, 'y': y, 'z': z, 'npc': None, 'place': place}
-        if hit is not None:
-            start['place'] = None
-            if hit['shown']:
-                start['npc'] = hit['name']
-            # The comment is prose somebody typed; npc_list is what the server spawns. Past
-            # five yalms they are not the same spot, and the marker goes where the NPC is.
-            if hit['dist'] > 5.0:
-                start.update(x=hit['x'], y=hit['y'], z=hit['z'])
-        return start
-
-    found = script_start(text, server)
+    places = [p for p in lsbdata.header_places(text, lines, server) if p['zone'] is not None]
+    if places:
+        return lsbdata.start_from_header(places[0])
+    found = lsbdata.script_start(text, server, 'mission')
     if found is None:
-        for line in lines[:40]:
-            m = _HEADER_ZONE.match(line.strip())
-            if m:
-                found = {'kind': 'zone', 'zone': int(m.group(2)), 'from': None}
-                break
-    if found is None:
-        return None
-    start = {'zone': found['zone'], 'x': found.get('x'), 'y': found.get('y'),
-             'z': found.get('z'), 'npc': None, 'place': None, 'from': found.get('from')}
-    if found['kind'] == 'npc' and found['shown']:
-        start['npc'] = found['name']
-    return start
+        zone = lsbdata.header_zone(lines)
+        found = {'kind': 'zone', 'zone': zone, 'from': None} if zone is not None else None
+    return lsbdata.start_from_script(found) if found is not None else None
 
 
 def parse_mission(path, ids, server=None):
@@ -282,7 +109,7 @@ def main():
     args = ap.parse_args()
 
     ids = parse_ids(args.root)
-    server = Server(args.root)
+    server = lsbdata.Server(args.root)
     missions, skipped = defaultdict(dict), 0
 
     def rank(m):

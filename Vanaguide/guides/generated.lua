@@ -63,12 +63,24 @@ local function quest_step(area, id, q, label, note)
         line[#line + 1] = ('|Z|%d|'):format(q.zone)
         if q.x ~= nil then line[#line + 1] = ('|POS|%.1f,%.1f,8|'):format(q.x, q.z) end
     end
+    -- Only an NPC is announced as "Ask": the in-game audit reads the name back out of it.
+    local where = nil
+    if q.npc ~= nil then
+        where = ('Ask %s.'):format(q.npc)
+    elseif q.place ~= nil then
+        where = ('First stop: %s.'):format(q.place)
+    elseif q.zone ~= nil and q.x ~= nil then
+        where = 'Starts at the marked spot.'
+    elseif q.zone ~= nil then
+        local U = require('core.util')
+        where = q.from ~= nil
+            and ('Starts on entering %s from %s.'):format(U.zone_name(q.zone), U.zone_name(q.from))
+            or ('Starts on entering %s.'):format(U.zone_name(q.zone))
+    end
     if q.level ~= nil then
-        notes[#notes + 1] = ('Level %d. Ask %s.'):format(q.level, q.npc or 'the quest giver')
-    elseif q.npc ~= nil then
-        notes[#notes + 1] = ('Ask %s.'):format(q.npc)
+        notes[#notes + 1] = ('Level %d. %s'):format(q.level, where or 'Ask the quest giver.')
     else
-        notes[#notes + 1] = 'No location recorded for this one yet.'
+        notes[#notes + 1] = where or 'No location recorded for this one yet.'
     end
     if note ~= nil then notes[#notes + 1] = note end
     line[#line + 1] = ('|N|%s|'):format(table.concat(notes, ' '):gsub('|', '/'))

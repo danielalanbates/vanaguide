@@ -275,6 +275,21 @@ do
     eq(bad_id, 0, 'every quest id fits the 256-flag log')
     local knights = QDB.get('sandoria', 29)
     ok(knights ~= nil and knights.zone == 230, "A Knight's Test is taken in Southern San d'Oria")
+
+    -- The name the client shows, never the header's label around it.
+    local bad_npc = {}
+    for _, quests in pairs(QDB.quests) do
+        for _, q in pairs(quests) do
+            local n = q.npc
+            if n ~= nil and (n:find('%(') or n:find('_') or n:find(',') or n:find('\\', 1, true)) then
+                bad_npc[#bad_npc + 1] = n
+            end
+        end
+    end
+    eq(#bad_npc, 0, 'every quest NPC is a shown name: ' .. table.concat(bad_npc, ', '))
+    local kuftal = QDB.get('outlands', 195)
+    ok(kuftal.npc == 'Datta' and kuftal.zone == 247, 'The Kuftal Tour starts with Datta in Rabao')
+    eq(QDB.get('abyssea', 87).x, -848.1, "Altepa Dominion Op #01 is at Nanaa Mihgo's camp")
 end
 
 -- ---- generated guides ------------------------------------------------------------
