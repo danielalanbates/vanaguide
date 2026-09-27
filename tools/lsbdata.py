@@ -505,6 +505,9 @@ def header_places(text, lines, server, near=8.0):
     return out
 
 
+GENERIC_PLACE_LABELS = {'region', 'area', 'triggerarea', 'zone', 'here'}
+
+
 def start_from_header(place):
     """A header_places() entry as a start: {'zone', 'x', 'y', 'z', 'npc', 'place'}.
 
@@ -519,7 +522,10 @@ def start_from_header(place):
              'npc': None, 'place': None}
     if hit is None:
         if label and not label.startswith('!'):
-            start['place'] = clean_npc_name(label) or None
+            name = clean_npc_name(label) or None
+            # "Region" (a trigger area's label) is not a place anyone can find by name.
+            if name and normalize(name) not in GENERIC_PLACE_LABELS:
+                start['place'] = name
         return start
     if hit['shown']:
         start['npc'] = hit['name']

@@ -49,7 +49,9 @@ T.walk = {
     -- Jeuno and the middle lands
     { 243, 244 }, { 244, 245 }, { 245, 246 },
     { 105, 245 }, { 110, 245 }, { 120, 245 }, { 126, 246 },
-    { 126, 157 }, { 157, 158 }, { 157, 184 },
+    -- Qufim reaches the tower at its Lower floor (184) only: LSB zonelines rows 126<->184. The
+    -- Middle/Upper floors connect by stairs inside the tower, which the zonelines table does not list.
+    { 157, 158 }, { 157, 184 },
     { 120, 121 }, { 121, 122 }, { 105, 195 }, { 111, 112 }, { 111, 105 },
     { 112, 161 }, { 161, 162 }, { 162, 165 },
 

@@ -45,3 +45,29 @@ Already known from those 14 steps:
   - Adoulin and RoV were read without removing the server's offset, so a fresh character showed Adoulin missions 0–109 and every RoV mission as done.
   - Bastok, Windurst and Zilart completed bits were read from San d'Oria's bytes.
   - All of these are fixed and covered by `tools/test_offline.lua`. See docs/PACKETS.md.
+
+
+## After the fixes (2026-09-26, merged into this branch)
+
+Three fix branches were each reviewed against LSB data by a separate agent, then merged.
+
+| | Before | After |
+|---|---|---|
+| Clean steps | 661 | **1,051** |
+| Zone changes with no route | 169 of 376 | 2 of 455 |
+| NPC missing / in another zone / too far from the marker | 33 / 11 / 11 | 0 / 0 / 0 |
+| Steps with no location | 316 | 106 |
+| Kill steps that name no mob | 4 | 0 |
+| Offline tests | 1,373 | 1,648 |
+
+- **Routing:** the zone graph now loads the generated zone lines. It also covers the NPC crossings: Cavernous Maws, Adoulin waypoints, Home Points, Shattered Telepoints and scripted doors. See docs/ROUTING.md.
+- **Mission data:** header labels are read for what they are, and positions come from npc_list. Hand-written steps carry an `NPC` tag.
+- **Mission state:** every mission log is decoded the way LSB's 0x056 packet sends it. The audit runs `!addmission` before `!completemission`, because LSB refuses to complete a mission that isn't the current one.
+
+What is left, and why:
+- **106 steps with no location.** LSB gives none for them: TVR, ACP 2–12 and ASA 6–15 are TODO stubs, and some steps have no single start (any Mog House, any nation city). 21 are note, manual or level steps and are not meant to have one.
+- **51 zone-only steps.** The start really is "enter this zone".
+- **2 steps with no route (44/34, 44/35: into and out of the Walk of Echoes, zone 182).** LSB has no zone line or NPC warp into zone 182. Only the RoV 2-18 mission event moves a player there.
+- **Known route limits** are listed in docs/ROUTING.md:
+  - one route combines crossings that are never usable at the same point in the story (Misareaux to Promyvion-Dem via Al'Taieu);
+  - the leftover `locations` sub-tables in quests.lua are stale, but nothing reads them.
