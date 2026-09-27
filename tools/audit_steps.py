@@ -106,11 +106,13 @@ def local_client_running():
     return subprocess.run(['/usr/bin/pgrep', '-f', LOCAL_LOADER], capture_output=True).returncode == 0
 
 
-def restart_client(game, log_path):
+def restart_client(game, log_path, before=None):
     """Log the Test character out, then start the local world again through the launcher.
 
     Only the local-world client, only by its --server address, and /shutdown first.
     """
+    if before is not None:
+        before()
     pipe = os.path.join(game, 'addons', 'cmdpipe', 'cmd.txt')
     with open(pipe, 'w') as fh:
         fh.write('/shutdown\n')
@@ -123,7 +125,7 @@ def restart_client(game, log_path):
     zones_before = open(log_path, errors='replace').read().count('IncreaseZoneCounter')
     subprocess.Popen([LAUNCHER, '--world', 'Local server', '--play'],
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    end = time.time() + 300
+    end = time.time() + 600
     while time.time() < end:
         time.sleep(5)
         if open(log_path, errors='replace').read().count('IncreaseZoneCounter') > zones_before:
@@ -164,6 +166,8 @@ def main():
     ap.add_argument('--max-restarts', type=int, default=8)
     ap.add_argument('--restart-every', type=int, default=200,
                     help='restart the client after this many audited steps (0 = never)')
+    ap.add_argument('--mirror', default=os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'results', 'audit-mirror.csv'),
+                    help='append-only copy of audit.csv outside the addon folder, which the launcher replaces on every Play')
     ap.add_argument('--map-log', default=os.path.expanduser('~/Games/lsb/run/xi_map.log'))
     args = ap.parse_args()
 
@@ -208,9 +212,32 @@ def main():
     nxt = next_mission(steps)
     if args.guide:
         steps = [s for s in steps if s['guide'] == args.guide]
+    mirror_state = {'offset': 0}
+
+    def mirror():
+        # Copy rows the addon has written since the last call; a reinstalled addon folder starts
+        # a fresh audit.csv, so a shorter file means start from its beginning again.
+        try:
+            size = os.path.getsize(csv)
+        except OSError:
+            mirror_state['offset'] = 0
+            return
+        if size < mirror_state['offset']:
+            mirror_state['offset'] = 0
+        with open(csv, 'rb') as src:
+            src.seek(mirror_state['offset'])
+            chunk = src.read()
+        if chunk:
+            with open(args.mirror, 'ab') as dst:
+                dst.write(chunk)
+            mirror_state['offset'] += len(chunk)
+
     done = set()
+    sources = [f for f in (args.mirror, csv) if os.path.exists(f)]
     if os.path.exists(csv):
-        for line in open(csv, encoding='utf-8', errors='replace'):
+        mirror_state['offset'] = os.path.getsize(csv)
+    for path in sources:
+        for line in open(path, encoding='utf-8', errors='replace'):
             b = line.split(',')
             if len(b) > 5 and b[2] == 'pre' and (b[4] == '' or b[4] == b[5]):
                 done.add((b[0], b[1]))
@@ -245,7 +272,7 @@ def main():
             last_restart_at = audited
             print(f'   restarting the local client ({restarts}/{args.max_restarts}): '
                   + ('scheduled' if due else 'under 2 fps'), flush=True)
-            if not restart_client(args.game, args.map_log):
+            if not restart_client(args.game, args.map_log, mirror):
                 print('!! the client did not come back -- stopping', flush=True)
                 break
             zone = None
@@ -254,7 +281,7 @@ def main():
             if restarts < args.max_restarts:
                 restarts += 1
                 print(f'   the client stopped reading cmd.txt -- restarting it ({restarts}/{args.max_restarts})', flush=True)
-                if restart_client(args.game, args.map_log):
+                if restart_client(args.game, args.map_log, mirror):
                     zone = None
                     send(f'/vg audit {g} {i} jump')
                     if consumed():
@@ -351,8 +378,10 @@ def main():
             send(f'/vg audit {g} {i} done')
             consumed()
             row_after(before)
+        mirror()
         if n % 25 == 0:
             print(f'   {n}/{len(todo)} ...', flush=True)
+    mirror()
     print('done', flush=True)
 
 
