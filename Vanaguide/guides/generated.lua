@@ -139,6 +139,20 @@ local STORY_TITLE = {
     tvr = 'The Voracious Resurgence', campaign = 'Campaign', assault = 'Assault',
 }
 
+--- Where a mission starts, in words.  Only an NPC gets "Starts with": the in-game audit and
+--- `/vg talk` read the name back out of that phrase, so it must never hold a place.
+local function mission_note(m)
+    local U = require('core.util')
+    if m.npc ~= nil then return ('Starts with %s.'):format(m.npc) end
+    if m.place ~= nil then return ('First stop: %s.'):format(m.place) end
+    if m.zone ~= nil and m.x ~= nil then return 'Starts at the marked spot.' end
+    if m.zone ~= nil and m.from ~= nil then
+        return ('Starts on entering %s from %s.'):format(U.zone_name(m.zone), U.zone_name(m.from))
+    end
+    if m.zone ~= nil then return ('Starts on entering %s.'):format(U.zone_name(m.zone)) end
+    return 'No location recorded for this one yet.'
+end
+
 --- Missions are linear, so the guide is simply the storyline in order.  `M|area,id|`
 --- completes when the server's current-mission number passes the id, which is why these
 --- ids are generated rather than remembered — being one out means waiting forever.
@@ -154,8 +168,7 @@ local function build_missions(area)
             line[#line + 1] = ('|Z|%d|'):format(m.zone)
             if m.x ~= nil then line[#line + 1] = ('|POS|%.1f,%.1f,8|'):format(m.x, m.z) end
         end
-        line[#line + 1] = ('|N|%s|'):format(m.npc and ('Starts with ' .. m.npc .. '.')
-            or 'No location recorded for this one yet.')
+        line[#line + 1] = ('|N|%s|'):format((mission_note(m):gsub('|', '/')))
         steps[#steps + 1] = table.concat(line)
     end
     return G.register({

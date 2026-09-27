@@ -55,6 +55,7 @@ Add the file's name to `guides/init.lua`.
 | `JOB` | `job id,level` |
 | `RANK` | nation rank |
 | `SP` | spell id |
+| `NPC` | who the step is about, by the name the client shows (`Endracion`, `Door:"Lion Springs"`). The audit looks for this NPC at the `POS`, and `/vg talk` targets it. Without it, a step with `M`/`Q` takes the NPC from the mission or quest database, but only when the step is in that entry's zone: the database names where the mission or quest *starts*. |
 | `N` | note, shown under the step |
 | `FIXED` | never auto-complete; always wait for the player |
 

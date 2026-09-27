@@ -34,7 +34,7 @@ for gi, guide in ipairs(G.list()) do
         if key and (s.quest or s.quest_accept) and Q.quests and Q.quests[key.area] then db = Q.quests[key.area][key.id] end
         if key and (s.mission or s.mission_accept) and okm and MI.get then db = MI.get(key.area, key.id) end
         local note = s.note or ''
-        local npc = (db and db.npc) or note:match('Ask ([^.]+)%.') or note:match('Starts with ([^.]+)%.')
+        local npc = G.npc_of(s, db)
         local row = {
             guide = gi, guide_name = guide.name, step = si, steps = #guide.steps,
             kind = s.kind, text = s.text, zone = s.zone,

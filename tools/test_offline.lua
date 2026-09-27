@@ -49,6 +49,21 @@ eq(steps[2].mission.area, 'sandoria', 'mission tag')
 eq(steps[3].item.count, 3, 'item count')
 ok(select(2, G.parse('q nonsense|Z|230|'))[1] ~= nil, 'bad verb reported')
 
+-- Who a step is about: its own NPC tag, else its database entry's NPC only in that entry's zone.
+do
+    local s = G.parse('T Trade the axe to Endracion|M|sandoria,0|Z|230|POS|-112.8,-37.2|NPC|Endracion|')[1]
+    eq(s.npc, 'Endracion', 'NPC tag')
+    eq(G.npc_of(s, { npc = 'Ambrotien', zone = 230 }), 'Endracion', 'the NPC tag beats the database')
+    local away = G.parse('T Deliver the report to Naji|M|bastok,0|Z|237|')[1]
+    eq(G.npc_of(away, { npc = 'Argus', zone = 236 }), nil,
+       "a database NPC in another zone is not this step's NPC")
+    local here = G.parse('C Mission|M|bastok,0|Z|236|N|Starts with Argus.|')[1]
+    eq(G.npc_of(here, { npc = 'Argus', zone = 236 }), 'Argus', 'the database NPC in its own zone')
+    eq(G.npc_of(G.parse('C Mission|M|cop,110|Z|126|N|First stop: Enter Lower Delkfutt.|')[1], nil),
+       nil, 'a place is not an NPC')
+    ok(select(2, G.parse('t Talk|Z|230|NPC||'))[1] ~= nil, 'an empty NPC tag is reported')
+end
+
 -- ---- conditions ---------------------------------------------------------------
 WORLD.zone, WORLD.x, WORLD.z = 230, -140, 120
 local w = C.world()
@@ -298,15 +313,27 @@ end
 -- ---- the generated mission database ---------------------------------------------
 do
     local MDB = require('data.missions')
-    local total, bad_zone = 0, 0
+    local total, bad_zone, bad_npc = 0, 0, {}
     for _, missions in pairs(MDB.missions) do
         for _, m in pairs(missions) do
             total = total + 1
             if m.zone ~= nil and zones.name[m.zone] == nil then bad_zone = bad_zone + 1 end
+            -- The name the client shows, never a label around it: no step number ("1. Enter
+            -- Lower Delkfutt"), no bracketed internal name ("Granite Door (_4fx)"), no
+            -- server-side name ("Sluice_Gate_6"), no escaped quote ("Tales\' Beginning").
+            local n = m.npc
+            if n ~= nil and (n:find('^%d+%.') or n:find('%(') or n:find('_') or n:find('\\', 1, true)) then
+                bad_npc[#bad_npc + 1] = n
+            end
         end
     end
     ok(total >= 400, ('the mission database has every storyline (%d)'):format(total))
     eq(bad_zone, 0, 'every mission zone is a real zone')
+    eq(#bad_npc, 0, 'every mission NPC is a shown name: ' .. table.concat(bad_npc, ', '))
+    local rites = MDB.get('cop', 110)
+    ok(rites.npc == nil and rites.place == 'Enter Lower Delkfutt',
+       'The Rites of Life starts at a place, not an NPC called "1. Enter Lower Delkfutt"')
+    eq(MDB.get('adoulin', 66).x, -215.4, "Soul Siphon's Hollowed Pathway is where the server spawns it")
 
     -- The ids the retired hand-written guide got wrong.  This is the regression.
     local first = MDB.get('sandoria', 0)
@@ -321,6 +348,12 @@ do
     for i = 2, #g.steps do
         ok(g.steps[i].mission.id > g.steps[i - 1].mission.id, 'missions are in order')
     end
+
+    -- Only an NPC is announced as "Starts with": the audit reads that phrase back as a name.
+    local cop = G.get('Chains of Promathia - in order')
+    local rites_step = cop.steps[1]
+    eq(rites_step.note, 'First stop: Enter Lower Delkfutt.', 'a place is announced as a place')
+    eq(G.npc_of(rites_step, rites), nil, 'and is not taken for an NPC')
 end
 
 -- ---- loot, gear and notorious monsters ------------------------------------------

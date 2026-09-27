@@ -10,6 +10,7 @@ so missions lost the NPC that quests had just gained.
 
 Copyright (c) 2026 Bates LLC.  All rights reserved.
 """
+import difflib
 import math
 import os
 import re
@@ -25,13 +26,62 @@ def clean_npc_name(raw):
     "NPC: Ayame", "Door: Merchant's House (H-8)", "Ranpi-Monpi (S) -", "qm6 (H-10/Boat)" --
     the label, the map reference in brackets and a trailing dash are all decoration. What is
     left is either a name the server knows or it is not, and that is the useful question.
+
+    Mission headers add one more decoration: a step number. "1. Enter Lower Delkfutt" is the
+    first of three numbered instructions, and "1." is no part of anybody's name.
+
+    The "Door:" label is stripped here, but the server's own name for a door keeps it
+    ("Door:Neptune's Spire"), so a lookup has to try the raw label as well -- see
+    name_candidates().
     """
-    name = re.sub(r'^\s*(?:NPC|Door|Marker|QM)\s*:\s*', '', raw, flags=re.I)
+    name = re.sub(r'^\s*\d+\.\s*', '', raw)
+    name = re.sub(r'^\s*(?:NPC|Door|Marker|QM)\s*:\s*', '', name, flags=re.I)
     name = name.split(',')[0]
     name = re.sub(r'\s*\([^)]*\)\s*$', '', name)
     # "Glenne - Southern Sandoria": the name, then where to find it.
     name = re.split(r'\s+-\s+', name)[0]
-    return name.strip(' -\t')
+    return name.strip(' -:\t')
+
+
+def name_candidates(raw):
+    """Every name a header label could be pointing at, most literal first.
+
+    A header label is the NPC's name as often as it is something else with the name inside it:
+
+        Door: Neptune's Spire              the server calls it "Door:Neptune's Spire"
+        Shattered Telepoint (Konschtat)    the name, then which of three
+        Granite Door (_4fx)                the name, then the server's internal name
+        _700 (Oaken Door)                  the internal name, then the name
+        Ploh Trishbahk (trigger area)      the name, then what it is for
+
+    Each of those is tried in turn; whichever the server actually has is the answer.
+    """
+    out = []
+
+    def add(name):
+        name = (name or '').strip(' -:\t')
+        if name and name not in out:
+            out.append(name)
+
+    raw = re.sub(r'^\s*\d+\.\s*', '', raw or '')
+    add(raw)
+    add(re.sub(r'\s*\([^)]*\)\s*$', '', raw))
+    add(clean_npc_name(raw))
+    for inner in re.findall(r'\(([^)]*)\)', raw):
+        add(inner)
+    # The server's internal names: `_4fx`, `qm_maw`, `Ergon_Locus_3`. Written into a label
+    # they are the most exact thing it says.
+    for token in re.findall(r"(?<![\w'])(_\w+|qm\w*|[A-Za-z]+(?:_\w+)+)(?![\w'])", raw):
+        add(token)
+    return out
+
+
+def similar(a, b):
+    """0..1: how alike two names are once spelling-insensitive. "Nashib" / "Nahshib" = 0.92."""
+    a, b = normalize(a), normalize(b)
+    if not a or not b:
+        return 0.0
+    return difflib.SequenceMatcher(None, a, b).ratio()
 
 
 def parse_zone_ids(root):
@@ -51,12 +101,15 @@ class NpcList(dict):
     """(zone, normalized display name) -> [(x, y, z, display name), ...].
 
     A dict, so every existing `in` and `.get` still means what it meant. `by_internal` is a
-    second index on the server's internal name, for the one pass that needs it.
+    second index on the server's internal name, for the one pass that needs it. `by_zone`
+    lists every placed entity of a zone as (x, y, z, display name, internal name, has display
+    name), for the question "what is standing at this spot?".
     """
 
     def __init__(self):
         super().__init__()
         self.by_internal = {}
+        self.by_zone = {}
 
 
 def parse_npc_list(root):
@@ -85,7 +138,11 @@ def parse_npc_list(root):
             continue
         for m in row.finditer(line):
             npcid = int(m.group(1))
-            internal, name = m.group(2), (m.group(3) or m.group(2))
+            # The dump escapes an apostrophe as \' -- "Tales\' Beginning" is Tales' Beginning,
+            # and the escaped form is what used to reach the player.
+            internal = m.group(2).replace("\\'", "'")
+            shown = m.group(3).replace("\\'", "'")
+            name = shown or internal
             x, y, z = float(m.group(4)), float(m.group(5)), float(m.group(6))
             if x == 0.0 and y == 0.0 and z == 0.0:
                 continue        # placed at runtime; a position of (0,0,0) is not one
@@ -110,7 +167,218 @@ def parse_npc_list(root):
             out.by_internal.setdefault(
                 ((npcid >> 12) & 0xFFF, re.sub(r'[^a-z0-9]', '', internal.lower())),
                 []).append((x, y, z, name))
+            out.by_zone.setdefault((npcid >> 12) & 0xFFF, []).append(
+                (x, y, z, name, internal, bool(shown)))
     return out
+
+
+# --------------------------------------------------------------------------------------------
+# The script itself: `mission.sections`, read as structure rather than as text.
+#
+# A header comment is somebody's summary of the script. The sections are the script: which
+# zone, which NPC, which trigger area, at which stage of the mission. Where the header says
+# nothing, or says it wrongly, this is what is left to ask -- and it can only be asked of the
+# structure, because "the first NPC the text mentions" is as often a line of flavour dialogue
+# for a mission that has not started yet as it is the NPC who starts it.
+# --------------------------------------------------------------------------------------------
+
+def _lua_depths(text):
+    """Brace depth at every character, and whether that character is code (not a string or a
+    comment). Braces inside strings and comments do not count."""
+    n = len(text)
+    depth = [0] * (n + 1)
+    code = [True] * (n + 1)
+    d, i = 0, 0
+    while i < n:
+        skip = None
+        if text.startswith('--[[', i):
+            end = text.find(']]', i)
+            skip = n if end < 0 else end + 2
+        elif text.startswith('--', i):
+            end = text.find('\n', i)
+            skip = n if end < 0 else end
+        elif text[i] in '\'"':
+            j = i + 1
+            while j < n and text[j] != text[i] and text[j] != '\n':
+                j += 2 if text[j] == '\\' else 1
+            skip = min(n, j + 1)
+        elif text.startswith('[[', i):
+            end = text.find(']]', i)
+            skip = n if end < 0 else end + 2
+        if skip is not None:
+            for k in range(i, skip):
+                depth[k], code[k] = d, False
+            i = skip
+            continue
+        depth[i] = d
+        if text[i] == '{':
+            d += 1
+        elif text[i] == '}':
+            d -= 1
+        i += 1
+    depth[n] = d
+    return depth, code
+
+
+def _lua_close(text, depth, code, open_at):
+    """Index of the '}' that closes the '{' at open_at."""
+    for k in range(open_at + 1, len(text)):
+        if text[k] == '}' and code[k] and depth[k] == depth[open_at] + 1:
+            return k
+    return len(text)
+
+
+def _lua_keys(text, depth, code, lo, hi, pattern):
+    """Matches of `pattern` that sit directly inside the table text[lo..hi], in order, each with
+    the text up to the next one."""
+    hits = [m for m in pattern.finditer(text, lo + 1, hi)
+            if code[m.start()] and depth[m.start()] == depth[lo] + 1]
+    return [(m, text[m.start():(hits[i + 1].start() if i + 1 < len(hits) else hi)])
+            for i, m in enumerate(hits)]
+
+
+_ZONE_KEY = re.compile(r"\[\s*xi\.zone\.([A-Z0-9_]+)\s*\]\s*=\s*\{")
+_ENTRY_KEY = re.compile(r"(?:\[\s*'([^']+)'\s*\]|\[\s*\"([^\"]+)\"\s*\]|\b(on[A-Z]\w*))\s*=")
+
+
+def script_sections(text):
+    """`mission.sections` (or `quest.sections`) as [(check text, [(ZONE_ENUM, [(key, body)])])].
+
+    `key` is an NPC's internal name (`'Naja_Salaheem'`) or a handler (`'onZoneIn'`,
+    `'onTriggerAreaEnter'`), in the order the script lists them. Sections built by a loop at
+    run time rather than written out are invisible here, and that is the right answer: they
+    name no one place.
+    """
+    m = re.search(r"\b(?:mission|quest)\.sections\s*=\s*\{", text)
+    if not m:
+        return []
+    depth, code = _lua_depths(text)
+    lo = m.end() - 1
+    hi = _lua_close(text, depth, code, lo)
+    out = []
+    k = lo + 1
+    while k < hi:
+        if text[k] == '{' and code[k] and depth[k] == depth[lo] + 1:
+            s_hi = _lua_close(text, depth, code, k)
+            zones, first = [], None
+            for zm, _ in _lua_keys(text, depth, code, k, s_hi, _ZONE_KEY):
+                first = zm.start() if first is None else first
+                z_lo = zm.end() - 1
+                z_hi = _lua_close(text, depth, code, z_lo)
+                entries = [(em.group(1) or em.group(2) or em.group(3), body)
+                           for em, body in _lua_keys(text, depth, code, z_lo, z_hi, _ENTRY_KEY)]
+                zones.append((zm.group(1), entries))
+            out.append((text[k:first if first is not None else s_hi], zones))
+            k = s_hi + 1
+            continue
+        k += 1
+    return out
+
+
+def section_keys(sections, zone_enum):
+    """Every NPC key the script's sections name in one zone, normalized."""
+    return {normalize(key) for _, zones in sections for z, entries in zones if z == zone_enum
+            for key, _ in entries if not re.match(r'on[A-Z]', key)}
+
+
+def zone_dirs(root, zone_ids):
+    """zone id -> scripts/zones/<folder>. The folder is the enum name in another spelling:
+    AHT_URHGAN_WHITEGATE is Aht_Urhgan_Whitegate, SOUTHERN_SAN_DORIA_S is
+    Southern_San_dOria_[S]."""
+    base = os.path.join(root, 'scripts/zones')
+    by_norm = {normalize(enum): zid for enum, zid in zone_ids.items()}
+    out = {}
+    if os.path.isdir(base):
+        for folder in os.listdir(base):
+            zid = by_norm.get(normalize(folder))
+            if zid is not None:
+                out[zid] = os.path.join(base, folder)
+    return out
+
+
+_AREA = re.compile(
+    r"register(Cuboid|Cylindrical|Spherical)TriggerArea\(\s*(\d+)\s*((?:,\s*-?[\d.]+\s*)+)\)")
+
+
+def trigger_areas(zone_dir):
+    """{area id: (x, z)} from a zone's Zone.lua -- the middle of each trigger area the zone
+    registers with literal numbers. The signatures are LandSandBoat's own
+    (src/map/lua/lua_zone.cpp): Cuboid(id, xMin, yMin, zMin, xMax, yMax, zMax),
+    Cylindrical(id, x, z, radius), Spherical(id, x, y, z, radius)."""
+    out = {}
+    path = os.path.join(zone_dir or '', 'Zone.lua')
+    if not os.path.exists(path):
+        return out
+    for m in _AREA.finditer(open(path, encoding='utf-8', errors='replace').read()):
+        kind, aid = m.group(1), int(m.group(2))
+        n = [float(v) for v in re.findall(r'-?[\d.]+', m.group(3))]
+        if kind == 'Cuboid' and len(n) == 6:
+            out.setdefault(aid, ((n[0] + n[3]) / 2, (n[2] + n[5]) / 2, (n[1] + n[4]) / 2))
+        elif kind == 'Cylindrical' and len(n) == 3:
+            out.setdefault(aid, (n[0], n[1], None))
+        elif kind == 'Spherical' and len(n) == 4:
+            out.setdefault(aid, (n[0], n[2], n[1]))
+    return out
+
+
+def resolve_label(label, zone, x, z, npc_list, keys=(), near=8.0):
+    """What a header line is pointing at: {'name', 'x', 'y', 'z', 'shown', 'how'} or None.
+
+    `label` is the header's text, `x`/`z` its coordinate, `keys` the normalized NPC keys the
+    script's sections use in that zone. In order:
+
+    1. A name the server has in that zone -- the label itself, or any name inside it (see
+       name_candidates) -- standing within `near` yalms of the coordinate.
+    2. Something standing within `near` yalms of the coordinate that the script itself
+       interacts with (a section key), or whose name is the label's name misspelt. "Batallia
+       Downs : !pos -48 0.1 435 105" names the zone, and three yalms away stands the Cavernous
+       Maw the script's `['Cavernous_Maw']` section is about. "Nashib" is the server's
+       "Nahshib", at the very coordinate.
+    3. A name the client shows, farther away: the comment typed the coordinate wrong, and the
+       server's row is the fact ("Hollowed Pathway" at x=215 where the server has x=-215).
+       Only a shown name counts here. "Blank (Cait Sith)" also matches a dozen unnamed
+       entities the server calls `blank`, three hundred yalms from the one the script means.
+
+    None means the label is not an NPC at all -- a place, or an instruction.
+    """
+    rows = npc_list.by_zone.get(zone, []) if npc_list else []
+    if not rows:
+        return None
+
+    def dist(r):
+        return 0.0 if x is None else math.hypot(r[0] - x, r[2] - z)
+
+    def found(r, how):
+        return {'name': r[3], 'x': r[0], 'y': r[1], 'z': r[2], 'shown': r[5],
+                'how': how, 'dist': dist(r)}
+
+    names = [normalize(c) for c in name_candidates(label)]
+    named = [[r for r in rows if n and n in (normalize(r[3]), normalize(r[4]))] for n in names]
+
+    for hits in named:
+        close = [r for r in hits if dist(r) <= near]
+        if close:
+            return found(min(close, key=dist), 'name')
+
+    if x is not None:
+        best = None
+        for r in rows:
+            d = dist(r)
+            if d > near:
+                continue
+            own = {normalize(r[3]), normalize(r[4])}
+            keyed = bool(own & set(keys))
+            spelt = any(similar(o, n) >= 0.85 for o in own for n in names)
+            if (keyed or spelt) and (best is None or d < best[0]):
+                best = (d, r)
+        if best is not None:
+            return found(best[1], 'near')
+
+    for n, hits in zip(names, named):
+        shown = [r for r in hits if r[5] and normalize(r[3]) == n]
+        if shown:
+            return found(min(shown, key=dist), 'name')
+    return None
 
 
 def find_npc(text, lines, title, zone_ids, npc_list, allow_zone_only=False):
