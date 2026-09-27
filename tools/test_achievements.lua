@@ -285,9 +285,9 @@ do
 end
 
 -- stale
-eq(RA.refresh(NOW + RA.max_age + 3600), 'stale', 'an old snapshot goes stale on its own')
-eq((RA.state(900101)), 'unknown', 'stale is unknown, never "not earned"')
-ok((RA.describe(900101)):find('stale', 1, true) ~= nil, 'the window says it is stale')
+eq(RA.refresh(NOW + RA.fresh_for + 3600), 'stale', 'an old snapshot goes stale on its own')
+eq((RA.state(900101)), 'earned', 'an unlock stays earned when the snapshot is stale')
+ok((RA.describe(900101)):find('Earned', 1, true) ~= nil, 'the window still shows it as earned')
 eq(RA.refresh(NOW), 'ok', 'and ok again when it is fresh')
 
 -- malformed, in several ways, each of which must read as no data

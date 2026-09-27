@@ -24,7 +24,8 @@ local J = require('core.json')
 local R = {
     path = nil,             -- set by R.default_path() or by a test
     interval = 60,          -- seconds between polls of the file
-    max_age = 7 * 86400,    -- older than this and the snapshot is stale: shown as no data
+    fresh_for = 86400,      -- older than this: earned still shows, 'not earned' becomes unknown
+                            -- (the companion app uses the same rule)
     max_bytes = 4 * 1024 * 1024,
     -- state
     status = 'missing',     -- 'ok' | 'missing' | 'stale' | 'malformed'
@@ -86,15 +87,14 @@ local function accept(doc, now)
 
     R.user, R.fetched_at, R.games, R.by_id = doc.user and tostring(doc.user) or nil, fetched, games, by_id
     local age = now - fetched
-    -- Stale: the user and the time stay for /vg ra to report, the progress itself is dropped.
-    if age > R.max_age then
-        R.status, R.reason = 'stale', ('fetched %d days ago'):format(math.floor(age / 86400))
-        R.games, R.by_id = {}, {}
+    -- Stale: an unlock never goes away, so earned achievements still show; only "not earned"
+    -- stops being claimed, because it may have been earned since.
+    if age > R.fresh_for then
+        R.status, R.reason = 'stale', ('fetched %s ago'):format(R.age_text(age))
         return true
     end
     if age < -86400 then
         R.status, R.reason = 'stale', 'fetched_at is in the future; check the clock'
-        R.games, R.by_id = {}, {}
         return true
     end
     R.status, R.reason = 'ok', nil
@@ -138,7 +138,7 @@ function R.refresh(now)
         -- back), so re-take it only when fresh-or-stale would now come out differently.
         if R.fetched_at ~= nil then
             local age = now - R.fetched_at
-            local stale = age > R.max_age or age < -86400
+            local stale = age > R.fresh_for or age < -86400
             if stale ~= (R.status == 'stale') then return R.load_text(text, now) end
         end
         return R.status
@@ -159,10 +159,11 @@ end
 
 --- 'earned' | 'not_earned' | 'unknown', and the record when there is one.
 function R.state(id)
-    if R.status ~= 'ok' then return 'unknown', nil end
+    if R.status ~= 'ok' and R.status ~= 'stale' then return 'unknown', nil end
     local rec = R.by_id[tonumber(id) or -1]
     if rec == nil then return 'unknown', nil end
     if rec.earned_at ~= nil or rec.earned_hardcore_at ~= nil then return 'earned', rec end
+    if R.status == 'stale' then return 'unknown', rec end
     return 'not_earned', rec
 end
 
@@ -189,7 +190,7 @@ function R.describe(id)
         return 'Not in the RetroAchievements snapshot', { 0.7, 0.7, 0.7, 1.0 }
     end
     if R.status == 'stale' then
-        return 'RetroAchievements data is stale (' .. tostring(R.reason) .. '); not shown', { 0.7, 0.7, 0.7, 1.0 }
+        return 'Progress unknown: RetroAchievements snapshot ' .. tostring(R.reason), { 0.7, 0.7, 0.7, 1.0 }
     end
     return 'No RetroAchievements progress data', { 0.7, 0.7, 0.7, 1.0 }
 end

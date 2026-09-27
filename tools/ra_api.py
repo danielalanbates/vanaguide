@@ -33,7 +33,10 @@ USER_ENV = "RETROACHIEVEMENTS_USER"
 # Keychain item: a generic password with this service name (any account).  Override with
 # RETROACHIEVEMENTS_KEYCHAIN_SERVICE when the launcher stores it under another name.
 KEYCHAIN_SERVICE_ENV = "RETROACHIEVEMENTS_KEYCHAIN_SERVICE"
-DEFAULT_KEYCHAIN_SERVICE = "retroachievements.org"
+# The FFXI-on-Mac launcher saves the key under its own name; a key added by hand with
+# `security add-generic-password -s retroachievements.org` is found too.
+DEFAULT_KEYCHAIN_SERVICES = ("org.batesai.horizonxi-on-mac.retroachievements", "retroachievements.org")
+DEFAULT_KEYCHAIN_SERVICE = DEFAULT_KEYCHAIN_SERVICES[0]
 
 
 class RAError(Exception):
@@ -45,15 +48,18 @@ def api_key():
     key = os.environ.get(KEY_ENV, "").strip()
     if key:
         return key
-    service = os.environ.get(KEYCHAIN_SERVICE_ENV, DEFAULT_KEYCHAIN_SERVICE)
-    try:
-        out = subprocess.run(
-            ["/usr/bin/security", "find-generic-password", "-s", service, "-w"],
-            capture_output=True, text=True, timeout=10, check=False)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    key = out.stdout.strip() if out.returncode == 0 else ""
-    return key or None
+    override = os.environ.get(KEYCHAIN_SERVICE_ENV, "").strip()
+    for service in ((override,) if override else DEFAULT_KEYCHAIN_SERVICES):
+        try:
+            out = subprocess.run(
+                ["/usr/bin/security", "find-generic-password", "-s", service, "-w"],
+                capture_output=True, text=True, timeout=10, check=False)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        key = out.stdout.strip() if out.returncode == 0 else ""
+        if key:
+            return key
+    return None
 
 
 def _get(endpoint, params):

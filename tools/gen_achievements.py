@@ -224,6 +224,10 @@ class GameData:
                     # before the next number begins.
                     first = self.mission_labels.setdefault(key, dict(target))
                     first["id"] = max(first["id"], mid)
+                    if first["id"] != mid or first.get("routes"):
+                        # Several ids share this number (2-3 has one per route): which one a
+                        # player finishes depends on their route, so no single id can tick it.
+                        first["routes"] = True
         self.nms = {}
         for n in nms:
             self._add(self.nms, n.get("name"), dict(kind="nm", name=n.get("name"), zone=n.get("zone"),
@@ -294,7 +298,9 @@ def candidates(ach, data):
         key = (NATIONS[m.group(1)], int(m.group(2)), int(m.group(3)))
         target = data.mission_labels.get(key)
         if target:
-            add(0.9, "nation-mission-number", target, 99)
+            # A number shared by several route-dependent ids stays a hint (below 0.75): no
+            # single id can tick it for every route.
+            add(0.6 if target.get("routes") else 0.9, "nation-mission-number", target, 99)
 
     # Job and level: "Reach level 30 as a Paladin", "Get Warrior to level 75", "Reach level 75".
     job_names = "|".join(sorted((re.escape(j) for j in JOBS), key=len, reverse=True))
@@ -376,7 +382,15 @@ def subset_name(title):
 def build_sets(source, game_ids, data, overrides):
     sets = []
     for game_id in game_ids:
-        game = source.game_extended(game_id)
+        try:
+            game = source.game_extended(game_id)
+        except ra_api.RAError as err:
+            # One retired or renumbered set must not cost the others: say so and carry on.
+            print(f"skipping game {game_id}: {err}", file=sys.stderr)
+            continue
+        if not isinstance(game, dict) or game.get("ID") is None:
+            print(f"skipping game {game_id}: RetroAchievements returned no game", file=sys.stderr)
+            continue
         title = ascii_text(game.get("Title") or f"Game {game_id}")
         achievements = []
         for a in ra_api.achievements_of(game):
