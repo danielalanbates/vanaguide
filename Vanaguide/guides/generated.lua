@@ -63,12 +63,24 @@ local function quest_step(area, id, q, label, note)
         line[#line + 1] = ('|Z|%d|'):format(q.zone)
         if q.x ~= nil then line[#line + 1] = ('|POS|%.1f,%.1f,8|'):format(q.x, q.z) end
     end
+    -- Only an NPC is announced as "Ask": the in-game audit reads the name back out of it.
+    local where = nil
+    if q.npc ~= nil then
+        where = ('Ask %s.'):format(q.npc)
+    elseif q.place ~= nil then
+        where = ('First stop: %s.'):format(q.place)
+    elseif q.zone ~= nil and q.x ~= nil then
+        where = 'Starts at the marked spot.'
+    elseif q.zone ~= nil then
+        local U = require('core.util')
+        where = q.from ~= nil
+            and ('Starts on entering %s from %s.'):format(U.zone_name(q.zone), U.zone_name(q.from))
+            or ('Starts on entering %s.'):format(U.zone_name(q.zone))
+    end
     if q.level ~= nil then
-        notes[#notes + 1] = ('Level %d. Ask %s.'):format(q.level, q.npc or 'the quest giver')
-    elseif q.npc ~= nil then
-        notes[#notes + 1] = ('Ask %s.'):format(q.npc)
+        notes[#notes + 1] = ('Level %d. %s'):format(q.level, where or 'Ask the quest giver.')
     else
-        notes[#notes + 1] = 'No location recorded for this one yet.'
+        notes[#notes + 1] = where or 'No location recorded for this one yet.'
     end
     if note ~= nil then notes[#notes + 1] = note end
     line[#line + 1] = ('|N|%s|'):format(table.concat(notes, ' '):gsub('|', '/'))
@@ -139,6 +151,20 @@ local STORY_TITLE = {
     tvr = 'The Voracious Resurgence', campaign = 'Campaign', assault = 'Assault',
 }
 
+--- Where a mission starts, in words.  Only an NPC gets "Starts with": the in-game audit and
+--- `/vg talk` read the name back out of that phrase, so it must never hold a place.
+local function mission_note(m)
+    local U = require('core.util')
+    if m.npc ~= nil then return ('Starts with %s.'):format(m.npc) end
+    if m.place ~= nil then return ('First stop: %s.'):format(m.place) end
+    if m.zone ~= nil and m.x ~= nil then return 'Starts at the marked spot.' end
+    if m.zone ~= nil and m.from ~= nil then
+        return ('Starts on entering %s from %s.'):format(U.zone_name(m.zone), U.zone_name(m.from))
+    end
+    if m.zone ~= nil then return ('Starts on entering %s.'):format(U.zone_name(m.zone)) end
+    return 'No location recorded for this one yet.'
+end
+
 --- Missions are linear, so the guide is simply the storyline in order.  `M|area,id|`
 --- completes when the server's current-mission number passes the id, which is why these
 --- ids are generated rather than remembered — being one out means waiting forever.
@@ -154,8 +180,7 @@ local function build_missions(area)
             line[#line + 1] = ('|Z|%d|'):format(m.zone)
             if m.x ~= nil then line[#line + 1] = ('|POS|%.1f,%.1f,8|'):format(m.x, m.z) end
         end
-        line[#line + 1] = ('|N|%s|'):format(m.npc and ('Starts with ' .. m.npc .. '.')
-            or 'No location recorded for this one yet.')
+        line[#line + 1] = ('|N|%s|'):format((mission_note(m):gsub('|', '/')))
         steps[#steps + 1] = table.concat(line)
     end
     return G.register({

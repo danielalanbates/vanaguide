@@ -24,6 +24,10 @@
 --         RANK n        — done at that nation rank
 --         SP   id       — done when you know that spell
 --         N    note shown under the step
+--         NPC  name     — who the step is about, by the name the client shows.  The audit
+--                         looks for this NPC at the marker and `/vg talk` targets it.  Without
+--                         it the step's quest or mission entry names the NPC, which is only
+--                         right for the step where that quest or mission starts.
 --         FIXED         — never skipped automatically, even if its condition already holds
 --
 -- A step with no completion tag is a manual step: it waits for a click, or for the player
@@ -42,7 +46,7 @@ local VERBS = {
 
 local TAGS = {
     Z = true, POS = true, M = true, MA = true, Q = true, QA = true, KI = true,
-    IT = true, LV = true, JOB = true, RANK = true, SP = true, N = true,
+    IT = true, LV = true, JOB = true, RANK = true, SP = true, N = true, NPC = true,
     FIXED = true,
 }
 
@@ -129,6 +133,9 @@ function G.parse_line(line, lineno)
             end
         elseif tag == 'N' then
             step.note = value
+        elseif tag == 'NPC' then
+            if value == '' then return nil, ('line %d: NPC needs a name'):format(lineno or 0) end
+            step.npc = value
         elseif tag == 'FIXED' then
             step.fixed = true
         end
@@ -176,6 +183,24 @@ function G.register(def)
     if G.guides[guide.name] == nil then G.order[#G.order + 1] = guide.name end
     G.guides[guide.name] = guide
     return guide
+end
+
+--- Who a step is about, or nil.  `entry` is the step's quest or mission from the database.
+---
+--- The step's own `NPC` tag first.  Then the database entry's NPC, but only when the step is
+--- in that entry's zone: the entry names where a quest or mission *starts*, and a hand-written
+--- guide's turn-in step in another town is about somebody else ("Deliver the Zeruhn Report to
+--- Naji" is not about Argus, who is in Port Bastok).  Then the name a generated step's note
+--- carries ("Ask X." / "Starts with X.").
+function G.npc_of(step, entry)
+    if step == nil then return nil end
+    if step.npc ~= nil then return step.npc end
+    if entry ~= nil and entry.npc ~= nil
+        and (step.zone == nil or entry.zone == nil or step.zone == entry.zone) then
+        return entry.npc
+    end
+    local note = step.note or ''
+    return note:match('Ask ([^.]+)%.') or note:match('Starts with ([^.]+)%.')
 end
 
 function G.get(name) return G.guides[name] end

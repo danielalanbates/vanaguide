@@ -18,6 +18,9 @@ import re
 import sys
 from collections import defaultdict
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import lsbdata  # noqa: E402
+
 # LandSandBoat's log names -> the names core/story.lua uses for packet 0x056 areas.
 AREA_LOG = {
     'sandoria': 'sandoria', 'bastok': 'bastok', 'windurst': 'windurst',
@@ -46,7 +49,30 @@ def parse_ids(root):
     return out
 
 
-def parse_mission(path, ids):
+def mission_start(text, lines, title, server):
+    """Where the mission starts: {'zone', 'x', 'y', 'z', 'npc', 'place', 'from'} or None.
+
+    The header's first positioned line, as it has always been -- mission headers list places
+    in the order the mission visits them -- but with its label read for what it is (see
+    lsbdata.header_places and start_from_header): the label is the NPC's name only some of the
+    time, and also a door with its internal name ("Granite Door (_4fx)"), the zone the NPC is
+    in ("Batallia Downs"), a home point ("Port Bastok HP"), a step of instructions ("1. Enter
+    Lower Delkfutt"), or the NPC's name misspelt ("Nashib").
+
+    With no positioned header, the script's own sections say where it starts; failing that, a
+    "-- Norg : !zone 252" header says which zone.
+    """
+    places = [p for p in lsbdata.header_places(text, lines, server) if p['zone'] is not None]
+    if places:
+        return lsbdata.start_from_header(places[0])
+    found = lsbdata.script_start(text, server, 'mission')
+    if found is None:
+        zone = lsbdata.header_zone(lines)
+        found = {'kind': 'zone', 'zone': zone, 'from': None} if zone is not None else None
+    return lsbdata.start_from_script(found) if found is not None else None
+
+
+def parse_mission(path, ids, server=None):
     text = open(path, encoding='utf-8', errors='replace').read()
     m = re.search(r"Mission:new\(\s*xi\.mission\.log_id\.(\w+)\s*,\s*xi\.mission\.id\.(\w+)\.([A-Z0-9_]+)", text)
     if not m:
@@ -68,15 +94,8 @@ def parse_mission(path, ids):
         if m2:
             label = m2.group(1).strip()
 
-    npc = None
-    for line in lines[:40]:
-        m2 = re.match(r"--\s*(.+?)\s*:\s*!pos\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(\d+)", line)
-        if m2:
-            npc = {'name': m2.group(1).strip(), 'x': float(m2.group(2)),
-                   'y': float(m2.group(3)), 'z': float(m2.group(4)), 'zone': int(m2.group(5))}
-            break
-
-    return {'area': area, 'id': mid, 'name': title, 'label': label, 'npc': npc}
+    start = mission_start(text, lines, title, server) if server is not None else None
+    return {'area': area, 'id': mid, 'name': title, 'label': label, 'npc': start}
 
 
 def lua_str(s):
@@ -90,23 +109,31 @@ def main():
     args = ap.parse_args()
 
     ids = parse_ids(args.root)
+    server = lsbdata.Server(args.root)
     missions, skipped = defaultdict(dict), 0
-    for dirpath, _, files in os.walk(os.path.join(args.root, 'scripts/missions')):
+
+    def rank(m):
+        s = m['npc']
+        return 0 if s is None else (1 if s.get('x') is None else 2)
+
+    for dirpath, dirnames, files in os.walk(os.path.join(args.root, 'scripts/missions')):
+        dirnames.sort()
         for f in sorted(files):
             if not f.endswith('.lua'):
                 continue
-            m = parse_mission(os.path.join(dirpath, f), ids)
+            m = parse_mission(os.path.join(dirpath, f), ids, server)
             if m is None:
                 skipped += 1
                 continue
             # A mission implemented in several files (first visit / repeat) keeps the entry
-            # that carries coordinates.
+            # that says the most about where it starts.
             have = missions[m['area']].get(m['id'])
-            if have is None or (have.get('npc') is None and m['npc'] is not None):
+            if have is None or rank(m) > rank(have):
                 missions[m['area']][m['id']] = m
 
     total = sum(len(v) for v in missions.values())
-    positioned = sum(1 for a in missions.values() for m in a.values() if m['npc'])
+    positioned = sum(1 for a in missions.values() for m in a.values() if rank(m) == 2)
+    zoned = sum(1 for a in missions.values() for m in a.values() if rank(m) == 1)
 
     with open(args.out, 'w', encoding='utf-8') as fh:
         fh.write("""-- Vanaguide :: data/missions.lua
@@ -115,6 +142,12 @@ def main():
 -- Mission ids keyed the way packet 0x056 keys them, so `M|area,id|` in a guide and this
 -- table are the same numbers.  Missions are linear: `M` waits for the current mission
 -- number to pass the id, which is why these are generated rather than remembered.
+--
+-- Where it starts, when the script says:
+--   zone    the zone, and x/z/y there (x/z/y nil when starting means entering the zone)
+--   npc     who to talk to, by the name the client shows
+--   place   what the script calls the spot, when nobody stands there to talk to
+--   from    the zone to enter it from, when that matters
 --
 -- Copyright (c) 2026 Bates LLC.  All rights reserved.
 
@@ -131,9 +164,17 @@ local M = {}
                     bits.append('label = %s' % lua_str(m['label']))
                 if m['npc']:
                     n = m['npc']
-                    bits += ['zone = %d' % n['zone'], 'x = %.1f' % n['x'],
-                             'z = %.1f' % n['z'], 'y = %.1f' % n['y'],
-                             'npc = %s' % lua_str(n['name'])]
+                    bits.append('zone = %d' % n['zone'])
+                    if n.get('x') is not None:
+                        bits += ['x = %.1f' % n['x'], 'z = %.1f' % n['z']]
+                        if n.get('y') is not None:
+                            bits.append('y = %.1f' % n['y'])
+                    if n.get('npc'):
+                        bits.append('npc = %s' % lua_str(n['npc']))
+                    if n.get('place'):
+                        bits.append('place = %s' % lua_str(n['place']))
+                    if n.get('from'):
+                        bits.append('from = %d' % n['from'])
                 fh.write('        [%d] = { %s },\n' % (mid, ', '.join(bits)))
             fh.write('    },\n')
         fh.write('}\n\n')
@@ -152,8 +193,8 @@ end
 return M
 """)
 
-    print('%d missions in %d storylines (%d with coordinates); %d files skipped'
-          % (total, len(missions), positioned, skipped))
+    print('%d missions in %d storylines (%d with coordinates, %d with a zone only); '
+          '%d files skipped' % (total, len(missions), positioned, zoned, skipped))
 
 
 if __name__ == '__main__':

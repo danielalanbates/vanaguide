@@ -533,7 +533,7 @@ ashita.events.register('command', 'vg_command', function (e)
             local ok, Qd = pcall(require, 'data.quests');
             if (ok and Qd.quests and Qd.quests[key.area]) then q = Qd.quests[key.area][key.id]; end
         end
-        local npc = (q and q.npc) or (step.note or ''):match('Ask ([^.]+)%.') or (step.note or ''):match('Starts with ([^.]+)%.') or '';
+        local npc = G.npc_of(step, q) or '';
         U.print(('target: step=%d zone=%s x=%s y=%s z=%s npc=%s key=%s,%s name=%s')
             :format(P.index, tostring(step.zone or (q and q.zone) or ''),
                     q and q.x or (step.pos and step.pos.x) or '', q and q.y or '',
@@ -651,8 +651,7 @@ ashita.events.register('command', 'vg_command', function (e)
             local ok, Md = pcall(require, 'data.missions');
             if (ok and Md.get) then q = Md.get(key.area, key.id); end
         end
-        local note = step.note or '';
-        local npc = (q and q.npc) or note:match('Ask ([^.]+)%.') or note:match('Starts with ([^.]+)%.') or '';
+        local npc = G.npc_of(step, q) or '';
         local present, ndist, nearest, why = false, nil, '', 'not in the step zone';
         if (step.zone ~= nil and step.zone == w.zone and step.pos ~= nil) then
             present, ndist, nearest, why = Verify.presence(npc, step.pos.x, step.pos.z);
