@@ -77,18 +77,27 @@ function N.load(zone)
     if zone == nil then return nil end
     if N.loaded == zone then return N.grid end
     if N.missing[zone] then return nil end
-    local root = N.root
-    if root == nil then
+    -- Where the grids live, first match wins.  config/addons/Vanaguide/nav comes first
+    -- because the addon folder itself is disposable: the launcher replaces it on every Play
+    -- and deletes it outright before a world whose addon allowlist excludes Vanaguide, and a
+    -- 30 MB grid set generated on the player's machine must not go with it.
+    local candidates = {}
+    if N.root ~= nil then
+        local sep = N.root:find('\\') and '\\' or '/'
+        candidates[1] = ('%s%sdata%snav%s%d.vgnav'):format(N.root, sep, sep, sep, zone)
+    else
         local ok, path = pcall(function () return AshitaCore:GetInstallPath() end)
         if ok and path ~= nil and path ~= '' then
-            root = ('%s\\addons\\Vanaguide'):format(path:gsub('[\\/]$', ''))
+            local base = path:gsub('[\\/]$', '')
+            candidates[1] = ('%s\\config\\addons\\Vanaguide\\nav\\%d.vgnav'):format(base, zone)
+            candidates[2] = ('%s\\addons\\Vanaguide\\data\\nav\\%d.vgnav'):format(base, zone)
         end
     end
-    if root == nil then N.missing[zone] = true; return nil end
-
-    local sep = root:find('\\') and '\\' or '/'
-    local path = ('%s%sdata%snav%s%d.vgnav'):format(root, sep, sep, sep, zone)
-    local fh = io.open(path, 'rb')
+    local fh = nil
+    for _, c in ipairs(candidates) do
+        fh = io.open(c, 'rb')
+        if fh ~= nil then break end
+    end
     if fh == nil then N.missing[zone] = true; return nil end
     local s = fh:read('*a')
     fh:close()
