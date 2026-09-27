@@ -37,4 +37,11 @@ Guide 3 (Squire's Test) passed all its steps:
 The full sweep was paused at 14 steps so Daniel could use the client. Rerunning `tools/audit_steps.py` resumes it.
 
 Already known from those 14 steps:
-- **CoP 43/8** (Dilapidated Gate) stayed open after `!completemission COP`. Either the mission-state read or the GM command is wrong for CoP. This needs checking.
+- **CoP 43/8** (Dilapidated Gate) stayed open after `!completemission COP`. The GM command was wrong, not the addon. The harness ran `!delmission` first, so the mission was never current. `completeMission` then did nothing except log "can't complete non current mission" (the map-server log has 27 of these from this sweep). Even on the current mission, it only resets CoP's current number to 0, and LandSandBoat keeps no completed bit for CoP. The server's own `hasCompletedMission` would still say "not done". The harness now makes the mission current, completes it, and moves the current number on to the next mission, which is what the mission scripts do.
+- Checking the other mission logs against LandSandBoat's packet code found real addon bugs:
+  - ToAU was read from the TVR page, which is always 0.
+  - WoTG was never read.
+  - AMK was stored under the wrong name (`mkd`).
+  - Adoulin and RoV were read without removing the server's offset, so a fresh character showed Adoulin missions 0–109 and every RoV mission as done.
+  - Bastok, Windurst and Zilart completed bits were read from San d'Oria's bytes.
+  - All of these are fixed and covered by `tools/test_offline.lua`. See docs/PACKETS.md.
