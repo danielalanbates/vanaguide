@@ -148,8 +148,15 @@ end
 
 --- Is `npc` loaded near (px, pz)?  Returns ok, dist, nearest, why.
 --- Markers ("???", qm*, _xyz doors) match anything within 10 yalms, as V.entry does.
-function V.presence(npc, px, pz)
+function V.presence(npc, px, pz, want_index)
     local list = V.nearby(px, pz)
+    if want_index ~= nil then
+        for _, e in ipairs(list) do
+            if e.index == want_index and (e.dist or 1e9) <= 10 then
+                return true, e.dist, ('%s#%d'):format(e.name, e.index), ('found by index #%d'):format(e.index)
+            end
+        end
+    end
     -- With its target index: the client names an NPC from its own DAT by index, and where
     -- that DAT is older than the server's npc_list the name belongs to another NPC
     -- (tools/client_names.py). The index can be checked against npc_list; the name cannot.
