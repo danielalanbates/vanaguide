@@ -23,6 +23,11 @@ not prove. Not yet run on a hosted server, and it must not be (see below).
 
 ## Install
 
+For a separate guide window on worlds that do not permit the addon, build
+`companion/build-app.sh`. It installs `Vanaguide.app` in Applications and includes all 965
+quest and mission entries plus live RetroAchievements progress. See
+[docs/COMPANION.md](docs/COMPANION.md). It does not control the game.
+
 ```sh
 tools/install.sh "/path/to/your/FFXI install"     # copies Vanaguide/ into addons/
 ```
