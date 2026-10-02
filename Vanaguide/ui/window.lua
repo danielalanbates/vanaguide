@@ -7,6 +7,7 @@ local U = require('core.util')
 local G = require('core.guide')
 local P = require('core.progress')
 local R = require('routing.router')
+local RA = require('core.ra')
 
 local W = {
     open = { true },
@@ -121,13 +122,22 @@ function W.draw(w, on_pick)
                 text_colored({ 0.4, 1.0, 0.4, 1.0 }, 'Guide complete.')
             else
                 imgui.Separator()
+                -- An achievement step says whether it is earned on HorizonXI: a mark in front
+                -- of the text always, the date on a line of its own when there is room.  It
+                -- is only shown -- core/ra.lua explains why it never completes the step.
+                local earned = step.ra ~= nil and RA.earned(step.ra)
                 text_colored({ 0.9, 0.9, 1.0, 1.0 },
-                    ('%s: %s'):format(VERB_LABEL[step.kind] or '?', step.text))
+                    ('%s%s: %s'):format(earned and (RA.MARK .. ' ') or '',
+                                        VERB_LABEL[step.kind] or '?', step.text))
                 -- The note is the first thing to go when the window is small: the buttons
                 -- have to stay above the fold, because clicking them is the only way to move
                 -- the guide by hand and this client cannot scroll an ImGui window.
                 if step.note ~= nil and step.note ~= '' and not narrow then
                     text_colored({ 0.7, 0.7, 0.7, 1.0 }, step.note)
+                end
+                if step.ra ~= nil and not narrow then
+                    local line, colour = RA.describe(step.ra)
+                    text_colored(colour, line)
                 end
 
                 local rec = R.recommend(step, w)
@@ -152,7 +162,8 @@ function W.draw(w, on_pick)
                     local next_steps = P.upcoming(W.upcoming + 1, w)
                     for i = 2, #next_steps do
                         local s = next_steps[i]
-                        wrapped((' %s %s'):format(VERB_LABEL[s.kind] or '-', s.text))
+                        local mark = (s.ra ~= nil and RA.earned(s.ra)) and (RA.MARK .. ' ') or ''
+                        wrapped((' %s%s %s'):format(mark, VERB_LABEL[s.kind] or '-', s.text))
                     end
                 end
             end

@@ -67,6 +67,7 @@ exactly what that does and does not prove.
 | `/vg arrow flip` · `nudge <deg>` | fix the arrow if it points the wrong way ([docs/ARROW.md](docs/ARROW.md)) |
 | `/vg status` · `/vg story` | what the addon can see, and what the server has told it |
 | `/vg reset` | start the current guide again |
+| `/vg ra` · `ra reload` | RetroAchievements progress from the launcher's snapshot, and the achievement guides ([docs/RETROACHIEVEMENTS.md](docs/RETROACHIEVEMENTS.md)) |
 
 ## Layout
 

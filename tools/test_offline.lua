@@ -64,6 +64,15 @@ do
     ok(select(2, G.parse('t Talk|Z|230|NPC||'))[1] ~= nil, 'an empty NPC tag is reported')
 end
 
+-- The RetroAchievements id a step stands for (guides/achievements.lua).  It is shown, never a
+-- condition: a step with only RA is still a manual step.  tools/test_achievements.lua has the rest.
+do
+    local s = G.parse('C Squire No More|RA|900102||N|Complete the quest.|')[1]
+    eq(s.ra, 900102, 'RA tag')
+    ok(not require('core.conditions').is_automatic(s), 'RA alone is not a completion condition')
+    ok(select(2, G.parse('C x|RA|none|'))[1] ~= nil, 'a non-numeric RA id is reported')
+end
+
 -- ---- conditions ---------------------------------------------------------------
 WORLD.zone, WORLD.x, WORLD.z = 230, -140, 120
 local w = C.world()

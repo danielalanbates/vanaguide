@@ -1,0 +1,14 @@
+{
+  "_comment": "Copyright (c) 2026 Bates LLC. All rights reserved. Hand mappings for tools/gen_achievements.py, keyed by RetroAchievements achievement id; each wins over the automatic match with confidence 1.0. Keys starting with _ are ignored.",
+  "_shapes": [
+    {"kind": "quest", "area": "sandoria", "id": 29, "name": "A Knight's Test", "zone": 230, "x": -136.0, "z": 64.0},
+    {"kind": "mission", "area": "zilart", "id": 26, "name": "Ark Angels", "zone": 252, "x": 122.5, "z": -12.1},
+    {"kind": "key_item", "ki": 123, "name": "key item name"},
+    {"kind": "item", "item": 4096, "count": 1, "name": "item name"},
+    {"kind": "job", "job": 7, "level": 30},
+    {"kind": "level", "level": 75},
+    {"kind": "rank", "rank": 6},
+    {"kind": "nm", "name": "Zebra Zachary", "zone": 75, "x": 260.0, "z": 125.0},
+    {"kind": "zone", "zone": 130, "name": "Ru'Aun Gardens"}
+  ]
+}
