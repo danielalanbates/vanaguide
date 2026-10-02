@@ -17,3 +17,11 @@ accounts.json
 .dbpass
 *.dbpass
 *.personal.json
+companion/build/
+companion/.build/
+companion/Resources/catalog.json
+.env
+.env.*
+**/config/boot/*.ini
+**/config/boot/*.xml
+*api-key*.txt

@@ -27,7 +27,7 @@ set -eu
 GAME="${VG_GAME:-/Volumes/x10/Video Games/Mac/FFXI/siku.app/Contents/SharedSupport/prefix10/drive_c/HorizonXI}"
 PREFIX="${GAME:h:h}"
 WRAP="${VG_WRAP:-/Volumes/x10/Video Games/Mac/FFXI/siku.app}"
-WINE="${VG_WINE:-/Volumes/Games/FFXI/wine-coop/wine/bin/wine}"
+WINE="${VG_WINE:-$WRAP/Contents/SharedSupport/wine/bin/wine}"
 CMD="$GAME/addons/Vanaguide/cmd.txt"
 DB_PASS_FILE="${VG_DBPASS:-$HOME/Games/lsb/.dbpass}"
 LOCAL_HOST="${VG_LOCAL_HOST:-127.0.0.1}"   # how the local world's client is recognised
@@ -70,14 +70,36 @@ another_world_running() {
 # had been silently unable to send packets suddenly could. That is a change to Daniel's live
 # account that he did not ask for, made by a test harness, and it is not this script's call.
 POINTERS="$PREFIX/drive_c/HorizonXI/config/ashita/custom.pointers.ini"
-POINTERS_SRC="${VG_POINTERS:-$HOME/Library/Mobile Documents/com~apple~CloudDocs/Code/HorizonXI-on-Mac/patches/ashita/custom.pointers.ini}"
+POINTERS_SRC="${VG_POINTERS:-}"
+POINTERS_MARKER="$HOME/Downloads/vanaguide-local-test/pointers-installed.sha256"
 
 use_pointers() {
   local which="$1"     # on | off
   if [[ "$which" == on ]]; then
-    [[ -f "$POINTERS_SRC" ]] && cp "$POINTERS_SRC" "$POINTERS" && print -r -- "==> signature patch: on"
+    if [[ -n "$POINTERS_SRC" && -s "$POINTERS_SRC" ]]; then
+      if [[ -e "$POINTERS" ]]; then
+        print -r -- "==> signature patch: existing file left unchanged"
+      else
+        mkdir -p "${POINTERS_MARKER:h}"
+        cp "$POINTERS_SRC" "$POINTERS"
+        shasum -a 256 "$POINTERS" | awk '{print $1}' > "$POINTERS_MARKER"
+        print -r -- "==> signature patch: on"
+      fi
+    else
+      print -r -- "==> signature patch: unchanged (set VG_POINTERS for packet tests)"
+    fi
   else
-    rm -f "$POINTERS" && print -r -- "==> signature patch: off"
+    if [[ -s "$POINTERS_MARKER" && -f "$POINTERS" ]]; then
+      local expected actual
+      expected=$(cat "$POINTERS_MARKER")
+      actual=$(shasum -a 256 "$POINTERS" | awk '{print $1}')
+      if [[ "$actual" == "$expected" ]]; then
+        rm -f "$POINTERS" "$POINTERS_MARKER"
+        print -r -- "==> signature patch: off"
+      else
+        print -r -- "==> signature patch: changed since installation; left unchanged"
+      fi
+    fi
   fi
 }
 
@@ -120,30 +142,42 @@ start() {
   print -r -- "==> should be in-world, GM hidden"
 }
 
-# Stop OUR client, and only ours.
+# Ask OUR client to log out, and only ours.
 #
-# This used to be `pkill -f horizon-loader.exe`, which kills every FFXI client on the machine.
-# Daniel caught it: starting a run on the local world shut down a HorizonXI session that had
-# nothing to do with it. One client per world is the point of the launcher, so a test harness
-# that cannot tell them apart has no business killing anything.
+# Killing the loader skips `/shutdown` and can cut off a logged-in character. The command wire
+# is local-world-only; if it is unavailable, leave the client running for manual inspection.
 #
 # They are told apart by the address they were launched against: the local world's client is
 # the one whose command line carries `--server 127.0.0.1`. Anything else is somebody's game.
-stop() {
+local_alive() {
   local pids
   pids=$(pgrep -f 'horizon-loader\.exe' 2>/dev/null || true)
-  local killed=0
   for pid in ${=pids}; do
     if ps -o args= -p "$pid" 2>/dev/null | grep -q -- "--server ${LOCAL_HOST}"; then
-      kill "$pid" 2>/dev/null && killed=$((killed + 1))
-    else
-      print -r -- "==> leaving pid $pid alone: it is not the local world"
+      return 0
     fi
   done
-  (( killed > 0 )) && sleep 3
+  return 1
+}
+
+restore() {
   use_pointers off
   # Leave the install as HorizonXI expects to find it: this is a shared client.
   use_pivot horizon
+}
+
+stop() {
+  if local_alive; then
+    print -r -- '/shutdown' > "$GAME/addons/cmdpipe/cmd.txt"
+    print -r -- "==> sent /shutdown to the local character"
+    local i=0
+    while (( i < 15 )) && local_alive; do sleep 2; (( i += 1 )); done
+    if local_alive; then
+      print -r -- "==> local client is still running; leaving it open"
+      return 1
+    fi
+  fi
+  restore
 }
 
 # The GMHidden charVar is the only readable record of the hide state; the client never says
@@ -178,6 +212,7 @@ rescue() {
 case "${1:-}" in
   start)  start ;;
   stop)   stop ;;
+  restore) restore ;;
   rescue) rescue ;;
-  *) print -r -- "usage: $0 start|stop|rescue"; exit 2 ;;
+  *) print -r -- "usage: $0 start|stop|restore|rescue"; exit 2 ;;
 esac
