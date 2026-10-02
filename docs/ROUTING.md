@@ -7,9 +7,49 @@ link with its own cost — an airship is 420 seconds because you wait for it.
 `routing/router.lua` turns the result into one instruction:
 
 * **here** — the step is in this zone. The arrow gets a bearing and a distance.
-* **travel** — the step is elsewhere. The window says either *"Zone into La Theine
-  Plateau"* or *"Airship to San d'Oria (Port Jeuno counter)"*, whichever the first leg is.
+* **travel** — the step is elsewhere. The arrow gets a bearing and a distance *anyway*,
+  pointing at the doorway out of this zone: *"Zone into La Theine Plateau -- 240 yalms"*.
 * **unknown** — no route. Said plainly rather than papered over.
+
+## Which way is out
+
+Knowing that two zones touch plans a journey; it does not walk one. For a long time the
+window said the same five words at the start of the road and at the end of it, and the arrow
+pointed at nothing for the whole trip — the exact stretch a guide exists for.
+
+`sql/zonelines.sql` had the missing half all along. Every row carries **both** ends:
+`from_zone, from_pos_x/y/z, to_zone, to_pos_x/y/z`, and `from_pos` is the trigger's position
+*in the zone you are leaving*. All 844 rows have a real one. `tools/gen_zonepoints.py` turns
+that into `data/zonepoints.lua`: **783 crossings across 197 zones**, plus the 14 boarding
+docks from `transport.sql` (`dock_x/y/z`, in the zone the route departs from).
+
+`routing/zonepoints.lua` answers two questions from it — *where is the way into that zone
+from here*, and *where do I stand to board*. Where a pair of zones has several doorways it
+returns the one nearest the player rather than picking one; where it has none, the router
+says the old sentence and sets no bearing rather than inventing a place.
+
+That is also what `/vg goto <zone>` is: a destination the player asked for by name, routed
+the same way, outranking the guide's own step until they arrive.
+
+## Where the seed graph is wrong
+
+Loading the server's own table made a disagreement visible. Twenty-five pairs in the
+hand-written `data/travel.lua` are **contradicted** by it — both zones are in the generated
+table and neither lists the other — and spot-checking says the server is right and the seed
+was written from memory:
+
+* King Ranperre's Tomb opens off East Ronfaure and Jugner Forest, not West Ronfaure.
+* Bastok Markets meets South Gustaberg; it is Port Bastok that meets North Gustaberg.
+* Kazham's gate is on Yuhtunga Jungle, not Yhoator.
+* Sauromugue Champaign reaches Port Jeuno, not Lower Jeuno.
+
+They are not deleted. A private server can have a doorway LandSandBoat does not, and a graph
+that is merely wrong beats a graph that is disconnected. `routing/zonegraph.lua` charges every
+contradicted pair **three times** the normal cost, so a route with real coordinates wins
+wherever one exists — which is exactly what happened to San d'Oria: the router now walks you
+Southern → Northern → Port, both doorways of which it can point at, instead of asserting a
+gate between Southern and Port that the server has never heard of. `/vg graph suspect` lists
+all twenty-five.
 
 ## Why the graph learns
 

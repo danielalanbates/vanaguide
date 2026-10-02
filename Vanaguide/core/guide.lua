@@ -12,7 +12,7 @@
 --         R run to · U use an item · F travel · N note only · L reach a level
 --
 -- Tags:   Z    zone (id, or a name from data/zone_names.lua)
---         POS  x,z[,radius]  — where in the zone; radius defaults to 10 yalms
+--         POS  x,z[,radius[,height]]  — where in the zone; radius defaults to 10 yalms
 --         M    area,id  — done when that mission is finished
 --         Q    area,id  — done when that quest is completed
 --         QA   area,id  — done when that quest is *accepted* (for A steps)
@@ -71,7 +71,12 @@ function G.parse_line(line, lineno)
         elseif tag == 'POS' then
             local n = numbers(value)
             if #n < 2 then return nil, ('line %d: POS needs x,z'):format(lineno or 0) end
-            step.pos = { x = n[1], z = n[2], r = n[3] or 10 }
+            -- The fourth number is the height, and it is optional because almost no source
+            -- of coordinates has one: /vg mark writes it, LandSandBoat's npc_list has it,
+            -- and a person reading a wiki does not.  Only the line on the ground wants it,
+            -- and ui/line.lua falls back to the player's own height without it, which is
+            -- right for anything on the same floor and wrong in a tower.
+            step.pos = { x = n[1], z = n[2], r = n[3] or 10, y = n[4] }
         elseif tag == 'M' or tag == 'Q' or tag == 'QA' then
             local area, id = value:match('^([%w_]+)%s*,%s*(%d+)$')
             if area == nil then

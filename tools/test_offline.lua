@@ -35,9 +35,11 @@ do
     local files = {
         'Vanaguide.lua', 'core/verify.lua', 'core/util.lua', 'core/guide.lua',
         'core/conditions.lua', 'core/progress.lua', 'core/story.lua', 'core/lookup.lua',
-        'routing/zonegraph.lua', 'routing/router.lua',
+        'routing/zonegraph.lua', 'routing/router.lua', 'routing/zonepoints.lua',
+        'routing/path.lua', 'routing/navgrid.lua', 'ui/arrow.lua', 'ui/window.lua', 'ui/line.lua', 'ui/project.lua',
         'data/quests.lua', 'data/missions.lua', 'data/zone_names.lua', 'data/travel.lua',
-        'data/zonelines.lua', 'data/gear.lua', 'data/drops.lua', 'data/nm.lua',
+        'data/zonelines.lua', 'data/zonepoints.lua', 'data/gear.lua', 'data/drops.lua',
+        'data/nm.lua',
         'data/vendors.lua',
     }
     for _, f in ipairs(files) do
@@ -449,6 +451,342 @@ do
     ok(A.pos_x > 0 and A.pos_x < 640, 'an absurd position is clamped onto the screen')
     ok(A.pos_y > 0 and A.pos_y < 480, 'in both directions')
     A.move(0.5, 0.28)
+end
+
+
+-- ---- zone points: the way out ---------------------------------------------------
+do
+    local ZP = require('routing.zonepoints')
+    ok(ZP.available, 'data/zonepoints.lua loaded')
+
+    -- Southern San d'Oria (230) opens onto West Ronfaure (100).  Every zone line in the
+    -- server's table carries the position of its trigger in the zone you are leaving, so
+    -- there is a coordinate for this and it is inside the zone, not at the origin.
+    local exits = ZP.exits(230, 100)
+    ok(#exits > 0, "San d'Oria has a recorded way out into West Ronfaure")
+    ok(exits[1].x ~= 0 or exits[1].z ~= 0, 'and it is a real coordinate, not 0,0')
+
+    -- More than one gate onto the same road: the nearest to the player wins, and which one
+    -- is nearest has to actually depend on where the player is standing.
+    if #exits > 1 then
+        local a = ZP.nearest_exit(230, 100, exits[1].x, exits[1].z)
+        local b = ZP.nearest_exit(230, 100, exits[2].x, exits[2].z)
+        eq(a.x, exits[1].x, 'standing on one gate picks that gate')
+        eq(b.x, exits[2].x, 'standing on the other picks the other')
+    end
+    ok(ZP.nearest_exit(230, 999, 0, 0) == nil, 'a zone pair that does not touch has no exit')
+
+    -- The docks: Selbina (248) and Mhaura (249) are joined only by the ferry, and the dock
+    -- is where you stand to wait for it.
+    local dock = ZP.dock(248, 249) or ZP.dock(249, 248)
+    ok(dock ~= nil, 'the Selbina/Mhaura ferry has a dock to stand on')
+    if dock ~= nil then ok(dock.via ~= nil and dock.via ~= '', 'and something to call it') end
+end
+
+-- ---- the router points at the doorway --------------------------------------------
+do
+    local R2 = require('routing.router')
+    local G2 = require('core.guide')
+    R2.forget()
+    WORLD.zone, WORLD.x, WORLD.z, WORLD.y, WORLD.yaw = 230, 0, 0, 0, 0
+    local far = G2.parse('R Go to Port Jeuno|Z|246|POS|10,-20|')
+    local rec = R2.recommend(far[1], C.world())
+    eq(rec.mode, 'travel', 'a step three zones away is a travel step')
+    ok(rec.target ~= nil, 'and it now has a place to walk to')
+    ok(rec.bearing ~= nil, 'so the arrow has a bearing during the journey')
+    ok(rec.distance ~= nil and rec.distance > 0, 'and a distance')
+    ok(rec.text:find('yalms') ~= nil, 'and the window says how far ("' .. rec.text .. '")')
+    ok(rec.hops ~= nil and rec.hops > 1, 'the route is more than one hop')
+
+    -- The itinerary is one line per leg, and knows which legs it can point at.
+    local it = R2.itinerary(rec.legs, 230, 0, 0)
+    eq(#it, #rec.legs, 'the itinerary has a line per leg')
+    ok(it[1].known, 'the first leg has a coordinate')
+    ok(R2.chain(rec.legs, 2) ~= nil, 'the chain of zones prints')
+    ok(R2.summary(rec):find('zones') ~= nil, 'the summary counts zones')
+
+    -- A step in this zone still behaves exactly as it did.
+    local near = G2.parse('t Talk to the guard|Z|230|POS|30,40,8|')
+    local rec2 = R2.recommend(near[1], C.world())
+    eq(rec2.mode, 'here', 'a step in this zone is still "here"')
+    ok(rec2.target ~= nil and rec2.target.x == 30, 'and carries its own coordinate')
+    R2.forget()
+end
+
+-- ---- the path -------------------------------------------------------------------
+do
+    local Path = require('routing.path')
+    Path.forget()
+    WORLD.zone, WORLD.x, WORLD.z, WORLD.y = 230, 0, 0, -5
+    local pts = Path.to(C.world(), { x = 60, z = 0, y = -5 })
+    ok(pts ~= nil and #pts >= 2, 'a straight path has at least two points')
+    ok(#pts <= Path.max_points, 'and never more than the cap')
+    eq(pts[1].x, 0, 'it starts where the player is')
+    eq(pts[#pts].x, 60, 'and ends on the target')
+    ok(math.abs(U.dist(pts[1].x, pts[1].z, pts[2].x, pts[2].z) - Path.spacing) < Path.spacing,
+       'the points are about a spacing apart')
+
+    -- The point nearest the player is where drawing starts, so walked ground stops being
+    -- drawn instead of trailing behind.
+    eq(Path.nearest_index(pts, 0, 0), 1, 'at the start, the nearest point is the first')
+    ok(Path.nearest_index(pts, 59, 0) == #pts, 'at the end, it is the last')
+
+    -- A provider (a navmesh, when one is installed) replaces the straight line.
+    Path.forget()
+    Path.provider = function (_, x1, z1, y1, x2, z2, y2)
+        return { { x = x1, z = z1, y = y1 }, { x = 0, z = 40, y = y1 }, { x = x2, z = z2, y = y2 } }
+    end
+    local bent = select(1, Path.to(C.world(), { x = 60, z = 0, y = -5 }))
+    local _, src = Path.to(C.world(), { x = 60, z = 0, y = -5 })
+    eq(src, 'navmesh', 'a provider is used when it answers')
+    local bends = false
+    for _, p in ipairs(bent) do if p.z > 10 then bends = true end end
+    ok(bends, 'and the path goes the way the provider said, not straight')
+    Path.provider = nil
+    Path.forget()
+end
+
+-- ---- world to screen -------------------------------------------------------------
+do
+    local Pr = require('ui.project')
+    -- A camera at the origin looking down +z, with a 90 degree perspective.  This checks the
+    -- arithmetic, not the game's axis conventions -- those can only be checked in the client,
+    -- and docs/LINE.md says how.
+    local eye = { _11 = 1, _12 = 0, _13 = 0, _14 = 0,
+                  _21 = 0, _22 = 1, _23 = 0, _24 = 0,
+                  _31 = 0, _32 = 0, _33 = 1, _34 = 0,
+                  _41 = 0, _42 = 0, _43 = 0, _44 = 1 }
+    local zn, zf = 1, 100
+    local proj = { _11 = 1, _12 = 0, _13 = 0, _14 = 0,
+                   _21 = 0, _22 = 1, _23 = 0, _24 = 0,
+                   _31 = 0, _32 = 0, _33 = zf / (zf - zn), _34 = 1,
+                   _41 = 0, _42 = 0, _43 = -zn * zf / (zf - zn), _44 = 0 }
+    ok(Pr.set_view_projection(eye, proj), 'the matrices combine')
+    Pr.set_viewport(800, 600)
+
+    -- Straight ahead lands in the middle of the screen.
+    local sx, sy, cw = Pr.point(0, 10, 0)
+    ok(math.abs(sx - 400) < 0.01, 'a point straight ahead is centred across')
+    ok(math.abs(sy - 300) < 0.01, 'and centred down')
+    ok(math.abs(cw - 10) < 0.01, 'and ten units in front')
+
+    -- Ten to the right at ten away is exactly the right-hand edge at this field of view.
+    sx = Pr.point(10, 10, 0)
+    ok(math.abs(sx - 800) < 0.01, '45 degrees right is the right edge')
+    sx = Pr.point(-10, 10, 0)
+    ok(math.abs(sx - 0) < 0.01, 'and 45 degrees left is the left edge')
+
+    -- Twice as far away is half as far from the centre: it is a perspective, not a plan.
+    sx = Pr.point(10, 20, 0)
+    ok(math.abs(sx - 600) < 0.01, 'twice the distance is half the offset')
+
+    -- Behind the camera, w goes negative and the caller must not draw it.
+    local _, _, back = Pr.point(0, -10, 0)
+    ok(back < 0, 'a point behind the camera has a negative w')
+
+    -- A segment from behind you to in front of you is cut at the near plane, not thrown
+    -- away: the line starts at your feet and your feet are usually behind the camera.
+    local x1, y1, x2, y2 = Pr.segment(0, -5, 0, 0, 40, 0)
+    ok(x1 ~= nil, 'a segment crossing the near plane still draws')
+    ok(math.abs(x1 - 400) < 0.5 and math.abs(x2 - 400) < 0.5, 'and stays on the centre line')
+    ok(Pr.segment(0, -50, 0, 0, -10, 0) == nil, 'a segment entirely behind you does not')
+
+    -- Nothing here should ever produce a NaN; ImGui draws a NaN as a line to nowhere and
+    -- the whole draw list after it goes with it.
+    local nx, ny = Pr.point(1e6, 1e6, 1e6)
+    ok(nx == nx and ny == ny, 'a huge coordinate is still a number')
+end
+
+
+-- ---- the line draws ---------------------------------------------------------------
+do
+    -- The whole renderer, through a fake draw list.  tools/render_line.lua draws the same
+    -- code into an SVG for a human to look at; this is the part a machine can check, and it
+    -- exists because the draw list was swapped from foreground to background after seeing a
+    -- 1613-yalm line drawn across the guide window in-game.
+    local calls = { line = 0, dot = 0, ring = 0, text = 0, list = nil }
+    local dl = {
+        AddLine = function(_, a, b) calls.line = calls.line + 1
+            ok(a[1] == a[1] and b[1] == b[1], 'no NaN reaches AddLine') end,
+        AddCircleFilled = function() calls.dot = calls.dot + 1 end,
+        AddCircle = function() calls.ring = calls.ring + 1 end,
+        AddText = function() calls.text = calls.text + 1 end,
+    }
+    _G.imgui = {
+        GetBackgroundDrawList = function() calls.list = 'background'; return dl end,
+        GetForegroundDrawList = function() calls.list = 'foreground'; return dl end,
+    }
+    local Pr2 = require('ui.project')
+    local Line = require('ui.line')
+    local Path2 = require('routing.path')
+
+    local eye = { _11 = 1, _12 = 0, _13 = 0, _14 = 0,
+                  _21 = 0, _22 = 1, _23 = 0, _24 = 0,
+                  _31 = 0, _32 = 0, _33 = 1, _34 = 0,
+                  _41 = 0, _42 = 0, _43 = 0, _44 = 1 }
+    local proj = { _11 = 1, _12 = 0, _13 = 0, _14 = 0,
+                   _21 = 0, _22 = 1, _23 = 0, _24 = 0,
+                   _31 = 0, _32 = 0, _33 = 1.01, _34 = 1,
+                   _41 = 0, _42 = 0, _43 = -1.01, _44 = 0 }
+    Pr2.set_view_projection(eye, proj)
+    Pr2.set_viewport(800, 600)
+    local real_refresh = Pr2.refresh
+    Pr2.refresh = function () return true end
+
+    Path2.forget()
+    Line.enabled = true
+    Line.style = 'both'
+    WORLD.zone, WORLD.x, WORLD.z, WORLD.y, WORLD.yaw = 230, 0, 0, 0, 0
+    local drew = Line.draw(C.world(), { x = 0, z = 90, y = 0 }, 'the gate')
+    ok(drew, 'the line draws')
+    eq(calls.list, 'background', 'on the background list, so windows sit on top of it')
+    ok(calls.line > 8, ('it drew %d segments'):format(calls.line))
+    ok(calls.dot > 0, 'and the crawling dots')
+    ok(calls.ring > 0, 'and a ring on the destination')
+    ok(calls.text > 0, 'and the distance')
+
+    -- Off means off.
+    calls.line = 0
+    Line.enabled = false
+    ok(not Line.draw(C.world(), { x = 0, z = 90, y = 0 }), 'a line that is off does not draw')
+    eq(calls.line, 0, 'and touches the draw list not at all')
+    Line.enabled = true
+
+    -- A build with only the foreground list still draws.
+    _G.imgui.GetBackgroundDrawList = nil
+    Path2.forget()
+    ok(Line.draw(C.world(), { x = 0, z = 90, y = 0 }), 'an older ImGui still gets a line')
+    eq(calls.list, 'foreground', 'by falling back to the foreground list')
+
+    -- A device that will not give up its camera turns the line off rather than throwing
+    -- once a frame forever.
+    Pr2.refresh = function () Pr2.fails = Pr2.fails + 1; Pr2.ok = false; return false end
+    Pr2.fails = 0
+    for _ = 1, Line.give_up_after do Line.draw(C.world(), { x = 0, z = 90, y = 0 }) end
+    ok(not Line.enabled, 'a camera that never answers switches the line off')
+    ok(Line.status():find('off') ~= nil, 'and /vg status says so')
+    Pr2.refresh = real_refresh
+    Line.enabled = true
+    _G.imgui = nil
+    Path2.forget()
+end
+
+
+-- ---- the navigation grid ----------------------------------------------------------
+do
+    -- The real grids are built by tools/gen_navgrid.py from navmeshes this repository does
+    -- not ship and never will (docs/NAVMESH.md), so the test builds its own: a room with a
+    -- wall down the middle and one gap at the far end.  A straight line goes through the
+    -- wall; a path has to go round.  That is the entire feature, in twenty cells.
+    local Nav  = require('routing.navgrid')
+    local Path = require('routing.path')
+
+    local W, H, CELL = 20, 20, 1.0
+    local function le32(v)
+        if v < 0 then v = v + 4294967296 end
+        return string.char(v % 256, math.floor(v / 256) % 256,
+                           math.floor(v / 65536) % 256, math.floor(v / 16777216) % 256)
+    end
+    local function le16(v)
+        if v < 0 then v = v + 65536 end
+        return string.char(v % 256, math.floor(v / 256) % 256)
+    end
+
+    local mask, heights = {}, {}
+    for cz = 0, H - 1 do
+        for cx = 0, W - 1 do
+            local open = true
+            if cx == 10 and cz < 18 then open = false end       -- the wall, with a gap at 18
+            if cx == 0 or cz == 0 or cx == W - 1 or cz == H - 1 then open = (cx ~= 10) end
+            mask[#mask + 1] = open and 1 or 0
+            heights[#heights + 1] = -8                          -- two yalms up, in quarters
+        end
+    end
+
+    -- Runs of one: the reader does not care, and a test that hand-rolls a compressor is a
+    -- test of the compressor.
+    local body = { 'VGNV', string.char(1), le16(230), string.char(CELL * 10),
+                   le32(0), le32(0), le16(W), le16(H), le32(#mask) }
+    for _, v in ipairs(mask) do body[#body + 1] = le32(1) .. string.char(v) end
+    body[#body + 1] = le32(#heights)
+    for _, v in ipairs(heights) do body[#body + 1] = le32(1) .. le16(v) end
+
+    local dir = os.tmpname()
+    os.remove(dir)
+    os.execute('mkdir -p "' .. dir .. '/data/nav"')
+    local fh = io.open(dir .. '/data/nav/230.vgnav', 'wb')
+    ok(fh ~= nil, 'the test grid can be written')
+    if fh ~= nil then
+        fh:write(table.concat(body))
+        fh:close()
+
+        Nav.reset()
+        Nav.root = dir
+        local g = Nav.load(230)
+        ok(g ~= nil, 'the grid loads')
+        if g ~= nil then
+            eq(g.w, W, 'width survives the round trip')
+            eq(g.h, H, 'height too')
+            ok(math.abs(g.cell - CELL) < 0.001, 'and the cell size')
+        end
+        ok(Nav.load(231) == nil, 'a zone with no grid is simply absent')
+
+        -- Stepped: the first ask says "not yet" rather than blocking the frame.
+        local pts, again = Nav.provide(230, 2.5, 2.5, 0, 17.5, 2.5, 0)
+        ok(pts == nil and again, 'the first ask is answered with "ask again"')
+        local guard = 0
+        while again and guard < 500 do
+            Nav.step(200)
+            pts, again = Nav.provide(230, 2.5, 2.5, 0, 17.5, 2.5, 0)
+            guard = guard + 1
+        end
+        ok(pts ~= nil, 'the search finishes')
+        if pts ~= nil then
+            ok(#pts >= 3, ('and bends: %d points'):format(#pts))
+            local deepest = 0
+            for _, pt in ipairs(pts) do
+                if pt.z > deepest then deepest = pt.z end
+            end
+            ok(deepest > 15, ('it goes round through the gap (z reaches %.0f)'):format(deepest))
+            ok(math.abs(pts[1].x - 2.5) < 0.01, 'it starts exactly where asked')
+            ok(math.abs(pts[#pts].x - 17.5) < 0.01, 'and ends exactly on the target')
+            ok(math.abs(pts[2].y + 2) < 0.5, 'heights come from the grid')
+        end
+
+        -- No route at all: a target walled off entirely is a fact, not a hang.
+        Nav.reset()
+        Nav.root = dir
+        local none, more = Nav.provide(230, 2.5, 2.5, 0, 200, 200, 0)
+        guard = 0
+        while more and guard < 500 do
+            Nav.step(400)
+            none, more = Nav.provide(230, 2.5, 2.5, 0, 200, 200, 0)
+            guard = guard + 1
+        end
+        ok(none == nil, 'a target off the mesh gets no path')
+        ok(guard < 500, 'and does not search forever')
+
+        -- Wired into routing/path.lua, the line bends.
+        Nav.reset()
+        Nav.root = dir
+        Nav.install(Path)
+        Path.forget()
+        WORLD.zone, WORLD.x, WORLD.z, WORLD.y = 230, 2.5, 2.5, -2
+        local route, source
+        for _ = 1, 200 do
+            route, source = Path.to(C.world(), { x = 17.5, z = 2.5, y = -2 })
+            if source == 'navmesh' then break end
+            Nav.step(200)
+        end
+        eq(source, 'navmesh', 'routing/path.lua uses the grid once it has an answer')
+        ok(route ~= nil and #route <= Path.max_points, 'and never returns more points than the cap')
+        -- The straight-line fallback is what is drawn until then, so there is never a frame
+        -- with no line at all.
+        Path.provider = nil
+        Nav.reset()
+        Path.forget()
+    end
+    os.execute('rm -rf "' .. dir .. '"')
 end
 
 print(('\n%d passed, %d failed'):format(pass, fail))

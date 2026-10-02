@@ -54,6 +54,13 @@ never leave it off the edge.
 If step 3 is mirrored, `/vg arrow flip` once and it is correct for good — and please change
 the default in `core/util.lua` so nobody else has to.
 
+## During a journey
+
+The arrow used to sit at zero for any step outside the zone you were standing in, because
+there was nothing in the current zone to point at. There is now: `routing/zonepoints.lua`
+knows where the doorway out is, so a step three zones away gets a real bearing and a real
+distance the whole way ([ROUTING.md](ROUTING.md)).
+
 ## Why lines and not a texture
 
 The Mac port runs the client through DXVK, and the drawing calls that are known to work
@@ -61,5 +68,6 @@ there are the ones other addons already use every frame: `AddLine` and `AddCircl
 ImGui's foreground draw list. The arrow is four lines with a dark outline behind them. A
 textured arrow, a world-space beam projected with `IDirect3DDevice8::GetTransform`, and a
 marker over the target's head are all possible — `Questhelper` does the projection on
-Windows — and all are listed in [PATHWAYS.md](PATHWAYS.md) as things to try *after*
-somebody has confirmed the plain arrow renders at all.
+Windows — and the projection half of that is no longer a question:
+`GetTransform` was confirmed working through the Mac port's `d3d8to9` and DXVK on
+2026-08-24, and [`ui/line.lua`](LINE.md) is built on it.

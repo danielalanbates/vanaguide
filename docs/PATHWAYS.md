@@ -42,15 +42,64 @@ additions would cover most of the gap:
 * **Dialogue** — packet `0x02A`/`0x00B` message ids identify which NPC line you just saw.
   A `|MSG|id|` tag would let a step complete on "you have been told the thing".
 
-## 5. Better drawing
+## 5. Better drawing — DONE, and it opened a door
 
-The arrow is four lines. A world-space marker over the target — projecting the target
-position with `IDirect3DDevice8::GetTransform(D3DTS_VIEW/PROJECTION)`, as
-`oxos-ffxi/Questhelper` does — is the feature that makes Zygor feel like Zygor. It is
-unknown whether `GetTransform` behaves under DXVK on the Mac port; that is one experiment,
-and `ui/arrow.lua` is already isolated enough to take a second renderer beside it.
+`GetTransform(D3DTS_VIEW/PROJECTION)` **works** through the Mac port's `d3d8 → d3d8to9 →
+DXVK` chain. Measured 2026-08-24, 742 consecutive frames, `tools/line_check.py`. That was the
+one experiment this whole item waited on, and it succeeded, so world-space drawing is now
+ordinary work rather than a research question. `ui/project.lua` is the projection;
+`ui/line.lua` is the first thing built on it ([LINE.md](LINE.md)).
 
-## 6. Step reordering
+What is now cheap that was not before:
+
+* **A marker over the target's head.** Same projection, one circle, read the NPC's position
+  out of the entity table instead of the guide.
+* **A path that goes around the wall.** See the next item — this is the big one.
+* **Anything else drawn in the world**: a ring around a spawn point, the radius of a
+  trigger area, the edge of a zone line.
+
+## 6. A path that goes around the wall — BUILT, not yet watched in-game
+
+`tools/gen_navgrid.py` + `routing/navgrid.lua` do this now; [NAVMESH.md](NAVMESH.md) is the
+page. What follows is why it exists and what is still open, which is one thing: nobody has
+stood in a city and watched the line bend round a building. See
+[VERIFICATION.md](VERIFICATION.md).
+
+The line on the ground was a straight line. It was right about the direction and silent about
+the cliff, which is exactly as much as the arrow ever knew.
+
+The data to fix that exists and is already on most machines running a LandSandBoat server:
+`navmeshes/*.nav`, 307 zones, 422 MB, and they are **standard Recast/Detour navigation
+meshes** — magic `TESM`, `dtNavMeshParams`, then tiles of `dtMeshHeader` + verts + polys, all
+documented. Southern San d'Oria is 86 tiles and 1,720 polygons. LandSandBoat's own conversion
+is two sign flips (`src/map/navmesh/detour_navmesh.cpp`): FFXI (x, y, z) to Detour (x, -y, -z).
+
+The shape of it, as built:
+
+1. `tools/gen_navgrid.py` reads a `.nav` and rasterises its walkable polygons into a coarse
+   grid — walkable bit plus ground height per cell — one small file per zone. 295 zones,
+   25 MB, a few minutes.
+2. `routing/navgrid.lua` loads the file for the zone you are in, A-stars across it 400
+   expansions per frame, and installs itself as `routing/path.lua`'s provider. The straight
+   line is drawn until the search finishes, so there is never a frame with no line at all.
+
+What is left on top of it, in the order I would do it:
+
+* **Watch it in a client.** The only unproven claim.
+* **A second floor.** A cell holds one height, so a tower keeps its ground floor and a bridge
+  is drawn under rather than over. Two layers per cell, chosen by which is nearer the
+  player's own height, is the honest fix.
+* **Off-mesh links.** Detour records ledges and jumps as a separate polygon type, which this
+  tool skips. They are exactly the shortcuts a guide would want to know about.
+
+Two constraints worth writing down before somebody starts. The navmeshes are **derived from
+Square Enix's map geometry** and LandSandBoat is GPL-3.0, so nothing generated from them can
+ship inside this repository — the tool ships, the data does not, and the addon falls back to
+a straight line when a zone's file is absent. And this addon runs with the JIT **off**, so
+the search has to be budgeted (a cap on expansions, and a straight line when it is hit) and
+run on a change of destination rather than on a frame.
+
+## 7. Step reordering
 
 CompletionRoute reorders the next N steps by travel cost under precedence constraints
 (`Routing/StepOrder.lua` in that repository). Vanaguide has the router but not the

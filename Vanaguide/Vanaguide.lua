@@ -8,7 +8,11 @@
 *   /vanaguide, /vg            show or hide the guide window
 *   /vg guides                 pick a guide
 *   /vg next | back | skip     move through the current guide
-*   /vg route                  explain the route to the current step
+*   /vg route                  explain the route to the current step, leg by leg
+*   /vg goto <zone>            route to any zone, guide or no guide; /vg goto off to stop
+*   /vg nav                    whether a navigation grid is loaded for this zone
+*   /vg line on | off          the line on the ground that shows the way
+*   /vg line style solid|dots|both, /vg line width <px>
 *   /vg mark <name>            record where you are standing into marks.txt (guide authoring)
 *   /vg arrow flip             flip the arrow's rotation if it points the wrong way
 *   /vg arrow nudge <degrees>  rotate the arrow by a fixed offset
@@ -54,6 +58,13 @@ local L      = require('core.lookup');
 local Verify = require('core.verify');
 local Arrow  = require('ui.arrow');
 local Window = require('ui.window');
+local Line   = require('ui.line');
+local Path   = require('routing.path');
+local points = require('routing.zonepoints');
+local Project = require('ui.project');
+-- The navigation grid is optional: with no data/nav/<zone>.vgnav it answers "no" and the
+-- line stays straight.  See docs/NAVMESH.md -- the grids are generated, never shipped.
+local Nav    = require('routing.navgrid');
 
 require('guides.init');
 
@@ -62,6 +73,9 @@ local default_settings = T{
     progress = T{},          -- [guide name] = { index, checked, skipped }
     learned = T{},           -- zone lines this character has crossed
     arrow = T{ visible = true, calibration = 1, offset = 0, x = 0.5, y = 0.28 },
+    -- The line is on by default: it is the thing that makes the guide readable at a glance,
+    -- and it turns itself off and says why if the device will not project (ui/line.lua).
+    line = T{ visible = true, style = 'both', width = 4 },
     window = T{ visible = true },
 };
 
@@ -71,6 +85,11 @@ local vg = {
     last_advance = 0,
     results = {},
     was_logged_in = false,
+    last_index = nil,
+    -- A destination the player asked for by name, which outranks the guide's own step while
+    -- it is set.  Wanting to get somewhere is not always the same as wanting to do the next
+    -- thing in a walkthrough, and every guide program has this.
+    goto_step = nil,
     d3d8 = nil,
 };
 
@@ -100,6 +119,10 @@ local function apply_settings(s)
     Arrow.calibration = vg.settings.arrow.calibration or 1;
     Arrow.offset = vg.settings.arrow.offset or 0;
     Arrow.move(vg.settings.arrow.x or 0.5, vg.settings.arrow.y or 0.28);
+    if (vg.settings.line == nil) then vg.settings.line = T{ visible = true, style = 'both', width = 4 }; end
+    Line.enabled = vg.settings.line.visible ~= false;
+    Line.style   = vg.settings.line.style or 'both';
+    Line.width   = vg.settings.line.width or 4;
     Window.open[1] = vg.settings.window.visible ~= false;
     if (vg.settings.guide ~= nil and vg.settings.guide ~= '') then
         load_guide(vg.settings.guide);
@@ -115,8 +138,10 @@ local function mark(name)
     local x, z, y = U.position();
     local zone = U.zone();
     if (x == nil or zone == nil) then U.print('not in the world'); return; end
-    local line = ('%s|Z|%d|POS|%.1f,%.1f,10|N|%s, y=%.1f|')
-        :format(name or 'mark', zone, x, z, U.zone_name(zone), y or 0);
+    -- The height goes in POS as the fourth number, not only in the note: the line on the
+    -- ground needs it, and a note is prose.
+    local line = ('%s|Z|%d|POS|%.1f,%.1f,10,%.1f|N|%s|')
+        :format(name or 'mark', zone, x, z, y or 0, U.zone_name(zone));
     local path = ('%s\\addons\\Vanaguide\\marks.txt'):format(AshitaCore:GetInstallPath():gsub('[\\/]$', ''));
     -- Binary mode on purpose. Lua on Windows opens files in text mode and rewrites every
     -- \n as \r\n, and marks.txt is meant to be read on the Mac side; a sibling project lost
@@ -127,6 +152,7 @@ local function mark(name)
 end
 
 ashita.events.register('load', 'vg_load', function ()
+    Nav.install(Path);
     apply_settings(nil);
     U.print(('v%s loaded. /vg for the window, /vg guides to pick one.'):format(addon.version));
 end);
@@ -299,6 +325,9 @@ ashita.events.register('command', 'vg_command', function (e)
             :format(tostring(Window.open[1]), tostring(vg.settings.arrow.visible ~= false),
                     P.guide and P.guide.name or 'none', P.index, P.count(),
                     tostring((pcall(require, 'imgui')))));
+        U.print(Line.status());
+        U.print(Nav.status());
+        U.print(('exits known out of this zone: %d'):format(points.count(U.zone())));
         return;
     end
 
@@ -399,6 +428,17 @@ ashita.events.register('command', 'vg_command', function (e)
                 and 'yes' or 'no'));
             return;
         end
+        -- `/vg graph suspect` lists the hand-written pairs the server's own zone line table
+        -- contradicts. They still route, at three times the cost, so a way round wins when
+        -- there is one -- see docs/ROUTING.md.
+        if (#args > 2 and args[3]:lower() == 'suspect') then
+            local sus = graph.suspect or {};
+            U.print(('%d seed pairs the server table contradicts:'):format(#sus));
+            for _, pair in ipairs(sus) do
+                U.print(('  %s <-> %s'):format(U.zone_name(pair[1]), U.zone_name(pair[2])));
+            end
+            return;
+        end
         local learned, seed = {}, 0;
         for key in pairs(graph.save_learned() or {}) do learned[#learned + 1] = key; end
         for _ in pairs(graph.adj or {}) do seed = seed + 1; end
@@ -411,8 +451,93 @@ ashita.events.register('command', 'vg_command', function (e)
     if (sub == 'route') then
         local step = P.step();
         if (step == nil or step.zone == nil) then U.print('the current step has no place'); return; end
-        local legs = graph.route(U.zone(), step.zone);
-        U.print(R.describe(legs));
+        local here = U.zone();
+        local x, z = U.position();
+        local legs, cost = graph.route(here, step.zone);
+        if (legs == nil) then
+            U.print(('no route from %s to %s'):format(U.zone_name(here), U.zone_name(step.zone)));
+            return;
+        end
+        U.print(('%s -> %s: %d legs, about %dm')
+            :format(U.zone_name(here), U.zone_name(step.zone), #legs, math.floor((cost or 0) / 60 + 0.5)));
+        -- One line per leg, and each says whether the router can point at it. A leg with no
+        -- recorded coordinate still gets you there; it just cannot aim the arrow, and saying
+        -- so is the difference between a gap and a bug.
+        for _, leg in ipairs(R.itinerary(legs, here, x, z)) do
+            U.print(('  %d. %s%s'):format(leg.n, leg.text, leg.known and '' or '   [no coordinate]'));
+        end
+        return;
+    end
+
+    -- The line on the ground.
+    if (sub == 'nav') then
+        local what = (#args > 2) and args[3]:lower() or '';
+        if (what == 'off') then
+            Path.provider = nil;
+            Path.forget();
+            U.print('navmesh paths off; the line is straight again');
+            return;
+        elseif (what == 'on' or what == 'reload') then
+            Nav.reset();
+            Nav.install(Path);
+            Path.forget();
+        end
+        U.print(Nav.status());
+        if (Nav.grid == nil) then
+            U.print('tools/gen_navgrid.py builds them from a LandSandBoat checkout you have;');
+            U.print('they are not shipped -- see docs/NAVMESH.md.');
+        end
+        return;
+    end
+
+    -- Route to any zone, with or without a guide loaded.
+    if (sub == 'goto' or sub == 'go') then
+        local rest = (#args > 2) and table.concat({ unpack(args, 3) }, ' ') or '';
+        if (rest == '' or rest:lower() == 'off' or rest:lower() == 'stop') then
+            vg.goto_step = nil;
+            Window.destination = nil;
+            Path.forget();
+            U.print('not going anywhere in particular');
+            return;
+        end
+        local id = tonumber(rest) or U.zone_id(rest);
+        if (id == nil) then
+            U.print(('no zone called "%s"'):format(rest));
+            return;
+        end
+        vg.goto_step = { kind = 'run', text = ('Go to %s'):format(U.zone_name(id)), zone = id };
+        Window.destination = vg.goto_step;
+        Path.forget();
+        local w = C.world(); w.yaw = U.heading();
+        local rec = R.recommend(vg.goto_step, w);
+        U.print(('going to %s: %s'):format(U.zone_name(id), rec.text or '?'));
+        local summary = R.summary(rec);
+        if (summary ~= nil) then U.print('  ' .. summary); end
+        return;
+    end
+
+    if (sub == 'line' or sub == 'path') then
+        local what = (#args > 2) and args[3]:lower() or '';
+        if (what == 'probe') then
+            local w = C.world(); w.yaw = U.heading();
+            Line.probe(w, function (s) U.print(s); end);
+            return;
+        end
+        if (what == '') then
+            what = Line.enabled and 'off' or 'on';       -- bare /vg line toggles
+        end
+        local said = Line.set(what, (#args > 3) and args[4]:lower() or nil);
+        if (said == nil) then
+            U.print('/vg line on | off | style solid|dots|both | width <px>');
+            U.print(Line.status());
+            return;
+        end
+        vg.settings.line.visible = Line.enabled;
+        vg.settings.line.style = Line.style;
+        vg.settings.line.width = Line.width;
+        settings.save();
+        U.print(said);
+        U.print(Line.status());
         return;
     end
 
@@ -457,7 +582,8 @@ ashita.events.register('command', 'vg_command', function (e)
         return;
     end
 
-    U.print('commands: guides, load <n>, next, back, skip, reset, route, mark, arrow');
+    U.print('commands: guides, load <n>, next, back, skip, reset, route, goto <zone>, mark,');
+    U.print('          arrow, line, nav');
     U.print('lookups:  find <item>, gear <slot>, nm [name], track <n>');
 end);
 
@@ -519,7 +645,14 @@ ashita.events.register('d3d_present', 'vg_present', function ()
             settings.save();
         end
         vg.last_zone = w.zone;
+        -- A path belongs to the zone it was found in, and so does the grid it was found on.
+        Path.forget();
     end
+
+    -- A few hundred cells of pathfinding, and no more. The JIT is off in this addon, so a
+    -- whole A* between two frames is a visible stutter; spread over a third of a second it
+    -- is nothing, and the straight line is drawn in the meantime.
+    Nav.step();
 
     -- Advancing walks the whole remaining guide in the worst case; once a second is plenty.
     local now = os.time();
@@ -540,19 +673,56 @@ ashita.events.register('d3d_present', 'vg_present', function ()
     if (ok and vp ~= nil) then
         Arrow.set_viewport(vp.Width, vp.Height);
         Window.set_viewport(vp.Width, vp.Height);
+        Project.set_viewport(vp.Width, vp.Height);
     end
 
     Window.draw(w, function (name) load_guide(name); end);
 
-    if (vg.settings.arrow.visible ~= false and P.guide ~= nil) then
-        local step = P.step();
+    if (P.guide ~= nil or vg.goto_step ~= nil) then
+        -- A destination asked for by name outranks the guide's own step: the player said
+        -- where they want to be, and the guide can wait until they are there.
+        local step = vg.goto_step or P.step();
         if (step ~= nil) then
+            -- A new step is a new destination: the cached path belongs to the old one, and
+            -- keeping it draws a confident line to somewhere the guide has stopped asking for.
+            if (P.index ~= vg.last_index) then
+                vg.last_index = P.index;
+                Path.forget();
+            end
+
             local rec = R.recommend(step, w);
-            if (rec.mode == 'here' and rec.bearing ~= nil) then
-                Arrow.draw(rec.bearing, rec.distance,
-                    ('%.0f yalms'):format(rec.distance or 0), step.text);
-            elseif (rec.mode == 'travel') then
-                Arrow.draw(0, nil, rec.text, U.zone_name(rec.destination));
+
+            -- Arrived: a goto is a one-shot errand, and leaving it set would keep pointing at
+            -- the door the player has just walked through.
+            if (vg.goto_step ~= nil and step == vg.goto_step
+                and rec.mode == 'here' and w.zone == vg.goto_step.zone) then
+                U.print(('arrived in %s'):format(U.zone_name(vg.goto_step.zone)));
+                vg.goto_step = nil;
+                Window.destination = nil;
+                Path.forget();
+            end
+
+            -- The line first, so the arrow is drawn on top of it rather than under it.
+            if (rec.target ~= nil) then
+                local label = (rec.mode == 'travel') and U.zone_name(rec.leg and rec.leg.to)
+                                                     or step.text;
+                Line.draw(w, rec.target, label);
+            end
+
+            if (vg.settings.arrow.visible ~= false) then
+                if (rec.bearing ~= nil) then
+                    -- Travel legs have a bearing now: the arrow points at the doorway out of
+                    -- this zone for the whole walk, instead of sitting at zero and saying the
+                    -- same five words from one end of the road to the other.
+                    local sub_text = step.text;
+                    if (rec.mode == 'travel') then
+                        sub_text = U.zone_name(rec.destination);
+                    end
+                    Arrow.draw(rec.bearing, rec.distance,
+                        ('%.0f yalms'):format(rec.distance or 0), sub_text);
+                elseif (rec.mode == 'travel') then
+                    Arrow.draw(0, nil, rec.text, U.zone_name(rec.destination));
+                end
             end
         end
     end

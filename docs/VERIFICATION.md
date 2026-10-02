@@ -48,9 +48,15 @@ the plugin block.
 
 ## Verified without the game
 
-`luajit tools/test_offline.lua` — 1,471 assertions covering the parser, the completion
+`luajit tools/test_offline.lua` — 1,612 assertions covering the parser, the completion
 conditions, the `0x056` bit maths (including the two packet shapes above), the progress
-cursor, the router, the generated databases and the arrow's rotation.
+cursor, the router, the generated databases, the arrow's rotation, the world-to-screen
+arithmetic and the line's own drawing calls.
+
+`luajit tools/render_line.lua` draws `ui/line.lua` through a fake ImGui draw list and a
+hand-built camera into `docs/line-geometry.svg`, the same way `render_arrow.lua` does for the
+arrow — and it caught the same class of bug for the same reason: the first camera in that
+harness was built left-handed, and every path that bent right came out bending left.
 
 ## Answered on 2026-08-24
 
@@ -74,6 +80,57 @@ the flag never arriving — the check now tries several ids. `Z.learn` refuses t
 it already knows, so warping between two zones the sweep has been through a hundred times
 leaves the total unchanged and reads exactly like learning being broken — the check now asks
 about one pair rather than counting.
+
+## Answered on 2026-08-24, second run — the line on the ground
+
+Run against the same local LandSandBoat world, standing in La Theine Plateau, by
+`tools/line_check.py`. Twelve checks, none failed.
+
+![Vanaguide in La Theine Plateau](line-ingame-2026-08-24.png)
+
+*`/vg goto Valkurm Dunes`: the window says where it is taking you and how far, the line runs
+off towards the zone line 1,613 yalms away, and the arrow agrees with it.*
+
+| | answer |
+| --- | --- |
+| **`IDirect3DDevice8::GetTransform` works on the Mac port** | **Yes.** This was [PATHWAYS.md](PATHWAYS.md) item 5 and had been open since the project started: nobody knew whether the `d3d8 → d3d8to9 → DXVK` chain would hand over the camera. It does. `/vg status` reports `camera ok (742 frames)`. Everything world-space — the line, and a marker over an NPC's head one day — rests on this, and it is now a fact rather than a hope. |
+| **The projection is right way up and right way round** | **Yes**, and numerically, not by squinting. `/vg line probe` prints the player's own feet, twenty yalms ahead and five yalms up: feet landed at 320,309 of a 640x480 viewport with w=4.67 (the camera distance); ahead at 320,163 with w=23.4 — higher up the screen and further away; up at 320,-135 — higher still and directly above. All four axis conventions confirmed at once. |
+| **The router points at a coordinate for a step in another zone** | **Yes.** `Zone into West Ronfaure -- 8 yalms`, with a bearing, from a step two zones away. Before this the arrow sat at zero for the whole journey. |
+| **`/vg route` walks the legs** | **Yes.** `La Theine Plateau -> West Ronfaure (8 yalms)` then `West Ronfaure -> Southern San d'Oria`. |
+| **`/vg goto <zone>` routes without a guide** | **Yes.** `going to Valkurm Dunes: Zone into Valkurm Dunes -- 1613 yalms`. |
+| **The line draws in the world** | **Yes** — screenshot above. |
+
+Two things the run changed, both found by looking at the picture rather than the numbers:
+
+* The line was on ImGui's **foreground** draw list and drew straight across the guide window
+  it was meant to explain. It is on the background list now, so windows sit on top of it.
+* `/vg goto` set the arrow and the line to one destination while the window still described
+  the guide's own step — two different answers to one question. The window now says where it
+  is taking you first.
+
+And one check that was wrong rather than one feature that was broken: the probe originally
+asked for a point *twenty* yalms up, which is behind a camera sitting five yalms away and
+pitched down, and correctly came back with a negative w. Five yalms is the check.
+
+## Not yet watched in the game
+
+`routing/navgrid.lua` — the A\* that makes the line go round the wall — has **not** been seen
+running in a client. It is proven three other ways and none of them is the same thing:
+
+* `tools/test_offline.lua` builds a twenty-cell room with a wall and one gap and asserts the
+  path goes round it, starts and ends where it was asked, takes its heights from the grid,
+  and gives up rather than hangs on a walled-off target.
+* Real grids, generated from the real navmeshes, produce real paths: gate to gate across
+  Southern San d'Oria in 924 expansions over 4 frames, and 1,500 yalms across La Theine
+  Plateau in 3,528 over 12. Both were drawn over the grid and inspected — they stay on the
+  streets.
+* 295 zones convert without error.
+
+What is missing is a character standing in a city with the line bending round a building on
+screen. The attempt was deliberately abandoned: a live HorizonXI session was running on this
+machine at the time, and a second client is both a duplicate instance and a risk to somebody
+else's game. It is the first thing to do on the next run, and `tools/line_check.py` plus a
+`/vg nav` call is most of it.
 
 ## How this run was driven
 
