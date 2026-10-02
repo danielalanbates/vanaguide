@@ -55,11 +55,14 @@ Add the file's name to `guides/init.lua`.
 | `JOB` | `job id,level` |
 | `RANK` | nation rank |
 | `SP` | spell id |
+| `NPC` | who the step is about, by the name the client shows (`Endracion`, `Door:"Lion Springs"`). The audit looks for this NPC at the `POS`, and `/vg talk` targets it. Without it, a step with `M`/`Q` takes the NPC from the mission or quest database, but only when the step is in that entry's zone: the database names where the mission or quest *starts*. |
 | `N` | note, shown under the step |
 | `FIXED` | never auto-complete; always wait for the player |
 
-`area` is a quest-log page name: `sandoria bastok windurst jeuno other outlands wotg
-abyssea adoulin coalition`, and for missions also `zilart cop acp mkd asa adoulin rov`.
+`area` is a quest-log page name: `sandoria bastok windurst jeuno other outlands ahturhgan
+wotg abyssea adoulin coalition`, and for missions `sandoria bastok windurst zilart cop toau
+wotg acp amk asa adoulin rov` (`tvr` parses but never completes on its own: LandSandBoat
+does not send TVR progress, see docs/PACKETS.md).
 
 A step with **no** completion tag waits for the player to click Done — except `R` and `F`
 steps, which complete when the player reaches the `POS`.

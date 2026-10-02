@@ -49,6 +49,21 @@ eq(steps[2].mission.area, 'sandoria', 'mission tag')
 eq(steps[3].item.count, 3, 'item count')
 ok(select(2, G.parse('q nonsense|Z|230|'))[1] ~= nil, 'bad verb reported')
 
+-- Who a step is about: its own NPC tag, else its database entry's NPC only in that entry's zone.
+do
+    local s = G.parse('T Trade the axe to Endracion|M|sandoria,0|Z|230|POS|-112.8,-37.2|NPC|Endracion|')[1]
+    eq(s.npc, 'Endracion', 'NPC tag')
+    eq(G.npc_of(s, { npc = 'Ambrotien', zone = 230 }), 'Endracion', 'the NPC tag beats the database')
+    local away = G.parse('T Deliver the report to Naji|M|bastok,0|Z|237|')[1]
+    eq(G.npc_of(away, { npc = 'Argus', zone = 236 }), nil,
+       "a database NPC in another zone is not this step's NPC")
+    local here = G.parse('C Mission|M|bastok,0|Z|236|N|Starts with Argus.|')[1]
+    eq(G.npc_of(here, { npc = 'Argus', zone = 236 }), 'Argus', 'the database NPC in its own zone')
+    eq(G.npc_of(G.parse('C Mission|M|cop,110|Z|126|N|First stop: Enter Lower Delkfutt.|')[1], nil),
+       nil, 'a place is not an NPC')
+    ok(select(2, G.parse('t Talk|Z|230|NPC||'))[1] ~= nil, 'an empty NPC tag is reported')
+end
+
 -- ---- conditions ---------------------------------------------------------------
 WORLD.zone, WORLD.x, WORLD.z = 230, -140, 120
 local w = C.world()
@@ -116,6 +131,124 @@ ok(story.mission_done('sandoria', 0), 'a completed nation mission is read from p
 ok(story.mission_done('sandoria', 1), 'and the second one')
 ok(not story.mission_done('sandoria', 9), 'but not one that is still to do')
 
+-- ---- every mission log, the way LandSandBoat packs it ----------------------------
+-- Built from src/map/packets/s2c/0x056_mission.cpp / 0x056_mission_other.cpp, and the state
+-- CLuaBaseEntity::completeMission / addMission leave behind (lua_base_entity.cpp).
+do
+    local unpk = table.unpack or unpack
+    -- a 0x056 of `page` whose 32 data bytes are zero except `u32s` ({offset = value}, offsets
+    -- from the start of the packet) and `bits` (flag ids across the 32 bytes)
+    local function pkt(page, u32s, bits)
+        local b = {}
+        for i = 1, 32 do b[i] = 0 end
+        for off, v in pairs(u32s or {}) do
+            for k = 0, 3 do b[off - 4 + k + 1] = math.floor(v / 256 ^ k) % 256 end
+        end
+        for _, id in ipairs(bits or {}) do
+            local i, bit = math.floor(id / 8) + 1, id % 8
+            b[i] = b[i] + 2 ^ bit
+        end
+        return string.char(0, 0, 0, 0) .. string.char(unpk(b, 1, 32))
+            .. string.char(page % 256, math.floor(page / 256) % 256, 0, 0) .. string.rep('\0', 8)
+    end
+    local function feed(p) story.on_packet(0x056, p, #p) end
+    -- 0xFFFF with every storyline "none" (65535 for the nation, 0 for logs 3+, SoA/RoV at
+    -- their un-started offsets), then overrides.
+    local function main(t)
+        local u = { [0x04] = t.nation or 0, [0x08] = t.nation_mission or 65535,
+                    [0x0C] = t.zilart or 0, [0x10] = t.cop or 0,
+                    [0x18] = (t.acp or 0) + (t.amk or 0) * 16 + (t.asa or 0) * 256,
+                    [0x1C] = t.soa_raw or 0x6E, [0x20] = t.rov_raw or 0x6C }
+        return pkt(0xFFFF, u)
+    end
+    story.reset()
+
+    -- Chains of Promathia, guide 43 step 8 (Ancient Vows, 248).  CoP has no completed bit
+    -- anywhere; the current number is the whole record, and LandSandBoat's own
+    -- hasCompletedMission(COP, id) is `id < current`.
+    require('guides.init')
+    local cop = G.get('Chains of Promathia - in order')
+    ok(cop ~= nil, 'the CoP storyline guide is registered')
+    local vows
+    for _, s in ipairs(cop.steps) do if s.mission and s.mission.id == 248 then vows = s end end
+    ok(vows ~= nil and vows.mission.area == 'cop', 'it has Ancient Vows as M|cop,248|')
+    local cw = { story = story }
+    feed(main({ cop = 248 }))                                   -- !addmission COP 248
+    ok(not C.done(vows, cw), 'CoP 248 is open while it is the current mission')
+    eq(story.mission_current('cop'), 248, 'and reads as the current one')
+    -- What the audit harness did: `!completemission COP 248`.  When 248 is current the server
+    -- sets current to 0 (logs above 2) and stores no bit for CoP, so 0xFFFF says CoP = 0 --
+    -- and the server itself no longer counts 248 as complete.  (When 248 is *not* current,
+    -- which the harness's `!delmission` made sure of, it only logs "can't complete non
+    -- current mission" and sends nothing.)  Open is the right answer.
+    feed(main({ cop = 0 }))
+    ok(not C.done(vows, cw), 'after a bare !completemission COP 248 the step stays open, as on the server')
+    -- What the mission script does: completeMission then addMission(nextMission), so
+    -- current becomes The Call of the Wyrmking (258).  That is what finishes a CoP mission.
+    feed(main({ cop = 258 }))
+    ok(C.done(vows, cw), 'CoP 248 is done once the current mission has moved on to 258')
+    ok(not story.mission_done('cop', 258), 'and 258 itself is not')
+    ok(story.mission_done('cop', 110), 'and every earlier CoP mission is')
+
+    -- Nations + Zilart share page 0x00D0, 8 bytes each.  A Bastok character's completed
+    -- mission 2 is bit 64+2 of the page; reading the page whole put it at id 66.
+    feed(main({ nation = 1 }))
+    feed(pkt(0x00D0, nil, { 64 + 2, 192 + 4 }))
+    ok(story.mission_done('bastok', 2), 'Bastok mission 2 is read from the Bastok bytes of 0x00D0')
+    ok(not story.mission_done('bastok', 66), 'not as Bastok mission 66')
+    ok(not story.mission_done('sandoria', 2), "and it is not a San d'Oria mission")
+    ok(story.mission_done('zilart', 4), 'Zilart completed bits are the last 8 bytes of 0x00D0')
+    ok(not story.mission_done('zilart', 0), 'and Zilart current 0 marks nothing done')
+    feed(pkt(0x00D0, nil, { 128 + 5 }))
+    ok(story.mission_done('windurst', 5), 'Windurst completed bits are bytes 16..23')
+    ok(not story.mission_done('bastok', 2), 'a fresh 0x00D0 replaces the previous one')
+
+    -- ToAU / WoTG: current numbers ride on the Aht Urhgan quest page 0x0080 (Data[5], Data[6]),
+    -- completed bits on 0x00D8.  0xFFFE is TVR's page and must not be read as ToAU.
+    feed(pkt(0x0080, { [0x18] = 3, [0x1C] = 9 }, { 5, 100 }))
+    feed(pkt(0xFFFE, { [0x04] = 0 }))
+    eq(story.mission_current('toau'), 3, 'ToAU current comes from page 0x0080, and 0xFFFE leaves it alone')
+    ok(story.mission_done('toau', 2), 'ToAU 2 is done while 3 is current')
+    ok(story.mission_done('wotg', 8), 'WoTG 8 is done while 9 is current')
+    ok(story.quest_active('ahturhgan', 5), 'Aht Urhgan quest 5 is in progress (page 0x0080)')
+    ok(story.quest_active('ahturhgan', 100), 'and quest 100')
+    -- ToAU current 3 in Data[5] is bits 160,161 if the page were read whole
+    ok(not story.quest_active('ahturhgan', 160), 'the mission numbers are not quest flags')
+    feed(pkt(0x0080, { [0x18] = 0, [0x1C] = 0 }))              -- !completemission TOAU 3
+    feed(pkt(0x00D8, nil, { 3, 64 + 9 }))
+    ok(story.mission_done('toau', 3), 'a completed ToAU mission is read from 0x00D8 bytes 0..7')
+    ok(story.mission_done('wotg', 9), 'a completed WoTG mission from bytes 8..15')
+    ok(not story.mission_done('toau', 4), 'but not the next one')
+    feed(pkt(0x00C0, nil, { 12, 128 + 1 }))
+    ok(story.quest_done('ahturhgan', 12), 'Aht Urhgan completed quests are read from 0x00C0')
+    ok(not story.quest_done('ahturhgan', 129), 'bytes 16..31 of 0x00C0 are Assault, not quests')
+
+    -- ACP / AMK / ASA nibbles: the guide area is 'amk'.
+    feed(main({ acp = 5, amk = 7, asa = 2 }))
+    ok(story.mission_done('acp', 4) and not story.mission_done('acp', 5), 'ACP from the low nibble of 0x18')
+    ok(story.mission_done('amk', 6) and not story.mission_done('amk', 7), "AMK from the high nibble, as area 'amk'")
+    ok(story.mission_done('asa', 1) and not story.mission_done('asa', 2), 'ASA from the low nibble of 0x19')
+
+    -- Seekers of Adoulin (current*2 + 0x6E) and RoV (current + 0x6C).  Read raw, a character
+    -- who had not started either had Adoulin missions 0..109 and all of RoV "done".
+    feed(main({}))
+    ok(not story.mission_done('adoulin', 0), 'an un-started Adoulin storyline has nothing done')
+    ok(not story.mission_done('rov', 0), 'nor RoV')
+    feed(main({ soa_raw = 0x6E + 9 * 2, rov_raw = 0x6C + 12 }))
+    eq(story.mission_current('adoulin'), 9, 'Adoulin current is (raw - 0x6E) / 2')
+    ok(story.mission_done('adoulin', 8) and not story.mission_done('adoulin', 100), 'and completes only what is past it')
+    eq(story.mission_current('rov'), 12, 'RoV current is raw - 0x6C')
+    ok(story.mission_done('rov', 10) and not story.mission_done('rov', 12), 'and completes only what is past it')
+    feed(main({ soa_raw = 0, rov_raw = 0 }))
+    eq(story.mission_current('adoulin'), nil, 'a declined expansion (0) is nothing started')
+
+    -- put the San d'Oria world back for the progress tests below
+    story.reset()
+    story.on_packet(0x056, packet_0056(0x0090, { 5, 12 }), 48)
+    story.on_packet(0x056, mission, #mission)
+    story.on_packet(0x056, packet_0056(0x00D0, { 0, 1 }), 48)
+end
+
 -- ---- progress -----------------------------------------------------------------
 local guide = G.register({ name = 'Test guide', steps = steps })
 P.set_guide(guide)
@@ -143,9 +276,52 @@ eq(air[1].kind, 'transit', 'and it is transit, not walking')
 ok(R.describe(air):find('Airship') ~= nil, 'route description names the airship')
 
 ok(graph.route(230, 299) == nil, 'unreachable zone routes to nil')
+local version = graph.version
 ok(graph.learn(230, 299), 'a new zone line is learned')
+ok(graph.version > version, 'learning bumps the graph version, so the router drops its cache')
 ok(not graph.learn(230, 299), 'and only learned once')
 ok(graph.route(230, 299) ~= nil, 'learning opens the route')
+
+-- The generated zone lines are in the graph, not just the hand-written seed: the two Adoulin
+-- cities touch, and nothing in data/travel.lua says so.
+local adoulin = graph.route(256, 257)
+ok(adoulin ~= nil and #adoulin == 1 and adoulin[1].kind == 'walk', 'Western Adoulin walks to Eastern Adoulin')
+
+-- A seed pair the server's table contradicts is kept out: Southern San d'Oria and Port
+-- San d'Oria do not touch, the way round is through Northern San d'Oria.
+local sandy = graph.route(230, 232)
+ok(#graph.suspect > 0, 'contradicted seed pairs are listed')
+ok(sandy ~= nil and #sandy == 2 and sandy[1].to == 231, 'no walk across a contradicted seed pair')
+
+-- NPC crossings: the Cavernous Maw is the only way to the [S] zones.
+local maw = graph.route(105, 84)
+ok(maw ~= nil and #maw == 1 and maw[1].kind == 'transit', 'Batallia Downs to Batallia Downs [S] is one maw')
+ok(maw ~= nil and maw[1].via:find('Cavernous Maw') ~= nil, 'and the leg says so')
+local maw_at = require('routing.zonepoints').leg_target(maw[1], 0, 0)
+ok(maw_at ~= nil and math.abs(maw_at.x - -45.1) < 1, 'the arrow points at the maw')
+
+-- The Lower Jeuno waypoint is the way to Adoulin.
+local wp = graph.route(245, 256)
+ok(wp ~= nil and #wp == 1 and wp[1].net == 'waypoint', 'Lower Jeuno to Western Adoulin is the waypoint')
+
+-- Home Points: a network through a hub the caller never sees.
+local hp = graph.route(244, 25)
+ok(hp ~= nil, 'Tavnazia is reachable')
+local folded = hp ~= nil
+for _, leg in ipairs(hp or {}) do
+    if type(leg.from) ~= 'number' or type(leg.to) ~= 'number' then folded = false end
+end
+ok(folded, 'the Home Point hub is folded out of the route')
+ok(hp ~= nil and hp[#hp].to == 25, 'and the route ends where it should')
+local warp = nil
+for _, leg in ipairs(hp or {}) do if leg.net == 'homepoint' then warp = leg end end
+ok(warp ~= nil and warp.via:find('Home Point') ~= nil, 'the warp leg names the Home Point')
+ok(warp ~= nil and require('routing.zonepoints').leg_target(warp, 0, 0) ~= nil,
+   'and has a Home Point to walk to')
+ok(not graph.learn(26, 236), 'a Home Point warp is not learned as a zone line')
+local _, hp_cost = graph.route(244, 25)
+ok(graph.eta(hp) ~= nil and graph.eta(hp) < hp_cost,
+   'the estimate is the warp time, not the last-resort price it was chosen by')
 
 -- ---- recommendation -----------------------------------------------------------
 WORLD.zone, WORLD.x, WORLD.z, WORLD.yaw = 230, 0, 0, 0
@@ -260,6 +436,21 @@ do
     eq(bad_id, 0, 'every quest id fits the 256-flag log')
     local knights = QDB.get('sandoria', 29)
     ok(knights ~= nil and knights.zone == 230, "A Knight's Test is taken in Southern San d'Oria")
+
+    -- The name the client shows, never the header's label around it.
+    local bad_npc = {}
+    for _, quests in pairs(QDB.quests) do
+        for _, q in pairs(quests) do
+            local n = q.npc
+            if n ~= nil and (n:find('%(') or n:find('_') or n:find(',') or n:find('\\', 1, true)) then
+                bad_npc[#bad_npc + 1] = n
+            end
+        end
+    end
+    eq(#bad_npc, 0, 'every quest NPC is a shown name: ' .. table.concat(bad_npc, ', '))
+    local kuftal = QDB.get('outlands', 195)
+    ok(kuftal.npc == 'Datta' and kuftal.zone == 247, 'The Kuftal Tour starts with Datta in Rabao')
+    eq(QDB.get('abyssea', 87).x, -848.1, "Altepa Dominion Op #01 is at Nanaa Mihgo's camp")
 end
 
 -- ---- generated guides ------------------------------------------------------------
@@ -298,15 +489,27 @@ end
 -- ---- the generated mission database ---------------------------------------------
 do
     local MDB = require('data.missions')
-    local total, bad_zone = 0, 0
+    local total, bad_zone, bad_npc = 0, 0, {}
     for _, missions in pairs(MDB.missions) do
         for _, m in pairs(missions) do
             total = total + 1
             if m.zone ~= nil and zones.name[m.zone] == nil then bad_zone = bad_zone + 1 end
+            -- The name the client shows, never a label around it: no step number ("1. Enter
+            -- Lower Delkfutt"), no bracketed internal name ("Granite Door (_4fx)"), no
+            -- server-side name ("Sluice_Gate_6"), no escaped quote ("Tales\' Beginning").
+            local n = m.npc
+            if n ~= nil and (n:find('^%d+%.') or n:find('%(') or n:find('_') or n:find('\\', 1, true)) then
+                bad_npc[#bad_npc + 1] = n
+            end
         end
     end
     ok(total >= 400, ('the mission database has every storyline (%d)'):format(total))
     eq(bad_zone, 0, 'every mission zone is a real zone')
+    eq(#bad_npc, 0, 'every mission NPC is a shown name: ' .. table.concat(bad_npc, ', '))
+    local rites = MDB.get('cop', 110)
+    ok(rites.npc == nil and rites.place == 'Enter Lower Delkfutt',
+       'The Rites of Life starts at a place, not an NPC called "1. Enter Lower Delkfutt"')
+    eq(MDB.get('adoulin', 66).x, -215.4, "Soul Siphon's Hollowed Pathway is where the server spawns it")
 
     -- The ids the retired hand-written guide got wrong.  This is the regression.
     local first = MDB.get('sandoria', 0)
@@ -321,6 +524,12 @@ do
     for i = 2, #g.steps do
         ok(g.steps[i].mission.id > g.steps[i - 1].mission.id, 'missions are in order')
     end
+
+    -- Only an NPC is announced as "Starts with": the audit reads that phrase back as a name.
+    local cop = G.get('Chains of Promathia - in order')
+    local rites_step = cop.steps[1]
+    eq(rites_step.note, 'First stop: Enter Lower Delkfutt.', 'a place is announced as a place')
+    eq(G.npc_of(rites_step, rites), nil, 'and is not taken for an NPC')
 end
 
 -- ---- loot, gear and notorious monsters ------------------------------------------

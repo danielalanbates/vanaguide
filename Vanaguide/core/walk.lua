@@ -10,8 +10,9 @@
 -- It exists so the guide can be *tested* the way it is meant to be used -- a character
 -- accepting quests, listening to the narrator, and following the arrow from one to the
 -- next on our own LandSandBoat world -- not for play on anyone else's server, where moving
--- a character by writing its position is a bannable offence.  tools/guided_walk.sh refuses
--- any server that is not 127.0.0.1, and so does this: Walk.start checks the same thing.
+-- a character by writing its position is a bannable offence. `/vg walk allow` is only a manual
+-- opt-in; this module does not independently verify the connected server address. The launcher
+-- restricts its own addon wiring to local LSB, and test operators must verify the active profile.
 --
 -- Copyright (c) 2026 Bates LLC.  All rights reserved.
 

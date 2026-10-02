@@ -124,3 +124,14 @@ walled off.
 ## Copyright
 
 Copyright (c) 2026 Bates LLC. All rights reserved. <https://batesai.org> · help@batesai.org
+
+
+## Where the grids go (2026-09-26)
+
+Put the generated grids in `<Ashita install>/config/addons/Vanaguide/nav/`, for example
+`tools/gen_navgrid.py ~/lsb/server -o "<game>/config/addons/Vanaguide/nav"`. The addon checks
+there first and falls back to `addons/Vanaguide/data/nav`.
+
+The addon folder is not a safe place for them. The FFXI-on-Mac launcher replaces that folder on
+every Play. It also deletes the folder entirely before launching a world whose addon allowlist
+excludes Vanaguide, such as HorizonXI. That deleted the grids twice on 2026-09-26.

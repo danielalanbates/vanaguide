@@ -48,7 +48,7 @@ local function ordered(area)
         -- left alone: reordering another area's guide from this one would be worse than a
         -- step that waits.
         local pre = entry.quest.prereq
-        if pre ~= nil and pre[1] == area then emit(by_id[pre[2]]) end
+        if pre ~= nil and Q.canonical_area(pre[1]) == area then emit(by_id[pre[2]]) end
         out[#out + 1] = entry
     end
 
@@ -56,27 +56,81 @@ local function ordered(area)
     return out
 end
 
+local function quest_step(area, id, q, label, note)
+    local line = { 'C ' .. label, ('|Q|%s,%d|'):format(Q.canonical_area(area), id) }
+    local notes = {}
+    if q.zone ~= nil then
+        line[#line + 1] = ('|Z|%d|'):format(q.zone)
+        if q.x ~= nil then line[#line + 1] = ('|POS|%.1f,%.1f,8|'):format(q.x, q.z) end
+    end
+    -- Only an NPC is announced as "Ask": the in-game audit reads the name back out of it.
+    local where = nil
+    if q.npc ~= nil then
+        where = ('Ask %s.'):format(q.npc)
+    elseif q.place ~= nil then
+        where = ('First stop: %s.'):format(q.place)
+    elseif q.zone ~= nil and q.x ~= nil then
+        where = 'Starts at the marked spot.'
+    elseif q.zone ~= nil then
+        local U = require('core.util')
+        where = q.from ~= nil
+            and ('Starts on entering %s from %s.'):format(U.zone_name(q.zone), U.zone_name(q.from))
+            or ('Starts on entering %s.'):format(U.zone_name(q.zone))
+    end
+    if q.level ~= nil then
+        notes[#notes + 1] = ('Level %d. %s'):format(q.level, where or 'Ask the quest giver.')
+    else
+        notes[#notes + 1] = where or 'No location recorded for this one yet.'
+    end
+    if note ~= nil then notes[#notes + 1] = note end
+    line[#line + 1] = ('|N|%s|'):format(table.concat(notes, ' '):gsub('|', '/'))
+    return table.concat(line)
+end
+
+local function add_external_prerequisites(area, entry, steps, added, visiting)
+    local pre = entry.quest.prereq
+    if pre == nil then return end
+    local pre_area = Q.canonical_area(pre[1])
+    local key = ('%s:%d'):format(pre_area, pre[2])
+    if added[key] or visiting[key] then return end
+    local parent = Q.get(pre_area, pre[2])
+
+    if pre_area == area then
+        if parent == nil then
+            steps[#steps + 1] = ('N This quest references missing prerequisite data %s/%d; verify the server quest source.|')
+                :format(pre_area, pre[2])
+            added[key] = true
+        end
+        return
+    end
+
+    visiting[key] = true
+    if parent ~= nil then
+        add_external_prerequisites(area, { area = pre_area, id = pre[2], quest = parent },
+                                   steps, added, visiting)
+        local title = AREA_TITLE[pre_area] or pre_area
+        steps[#steps + 1] = quest_step(pre_area, pre[2], parent,
+            'Prerequisite: ' .. parent.name,
+            ('Complete this quest in %s first; load "%s - every quest" for its guide steps.')
+                :format(title, title))
+    else
+        steps[#steps + 1] = ('N This quest requires missing prerequisite data %s/%d; verify the server quest source.|')
+            :format(pre_area, pre[2])
+    end
+
+    visiting[key] = nil
+    added[key] = true
+end
+
 local function build(area)
     local entries = ordered(area)
     if #entries == 0 then return nil end
 
     local steps = {}
+    local added, visiting = {}, {}
     for _, entry in ipairs(entries) do
-        local q = entry.quest
-        local line = { 'C ' .. q.name }
-        line[#line + 1] = ('|Q|%s,%d|'):format(area, entry.id)
-        if q.zone ~= nil then
-            line[#line + 1] = ('|Z|%d|'):format(q.zone)
-            if q.x ~= nil then line[#line + 1] = ('|POS|%.1f,%.1f,8|'):format(q.x, q.z) end
-        end
-        if q.level ~= nil then
-            line[#line + 1] = ('|N|Level %d. Ask %s.|'):format(q.level, q.npc or 'the quest giver')
-        elseif q.npc ~= nil then
-            line[#line + 1] = ('|N|Ask %s.|'):format(q.npc)
-        else
-            line[#line + 1] = '|N|No location recorded for this one yet.|'
-        end
-        steps[#steps + 1] = table.concat(line)
+        add_external_prerequisites(area, entry, steps, added, visiting)
+        steps[#steps + 1] = quest_step(area, entry.id, entry.quest, entry.quest.name)
     end
 
     return G.register({
@@ -97,6 +151,20 @@ local STORY_TITLE = {
     tvr = 'The Voracious Resurgence', campaign = 'Campaign', assault = 'Assault',
 }
 
+--- Where a mission starts, in words.  Only an NPC gets "Starts with": the in-game audit and
+--- `/vg talk` read the name back out of that phrase, so it must never hold a place.
+local function mission_note(m)
+    local U = require('core.util')
+    if m.npc ~= nil then return ('Starts with %s.'):format(m.npc) end
+    if m.place ~= nil then return ('First stop: %s.'):format(m.place) end
+    if m.zone ~= nil and m.x ~= nil then return 'Starts at the marked spot.' end
+    if m.zone ~= nil and m.from ~= nil then
+        return ('Starts on entering %s from %s.'):format(U.zone_name(m.zone), U.zone_name(m.from))
+    end
+    if m.zone ~= nil then return ('Starts on entering %s.'):format(U.zone_name(m.zone)) end
+    return 'No location recorded for this one yet.'
+end
+
 --- Missions are linear, so the guide is simply the storyline in order.  `M|area,id|`
 --- completes when the server's current-mission number passes the id, which is why these
 --- ids are generated rather than remembered — being one out means waiting forever.
@@ -112,8 +180,7 @@ local function build_missions(area)
             line[#line + 1] = ('|Z|%d|'):format(m.zone)
             if m.x ~= nil then line[#line + 1] = ('|POS|%.1f,%.1f,8|'):format(m.x, m.z) end
         end
-        line[#line + 1] = ('|N|%s|'):format(m.npc and ('Starts with ' .. m.npc .. '.')
-            or 'No location recorded for this one yet.')
+        line[#line + 1] = ('|N|%s|'):format((mission_note(m):gsub('|', '/')))
         steps[#steps + 1] = table.concat(line)
     end
     return G.register({
