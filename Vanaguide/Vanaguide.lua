@@ -15,6 +15,7 @@
 *   /vg line style solid|dots|both, /vg line width <px>, /vg line horizon <yalms>
 *   /vg walk [auto|stop|status|speed <y/s>]   walk the character to the target (LOCAL WORLD ONLY)
 *   /vg mark <name>            record where you are standing into marks.txt (guide authoring)
+*   /vg dump graph             write the learned zone lines as a paste-ready seed block
 *   /vg arrow flip             flip the arrow's rotation if it points the wrong way
 *   /vg arrow nudge <degrees>  rotate the arrow by a fixed offset
 *   /vg reset                  start the current guide again
@@ -56,6 +57,7 @@ local P      = require('core.progress');
 local graph  = require('routing.zonegraph');
 local R      = require('routing.router');
 local L      = require('core.lookup');
+local Learned = require('core.learned');
 local Verify = require('core.verify');
 local Arrow  = require('ui.arrow');
 
@@ -128,7 +130,17 @@ end
 
 local function apply_settings(s)
     if (s ~= nil) then vg.settings = s; end
-    graph.load_learned(vg.settings.learned);
+    -- Zone lines are account-wide (core/learned.lua): merge the shared file with anything
+    -- this character learned before the graph became shared, adopt the union, and write it
+    -- back once so the per-character copy is migrated.  A character now starts with every
+    -- road any character on this install has already walked, not a blank map.
+    local shared = Learned.load();
+    local merged = Learned.merge(shared, vg.settings.learned);
+    graph.load_learned(merged);
+    vg.settings.learned = graph.save_learned();
+    local grew = false;
+    for k in pairs(vg.settings.learned) do if not shared[k] then grew = true; break; end end
+    if (grew) then Learned.save(vg.settings.learned); end
     Arrow.calibration = vg.settings.arrow.calibration or 1;
     Arrow.offset = vg.settings.arrow.offset or 0;
     -- A saved position wins over the default, which would have left every existing install
@@ -658,6 +670,26 @@ ashita.events.register('command', 'vg_command', function (e)
         return;
     end
 
+    -- `/vg dump graph` writes the learned crossings as a paste-ready block for
+    -- data/zonelines.lua, so a playthrough's map can be promoted into the shipped seed and a
+    -- fresh install starts with roads instead of a blank graph (docs/PATHWAYS.md #2).
+    if (sub == 'dump' and #args > 2 and args[3]:lower() == 'graph') then
+        local set = graph.save_learned() or {};
+        local n = #Learned.pairs_list(set);
+        if (n == 0) then
+            U.print('dump: nothing learned yet -- walk some zone lines first.');
+            return;
+        end
+        local path = Learned.dump(set, function (id) return U.zone_name(id); end);
+        if (path == nil) then
+            U.print('dump: could not write the file (is the game folder writable?).');
+        else
+            U.print(('dump: %d learned crossing%s written to %s'):format(n, n == 1 and '' or 's', path));
+            U.print('paste the Z.learned_walk pairs into data/zonelines.lua Z.walk to ship them.');
+        end
+        return;
+    end
+
     -- What the zone graph has learned from play, and whether it is learning at all. The
     -- graph records every crossing (docs/ROUTING.md) and until now nothing could read the
     -- result back, so "zone-line learning works" was an untested claim in the docs.
@@ -668,11 +700,11 @@ ashita.events.register('command', 'vg_command', function (e)
         -- times leaves the total unchanged and looks exactly like learning being broken.
         if (#args > 3) then
             local a, b = tonumber(args[3]), tonumber(args[4]);
-            local key = ('%d-%d'):format(math.min(a, b), math.max(a, b));
+            -- The graph stores crossings keyed "from:to" with a colon, both directions.
+            -- This query used to build "from-to" with a dash and so always reported "no".
             local set = graph.save_learned() or {};
-            U.print(('graph: %s learned = %s'):format(key,
-                (set[key] or set[('%d-%d'):format(a, b)] or set[('%d-%d'):format(b, a)])
-                and 'yes' or 'no'));
+            local yes = set[('%d:%d'):format(a, b)] or set[('%d:%d'):format(b, a)];
+            U.print(('graph: %d-%d learned = %s'):format(a, b, yes and 'yes' or 'no'));
             return;
         end
         -- `/vg graph suspect` lists the hand-written pairs the server's own zone line table
@@ -1107,7 +1139,7 @@ ashita.events.register('command', 'vg_command', function (e)
     end
 
     U.print('commands: guides, load <n>, next, back, skip, reset, route, goto <zone>, mark,');
-    U.print('          arrow, line, nav');
+    U.print('          arrow, line, nav, dump graph');
     U.print('lookups:  find <item>, gear <slot>, nm [name], track <n>');
 end);
 
@@ -1181,6 +1213,7 @@ ashita.events.register('d3d_present', 'vg_present', function ()
     if (w.zone ~= nil and w.zone ~= vg.last_zone) then
         if (vg.last_zone ~= nil and graph.learn(vg.last_zone, w.zone)) then
             vg.settings.learned = graph.save_learned();
+            Learned.save(vg.settings.learned);   -- shared across every character
             settings.save();
         end
         vg.last_zone = w.zone;
