@@ -166,6 +166,14 @@ def num(v, default=0):
         return default
 
 
+def fnum(v, default=0.0):
+    """A coordinate; private-server forks carry typos such as '0.-180' or NULL."""
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
 def pretty(name):
     return ' '.join(w.capitalize() if w.islower() else w for w in str(name).split('_'))
 
@@ -261,10 +269,14 @@ def collect(root, quests_path):
 
     # ---- items -----------------------------------------------------------------
     items = {}
-    for r in rows(os.path.join(sql, 'item_basic.sql'), 'item_basic'):
-        if len(r) < 8:
+    path = os.path.join(sql, 'item_basic.sql')
+    # Newer LandSandBoat added a name_jp column before `type`; older forks (CatsEyeXI,
+    # PegasusXI) lack it, which moves `flags` one column left.
+    fcol = 7 if '`name_jp`' in open(path, encoding='utf-8', errors='replace').read(4000) else 6
+    for r in rows(path, 'item_basic'):
+        if len(r) < fcol + 1:
             continue
-        iid, name, flags = num(r[0]), r[2], num(r[7])
+        iid, name, flags = num(r[0]), r[2], num(r[fcol])
         if iid == 0 or name in ('', '.'):
             continue
         items[iid] = {'name': pretty(name), 'flags': flags}
@@ -307,7 +319,7 @@ def collect(root, quests_path):
         spawns[gid] = {
             'name': pretty(r[3] or r[2]),
             'min': num(r[5]), 'max': num(r[6]),
-            'x': float(r[7] or 0), 'y': float(r[8] or 0), 'z': float(r[9] or 0),
+            'x': fnum(r[7]), 'y': fnum(r[8]), 'z': fnum(r[9]),
         }
 
     droplists = defaultdict(list)

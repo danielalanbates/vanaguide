@@ -62,7 +62,11 @@ def zone_settings(sql):
 
 def zone_enum(root):
     out = {}
-    for line in open(os.path.join(root, 'scripts/enum/zone.codegen.lua'), encoding='utf-8'):
+    # Newer LandSandBoat generates zone.codegen.lua; older forks (CatsEyeXI) keep zone.lua.
+    path = os.path.join(root, 'scripts/enum/zone.codegen.lua')
+    if not os.path.exists(path):
+        path = os.path.join(root, 'scripts/enum/zone.lua')
+    for line in open(path, encoding='utf-8'):
         m = re.match(r"\s*([A-Z][A-Z0-9_]*)\s*=\s*(\d+)", line)
         if m:
             out[m.group(1)] = int(m.group(2))

@@ -44,9 +44,6 @@ def guild_shops(root, folders):
     """{item id: [(npc, zone, price)]} from scripts/data/guild_shops.lua. The shop's zone is
     the folder its NPC script lives in."""
     path = os.path.join(root, 'scripts/data/guild_shops.lua')
-    if not os.path.exists(path):
-        return {}
-    enum = L.parse_item_enum(root)
     zid = {v: k for k, v in folders.items()}
     npc_zone = {}
     zdir = os.path.join(root, 'scripts/zones')
@@ -56,6 +53,9 @@ def guild_shops(root, folders):
             for f in os.listdir(nd):
                 npc_zone.setdefault(f[:-4], zid.get(folder))
     out = defaultdict(list)
+    if not os.path.exists(path):
+        return sql_guild_shops(root, zid, out)
+    enum = L.parse_item_enum(root)
     text = open(path, encoding='utf-8').read()
     for m in re.finditer(r"\['([^']+)'\]\s*=\s*\{(.*?)\n    \},", text, re.S):
         npc, body = m.group(1), m.group(2)
@@ -63,6 +63,30 @@ def guild_shops(root, folders):
         for k, price in re.findall(r"id\s*=\s*xi\.item\.(\w+).*?buyMax\s*=\s*(\d+)", body):
             if k in enum and zone is not None:
                 out[enum[k]].append((npc.replace('_', ' '), zone, int(price)))
+    return out
+
+
+def sql_guild_shops(root, zid, out):
+    """Older forks (CatsEyeXI) keep stock in sql/guild_shops.sql, keyed by a guild id that each
+    shop NPC's script passes to player:sendGuild(<id>, ...)."""
+    sql = os.path.join(root, 'sql/guild_shops.sql')
+    if not os.path.exists(sql):
+        return out
+    sellers = defaultdict(list)           # guild id -> [(npc, zone)]
+    zdir = os.path.join(root, 'scripts/zones')
+    for folder in os.listdir(zdir):
+        nd = os.path.join(zdir, folder, 'npcs')
+        if not os.path.isdir(nd) or zid.get(folder) is None:
+            continue
+        for f in os.listdir(nd):
+            if f.endswith('.lua'):
+                text = open(os.path.join(nd, f), encoding='utf-8', errors='replace').read()
+                for g in set(re.findall(r"sendGuild\(\s*(\d+)", text)):
+                    sellers[int(g)].append((f[:-4].replace('_', ' '), zid[folder]))
+    for r in L.rows(sql, 'guild_shops'):
+        if len(r) >= 4:
+            for npc, zone in sellers.get(L.num(r[0]), []):
+                out[L.num(r[1])].append((npc, zone, L.num(r[3])))
     return out
 
 
