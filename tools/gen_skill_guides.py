@@ -114,10 +114,9 @@ def craft_guides(sql, items, buy, zone_name):
                 lines.append('• %s (cap %d)%s: %s + %s'
                              % (name, lv, '' if other == 0 else ', also needs another craft at %d' % other,
                                 crystal, ', '.join(parts)))
-            steps.append(('%s %d–%d' % (craft, lo, lo + 10),
-                          'Synthesize one of these until it stops giving skill, then move on. Cheapest first. Merchant '
-                          'prices are fixed; guild shop prices are the most they charge.\n' + '\n'.join(lines)))
-        out.append((craft, 'Crafting', 'Recipes to level %s from 0, by level band.' % craft, steps))
+            steps.append(('%s %d–%d' % (craft, lo, lo + 10), '\n'.join(lines)))
+        out.append((craft, 'Crafting', 'In each band, synthesize one of these until it stops giving skill, then move '
+                    'on. Cheapest first. Merchant prices are fixed; guild shop prices are the most they charge.', steps))
     return out
 
 
@@ -153,9 +152,9 @@ def fishing_guide(sql, items, buy, zone_name):
         lines = ['• %s (skill %d) in %s, on %s'
                  % (n, sk, ', '.join(zone_name(z) for z in sorted(where[f])[:3]), bait_text(f))
                  for sk, n, f in band[:4]]
-        steps.append(('Fishing %d–%d' % (lo, lo + 10),
-                      'Fish for one of these. Skill rises fastest on fish a little above your level.\n' + '\n'.join(lines)))
-    return [('Fishing', 'Crafting', 'Where and what to fish, by skill band.', steps)]
+        steps.append(('Fishing %d–%d' % (lo, lo + 10), '\n'.join(lines)))
+    return [('Fishing', 'Crafting', 'In each band, fish for one of these: where they bite and the bait they take. '
+             'Skill rises fastest on fish a little above your skill.', steps)]
 
 
 def combat_guides(sql):
