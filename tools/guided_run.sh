@@ -21,7 +21,7 @@ guard(){ python3 "$GUARD" check "$GAME" || exit 1; }
 # Verify before creating results, clearing shared logs, taking screenshots or sending anything.
 guard
 A="$GAME/addons"; CMD="$A/cmdpipe/cmd.txt"; CHAT="$A/cmdpipe/chat.txt"
-NARR=/tmp/vanavoice/dialogue.jsonl
+NARR="${VG_NARR:-/tmp/vanavoice/dialogue.jsonl}"
 GUIDE="${1:?guide number}"; STEPS="${2:-5}"; OUT="${3:-$(cd "$(dirname "$0")/.." && pwd)/results/guided-$(date +%Y%m%d-%H%M)}"
 mkdir -p "$OUT"; MD="$OUT/RESULTS.md"
 say(){ python3 "$GUARD" send "$GAME" "$CMD" "$1" || exit 1; }
@@ -60,7 +60,8 @@ for ((i = 1; i <= STEPS; i++)); do
   shot "step$step-a-before"
   area=${key%%,*}; qid=${key##*,}
   # a clean slate for this quest, so the NPC offers it rather than remembering an earlier run
-  [[ -n "$area" && "$area" != "$qid" ]] && say "!delquest $area $qid"
+  # Two chat commands in one instant: the client sends only the first, so space them out.
+  [[ -n "$area" && "$area" != "$qid" ]] && { say "!delquest $area $qid"; sleep 2; }
   say "!pos $x ${y:-0} $z $zone"; sleep 22
   clear_logs "$CHAT"; say '/vg status'; sleep 3
   print -r -- "- after teleport: $(last 'step="' | sed 's/^step=.*mode=/mode=/')" >> "$MD"
