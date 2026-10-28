@@ -16,6 +16,8 @@ import argparse
 import os
 import re
 import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from gen_quests import POS_LINE, giver_name, load_zone_names  # noqa: E402
 from collections import defaultdict
 
 # LandSandBoat's log names -> the names core/story.lua uses for packet 0x056 areas.
@@ -70,10 +72,11 @@ def parse_mission(path, ids):
 
     npc = None
     for line in lines[:40]:
-        m2 = re.match(r"--\s*(.+?)\s*:\s*!pos\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(\d+)", line)
+        # Same header styles as the quest scripts; see gen_quests.POS_LINE.
+        m2 = POS_LINE.match(line)
         if m2:
-            npc = {'name': m2.group(1).strip(), 'x': float(m2.group(2)),
-                   'y': float(m2.group(3)), 'z': float(m2.group(4)), 'zone': int(m2.group(5))}
+            npc = {'name': giver_name(m2.group('head') or ''), 'x': float(m2.group('x')),
+                   'y': float(m2.group('y')), 'z': float(m2.group('z')), 'zone': int(m2.group('zone'))}
             break
 
     return {'area': area, 'id': mid, 'name': title, 'label': label, 'npc': npc}
@@ -89,6 +92,7 @@ def main():
     ap.add_argument('-o', '--out', default='Vanaguide/data/missions.lua')
     args = ap.parse_args()
 
+    load_zone_names(args.root)
     ids = parse_ids(args.root)
     missions, skipped = defaultdict(dict), 0
     for dirpath, _, files in os.walk(os.path.join(args.root, 'scripts/missions')):
@@ -132,8 +136,9 @@ local M = {}
                 if m['npc']:
                     n = m['npc']
                     bits += ['zone = %d' % n['zone'], 'x = %.1f' % n['x'],
-                             'z = %.1f' % n['z'], 'y = %.1f' % n['y'],
-                             'npc = %s' % lua_str(n['name'])]
+                             'z = %.1f' % n['z'], 'y = %.1f' % n['y']]
+                    if n['name']:
+                        bits.append('npc = %s' % lua_str(n['name']))
                 fh.write('        [%d] = { %s },\n' % (mid, ', '.join(bits)))
             fh.write('    },\n')
         fh.write('}\n\n')
