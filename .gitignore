@@ -17,3 +17,15 @@ accounts.json
 .dbpass
 *.dbpass
 *.personal.json
+
+# Local capture/test output, account settings and credentials.
+.env
+.env.*
+CREDENTIALS.md
+secrets.json
+retroachievements.json
+retroachievements-snapshots.json
+dialogue.jsonl
+__pycache__/
+*.pyc
+results/guided-*/

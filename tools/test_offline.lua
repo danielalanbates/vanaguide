@@ -174,6 +174,78 @@ for _, g in ipairs(G.list()) do
 end
 ok(shipped >= 3, 'at least three guides ship')
 
+-- ---- authored classic support-job routes ---------------------------------------
+-- Factual fixtures checked against pinned upstream scripts, not a running server.
+do
+    local qdb = require('data.quests')
+    local routes = {
+        { name = 'Support jobs', quest = 24, zone = 248, x = -54, z = -44,
+          npc = 'Isacio', items = { 538, 537, 539 } },
+        { name = 'Support jobs - Mhaura', quest = 10, zone = 249, x = -49, z = 20,
+          npc = 'Vera', items = { 542, 541, 540 } },
+    }
+    local old_current = story.quest.current.other
+    local old_completed = story.quest.completed.other
+    for _, route in ipairs(routes) do
+        local g = G.get(route.name)
+        ok(g ~= nil, route.name .. ' is registered by guides.init')
+        if g then
+            local accept, turnin, level, items, trades = nil, nil, nil, {}, {}
+            for _, s in ipairs(g.steps) do
+                if s.quest_accept then accept = s end
+                if s.quest then turnin = s end
+                if s.level then level = s end
+                if s.item then items[#items + 1] = s end
+                if s.fixed then trades[#trades + 1] = s end
+                ok(s.key_item == nil, route.name .. ' does not invent a key-item reward')
+            end
+            eq(level and level.level, 18, route.name .. ' uses the classic configured default level')
+            eq(accept and accept.quest_accept.area, 'other', route.name .. ' uses other-areas quest log')
+            eq(accept and accept.quest_accept.id, route.quest, route.name .. ' acceptance id')
+            eq(turnin and turnin.quest.id, route.quest, route.name .. ' completion id')
+            local db = qdb.quests.other[route.quest]
+            eq(db.npc, route.npc, route.name .. ' agrees with existing NPC data')
+            eq(accept.zone, db.zone, route.name .. ' agrees with existing zone data')
+            eq(accept.pos.x, db.x, route.name .. ' NPC horizontal x')
+            eq(accept.pos.z, db.z, route.name .. ' NPC horizontal z')
+            eq(#items, 3, route.name .. ' has exactly three collection objectives')
+            local held = {}
+            local w = { level = 17, zone = route.zone, x = route.x, z = route.z,
+                        item_count = function(id) return held[id] or 0 end, story = story }
+            ok(not C.done(level, w), route.name .. ' waits below level 18')
+            w.level = 18
+            ok(C.done(level, w), route.name .. ' level threshold completes')
+            eq(C.distance(accept, w), 0, route.name .. ' waypoint reaches the sourced NPC')
+            for i, item in ipairs(items) do
+                eq(item.item.id, route.items[i], route.name .. ' collection/trade order item ' .. i)
+                eq(item.item.count, 1, route.name .. ' asks for one item ' .. i)
+                ok(not C.done(item, w), route.name .. ' missing item waits ' .. i)
+                held[item.item.id] = 1
+                ok(C.done(item, w), route.name .. ' inventory confirms collection ' .. i)
+            end
+            eq(#trades, 2, route.name .. ' intermediate trades require manual confirmation')
+            for _, trade in ipairs(trades) do
+                ok(not C.done(trade, w), route.name .. ' proximity does not complete a trade')
+            end
+            story.on_packet(0x056, packet_0056(0x0070, {}), 48)
+            story.on_packet(0x056, packet_0056(0x00B0, {}), 48)
+            ok(not C.done(accept, w), route.name .. ' waits for quest acceptance')
+            story.on_packet(0x056, packet_0056(0x0070, { route.quest }), 48)
+            ok(C.done(accept, w), route.name .. ' accepted quest ticks acceptance')
+            ok(not C.done(turnin, w), route.name .. ' acceptance alone never ticks completion')
+            story.on_packet(0x056, packet_0056(0x00B0, { route.quest }), 48)
+            ok(C.done(turnin, w), route.name .. ' completed quest ticks final turn-in')
+        end
+    end
+    story.quest.current.other = old_current
+    story.quest.completed.other = old_completed
+    local starter_text = {}
+    for _, s in ipairs(G.get('Starting out').steps) do starter_text[#starter_text + 1] = s.text end
+    local starter = table.concat(starter_text, '\n')
+    ok(not starter:find('At 10 you can take the airship pass', 1, true), 'starter does not promise level-10 airship access')
+    ok(not starter:find("Adventurer's Certificate", 1, true), 'starter does not invent a guard certificate reward')
+end
+
 -- ---- a whole guide, played through ---------------------------------------------
 -- Walk the "Starting out" guide the way a player would and check it ends.
 P.set_guide(G.get('Starting out'))

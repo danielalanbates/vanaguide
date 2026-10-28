@@ -71,6 +71,41 @@ def parse_items(root):
     return out
 
 
+# Upstream script headers with a copy-pasted title (checked against scripts/globals/quests.lua).
+TITLE_FIXES = {
+    ('sandoria', 60): "The General's Secret",   # The_Generals_Secret.lua says "A Sentry's Peril"
+}
+
+POS_LINE = re.compile(r"--\s*(?P<head>.*?)\s*[:,\-]?\s*!pos[\s:]+(?P<x>-?[\d.]+)[\s,]+(?P<y>-?[\d.]+)"
+                      r"[\s,]+(?P<z>-?[\d.]+)[\s,]+(?P<zone>\d+)")
+ZONE_WORDS = set()   # normalized zone names, filled by load_zone_names()
+
+
+def squash(text):
+    return re.sub(r"[^a-z0-9]", "", text.lower())
+
+
+def load_zone_names(root):
+    """Zone names from sql/zone_settings.sql, so "Southern San'doria" is not taken for a person."""
+    path = os.path.join(root, 'sql/zone_settings.sql')
+    if os.path.exists(path):
+        # INSERT INTO `zone_settings` VALUES (1,2,'127.0.0.1',54230,'Phanauet_Channel',...)
+        for m in re.finditer(r"VALUES\s*\(\s*\d+\s*,\s*\d+\s*,\s*'[^']*'\s*,\s*\d+\s*,\s*'([^']+)'",
+                             open(path, encoding='utf-8').read()):
+            ZONE_WORDS.add(squash(m.group(1).replace('_', ' ')))
+    ZONE_WORDS.update(squash(z) for z in ("Southern San d'Oria", "Northern San d'Oria", "Port San d'Oria",
+                                          "Chateau d'Oraguille", "Sandoria", "San d'Oria"))
+
+
+def giver_name(head):
+    head = re.sub(r"!gotoid.*$", "", head)            # "Perih Vashai !gotoid 1776 /"
+    for part in re.split(r"\s+-\s+|\s*[:,/]\s*|\s{2,}", head):
+        part = re.sub(r"\s*\(.*$", "", part).strip(" -:,")  # "Tower (???)" -> "Tower"
+        if part and squash(part) not in ZONE_WORDS:
+            return part
+    return None
+
+
 def parse_quest(path, ids, key_items, item_ids):
     text = open(path, encoding='utf-8', errors='replace').read()
 
@@ -91,16 +126,21 @@ def parse_quest(path, ids, key_items, item_ids):
     lines = text.splitlines()
     title = lines[1].lstrip('- ').strip() if len(lines) > 1 else const.title()
 
-    # Header comments: "-- Balasiel : !pos -136 -11 64 230".  The first one is where the
-    # quest is taken, which is the only coordinate a guide can state without guessing.
+    # Header comments name where the quest is taken, which is the only coordinate a guide can
+    # state without guessing. Script authors write it several ways (2026-10-28 survey):
+    #   "-- Balasiel : !pos -136 -11 64 230"            (most)
+    #   "-- Glenne - Southern Sandoria, !pos -122 -2 15 230"
+    #   "-- Chateau d'Oraguille, Curilla,     !pos 27 0.1 0.1 233"
+    #   "-- Zalsuhm: !pos 1,2,3 50"   "-- Name !pos x y z zone"   "-- !pos x y z zone"
+    # The giver is the first part of the header that is not a zone name.
     npc = None
     for line in lines[:40]:
-        m = re.match(r"--\s*(.+?)\s*:\s*!pos\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(\d+)", line)
+        m = POS_LINE.match(line)
         if m:
             npc = {
-                'name': m.group(1).strip(),
-                'x': float(m.group(2)), 'y': float(m.group(3)), 'z': float(m.group(4)),
-                'zone': int(m.group(5)),
+                'name': giver_name(m.group('head') or ''),
+                'x': float(m.group('x')), 'y': float(m.group('y')), 'z': float(m.group('z')),
+                'zone': int(m.group('zone')),
             }
             break
 
@@ -139,7 +179,7 @@ def parse_quest(path, ids, key_items, item_ids):
     return {
         'area': AREA_LOG.get(id_area, id_area.lower()),
         'id': qid,
-        'name': title,
+        'name': TITLE_FIXES.get((AREA_LOG.get(id_area, id_area.lower()), qid), title),
         'npc': npc,
         'key_item': reward_ki,
         'items': reward_items,
@@ -158,6 +198,7 @@ def main():
     ap.add_argument('-o', '--out', default='Vanaguide/data/quests.lua')
     args = ap.parse_args()
 
+    load_zone_names(args.root)
     ids = parse_ids(args.root)
     key_items = parse_key_items(args.root)
     item_ids = parse_items(args.root)
@@ -210,7 +251,8 @@ local Q = {}
                     bits.append('x = %.1f' % n['x'])
                     bits.append('z = %.1f' % n['z'])
                     bits.append('y = %.1f' % n['y'])
-                    bits.append('npc = %s' % lua_str(n['name']))
+                    if n['name']:
+                        bits.append('npc = %s' % lua_str(n['name']))
                 if q['key_item']:
                     bits.append('ki = %d' % q['key_item'])
                 if q['level']:
