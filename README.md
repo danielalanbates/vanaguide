@@ -85,12 +85,20 @@ docs/         format, routing, packets, arrow calibration, verification, pathway
 ## Testing
 
 ```sh
-luajit tools/test_offline.lua      # 1239 assertions, no game required
+luajit tools/test_offline.lua      # 1336 assertions, no game required
+python3 -B tools/test_local_client_guard.py
+python3 -B tools/test_client.py
 ```
 
 The harness fakes Ashita's globals (`tools/stubs.lua`), so the parser, the completion
 conditions, the packet reader, the progress cursor and the router are all exercised without
 launching anything.
+
+The local gameplay harnesses now require one verified loopback client and refuse hosted or
+ambiguous sessions before commands or captures. Their offline fixtures also check safe
+shutdown/recovery failures. See [docs/LOCAL-TEST-GUARD.md](docs/LOCAL-TEST-GUARD.md).
+The authored Selbina and Mhaura support-job routes, source checkpoint and live-test limits
+are described in [docs/SUPPORT-JOBS.md](docs/SUPPORT-JOBS.md).
 
 ## Documentation
 

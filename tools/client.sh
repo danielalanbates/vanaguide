@@ -25,14 +25,25 @@
 set -eu
 
 GAME="${VG_GAME:-/Volumes/x10/Video Games/Mac/FFXI/siku.app/Contents/SharedSupport/prefix10/drive_c/HorizonXI}"
+GAME="${GAME:A}"
+# This launcher supports a game folder directly inside the prefix's C: drive. Derive every
+# path from that same folder; an isolated test copy need not be named HorizonXI.
+[[ "${GAME:h:t}" == drive_c && "${GAME:t}" != *\\* && "${GAME:t}" != *:* \
+   && "$GAME" != *$'\n'* && "$GAME" != *$'\r'* ]] \
+  || { print -u2 'Local test refused: use a game folder directly inside a Wine drive_c.'; exit 1; }
+GUARD="${${(%):-%N}:A:h}/local_client_guard.py"
+guard(){ python3 "$GUARD" "$1" "$GAME" || exit 1; }
+probe_idle(){ python3 "$GUARD" idle "$GAME"; }
+send(){ python3 "$GUARD" send "$GAME" "$CMD" "$1" || exit 1; }
 PREFIX="${GAME:h:h}"
+WINDOWS_GAME="C:\\${GAME:t}"
 WRAP="${VG_WRAP:-/Volumes/x10/Video Games/Mac/FFXI/siku.app}"
 WINE="${VG_WINE:-/Volumes/Games/FFXI/wine-coop/wine/bin/wine}"
 CMD="$GAME/addons/Vanaguide/cmd.txt"
 DB_PASS_FILE="${VG_DBPASS:-$HOME/Games/lsb/.dbpass}"
-LOCAL_HOST="${VG_LOCAL_HOST:-127.0.0.1}"   # how the local world's client is recognised
 SAFE_ZONE="${VG_SAFE_ZONE:-230}"          # Southern San d'Oria
 CHARID="${VG_CHARID:-1}"
+[[ "$SAFE_ZONE" == <-> && "$CHARID" == <-> ]] || { print -u2 'Local test refused: numeric zone and character ids required.'; exit 1; }
 
 # XIPivot's overlay list is one file for the whole install, not one per boot profile, so the
 # local world and HorizonXI cannot both have their own branding at rest -- whichever ran last
@@ -43,7 +54,7 @@ CHARID="${VG_CHARID:-1}"
 # way down.  `stockbrand` has to sit at index 0 because XIPivot resolves ties by the LOWEST
 # number (config/pivot/pivot.sample.ini), and the logo it is beating -- menu/titlwin in
 # ROM/119/50.dat -- is inside the horizonoverrides overlay.
-PIVOT="$PREFIX/drive_c/HorizonXI/config/pivot"
+PIVOT="$GAME/config/pivot"
 
 # The shared install has ONE XIPivot overlay list and ONE Ashita pointer file, and both are
 # read at client start-up. So swapping either while somebody else's client is live is fine --
@@ -53,15 +64,6 @@ PIVOT="$PREFIX/drive_c/HorizonXI/config/pivot"
 # overlays swapped to stock, and his game came up wearing the generic LandSandBoat title logo
 # instead of HORIZON XI. Refusing to swap while another world's client is running does not fix
 # that case on its own, so `stop` puts things back immediately rather than at some later point.
-another_world_running() {
-  local pids; pids=$(pgrep -f 'horizon-loader\.exe' 2>/dev/null || true)
-  local pid
-  for pid in ${=pids}; do
-    ps -o args= -p "$pid" 2>/dev/null | grep -q -- "--server ${LOCAL_HOST}" || return 0
-  done
-  return 1
-}
-
 # custom.pointers.ini repairs signatures Ashita cannot resolve on this client build, which is
 # what makes packet injection work. It is installed only while the local world is running.
 #
@@ -69,10 +71,11 @@ another_world_running() {
 # profile, so leaving it there changes how every addon behaves on a live server -- addons that
 # had been silently unable to send packets suddenly could. That is a change to Daniel's live
 # account that he did not ask for, made by a test harness, and it is not this script's call.
-POINTERS="$PREFIX/drive_c/HorizonXI/config/ashita/custom.pointers.ini"
+POINTERS="$GAME/config/ashita/custom.pointers.ini"
 POINTERS_SRC="${VG_POINTERS:-$HOME/Library/Mobile Documents/com~apple~CloudDocs/Code/HorizonXI-on-Mac/patches/ashita/custom.pointers.ini}"
 
 use_pointers() {
+  guard idle
   local which="$1"     # on | off
   if [[ "$which" == on ]]; then
     [[ -f "$POINTERS_SRC" ]] && cp "$POINTERS_SRC" "$POINTERS" && print -r -- "==> signature patch: on"
@@ -82,6 +85,7 @@ use_pointers() {
 }
 
 use_pivot() {
+  guard idle
   local which="$1"     # stock | horizon
   [[ -f "$PIVOT/pivot.ini.$which" ]] || { print -r -- "no pivot.ini.$which"; return 0; }
   cp "$PIVOT/pivot.ini.$which" "$PIVOT/pivot.ini"
@@ -89,12 +93,12 @@ use_pivot() {
 }
 
 start() {
-  if another_world_running; then
-    print -r -- "==> another world's client is running; leaving its branding and pointers alone"
-  else
-    use_pivot stock
-    use_pointers on
-  fi
+  # Refuse before modifying the shared install. A running local client also blocks a duplicate.
+  # Merely leaving branding alone while continuing to launch was not a safe refusal.
+  guard start
+  use_pivot stock
+  use_pointers on
+  guard start
   cd "$GAME"
   env -i HOME="$HOME" USER="$USER" PATH=/usr/bin:/bin:/usr/sbin:/sbin SHELL=/bin/zsh \
     WINEPREFIX="$PREFIX" \
@@ -103,7 +107,7 @@ start() {
     WINEMSYNC=0 WINEESYNC=0 WINE_LARGE_ADDRESS_AWARE=1 LSAppNapIsDisabled=1 \
     MVK_CONFIG_FAST_MATH_ENABLED=1 MVK_CONFIG_USE_COMMAND_POOLING=1 \
     MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS=1 FFXI_FPS_DIVISOR=1 D3D9_RT_READBACK_FENCE=32 \
-    nohup "$WINE" 'C:\HorizonXI\Ashita-cli.exe' lsb.ini > /tmp/vanaguide-client.log 2>&1 &
+    nohup "$WINE" "$WINDOWS_GAME\\Ashita-cli.exe" lsb.ini > /tmp/vanaguide-client.log 2>&1 &
   disown
   print -r -- "==> launched; waiting for the title screen"
   sleep 100
@@ -111,12 +115,12 @@ start() {
   # autologin 0`. That is the only way to enable it: the addon registers no command, so
   # `/autologin 0` is silently ignored and the client waits on the licence screen forever.
   # Re-sent here anyway, because a boot script line can lose the race with Addons.dll.
-  print -r -- '/addon load autologin 0' > "$CMD"; sleep 45
+  send '/addon load autologin 0'; sleep 45
   # GM hide is what stops the sweep dying: `setGMHidden` takes the character out of every
   # mob's aggro check, and the `GMHidden` charVar survives zoning, so it holds for the whole
   # run. It is a toggle, so ask before setting it -- issuing it twice turns it back off.
-  print -r -- '!hide status' > "$CMD"; sleep 3
-  if ! hidden; then print -r -- '!hide' > "$CMD"; sleep 3; fi
+  send '!hide status'; sleep 3
+  ensure_hidden || return 1
   print -r -- "==> should be in-world, GM hidden"
 }
 
@@ -127,20 +131,19 @@ start() {
 # nothing to do with it. One client per world is the point of the launcher, so a test harness
 # that cannot tell them apart has no business killing anything.
 #
-# They are told apart by the address they were launched against: the local world's client is
-# the one whose command line carries `--server 127.0.0.1`. Anything else is somebody's game.
+# The guard also verifies the install folder and refuses any additional or ambiguous client.
+# A clean /shutdown is the only stop action: never send a signal to a game client.
 stop() {
-  local pids
-  pids=$(pgrep -f 'horizon-loader\.exe' 2>/dev/null || true)
-  local killed=0
-  for pid in ${=pids}; do
-    if ps -o args= -p "$pid" 2>/dev/null | grep -q -- "--server ${LOCAL_HOST}"; then
-      kill "$pid" 2>/dev/null && killed=$((killed + 1))
-    else
-      print -r -- "==> leaving pid $pid alone: it is not the local world"
-    fi
-  done
-  (( killed > 0 )) && sleep 3
+  if ! probe_idle >/dev/null 2>&1; then
+    guard check
+    send '/shutdown'
+    local i
+    for i in {1..30}; do
+      sleep 2
+      probe_idle >/dev/null 2>&1 && break
+    done
+    probe_idle || { print -u2 'Local test refused: the client did not finish /shutdown; nothing was killed.'; return 1; }
+  fi
   use_pointers off
   # Leave the install as HorizonXI expects to find it: this is a shared client.
   use_pivot horizon
@@ -148,36 +151,52 @@ stop() {
 
 # The GMHidden charVar is the only readable record of the hide state; the client never says
 # so anywhere a script can see.
-hidden() {
-  local v; v=$(sql "select value from char_vars where charid=$CHARID and varname='GMHidden';")
-  [[ "$v" == *1* ]]
+ensure_hidden() {
+  local v
+  v=$(sql "select value from char_vars where charid=$CHARID and varname='GMHidden';") || return 1
+  case "$v" in
+    1) return 0 ;;
+    0|'') send '!hide'; sleep 3 ;;
+    *) print -u2 'Local test refused: the GM hide state could not be verified.'; return 1 ;;
+  esac
 }
 
 sql() {
-  local pass; pass=$(cat "$DB_PASS_FILE")
-  /opt/homebrew/opt/mariadb/bin/mariadb -N -B -u xiuser -p"$pass" xidb -e "$1" 2>/dev/null
+  guard safe
+  local pass; pass=$(cat "$DB_PASS_FILE") || return 1
+  # Keep credentials out of process arguments; force the connection to this Mac.
+  MYSQL_PWD="$pass" /opt/homebrew/opt/mariadb/bin/mariadb --protocol=tcp --host=127.0.0.1 -N -B -u xiuser xidb -e "$1" 2>/dev/null \
+    || { print -u2 'Local test refused: the local database query failed.'; return 1; }
 }
 
 rescue() {
-  stop
+  stop || return 1
   # Wait for the map server to let go of the character. It writes hp, mp and the death
   # timestamp back out when the session closes, so a revive done too early is silently
   # overwritten by the corpse -- which looks exactly like the revive not working.
-  local i=0
-  while (( i < 40 )) && [[ -n "$(sql "select 1 from accounts_sessions where charid=$CHARID;")" ]]; do
-    sleep 2; (( i += 1 ))
+  local i session
+  for i in {1..40}; do
+    session=$(sql "select 1 from accounts_sessions where charid=$CHARID;") || return 1
+    [[ -z "$session" ]] && break
+    sleep 2
   done
+  [[ -z "$session" ]] \
+    || { print -u2 'Local test refused: the local server still holds the character session.'; return 1; }
+  guard idle
   # Revive first. A KO'd character refuses every GM command, so moving it without reviving it
   # leaves the sweep exactly as wedged as it was.
-  sql "update char_stats set hp=1000, mp=1000, death=0 where charid=$CHARID;"
-  sql "update chars set pos_zone=$SAFE_ZONE, pos_x=-136, pos_y=-11, pos_z=64 where charid=$CHARID;"
+  sql "update char_stats set hp=1000, mp=1000, death=0 where charid=$CHARID;" || return 1
+  sql "update chars set pos_zone=$SAFE_ZONE, pos_x=-136, pos_y=-11, pos_z=64 where charid=$CHARID;" || return 1
   print -r -- "==> character revived and put back in zone $SAFE_ZONE"
   start
 }
 
-case "${1:-}" in
-  start)  start ;;
-  stop)   stop ;;
-  rescue) rescue ;;
-  *) print -r -- "usage: $0 start|stop|rescue"; exit 2 ;;
-esac
+# Sourcing exposes functions for offline fixtures; direct execution is the only dispatch.
+if [[ "$ZSH_EVAL_CONTEXT" == toplevel ]]; then
+  case "${1:-}" in
+    start)  start ;;
+    stop)   stop ;;
+    rescue) rescue ;;
+    *) print -r -- "usage: $0 start|stop|rescue"; exit 2 ;;
+  esac
+fi

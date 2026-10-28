@@ -16,10 +16,11 @@ G.register({
     steps = [[
 N Welcome. Tick a step off with Done, or let the game tick it for you.|N|Steps that the server can confirm complete themselves.|
 t Talk to your nation's Gate Guard and take Signet before leaving town.|N|Signet is what makes low-level fighting outside worth doing.|
-t Ask the Gate Guard for the Adventurer's Certificate and your first national mission.|
+t Ask a mission guard about your first national mission.|N|The opening mission and guard depend on your nation. Check the mission menu after accepting.|
 C Reach level 5 in your starting job.|LV|5|
 t Buy a weapon you can actually skill up, and food if you can afford it.|
 C Reach level 10.|LV|10|
-N At 10 you can take the airship pass quests and start moving between cities.|
+N Level 10 does not automatically grant an airship pass.|N|Continue your nation's missions and plan travel according to the transport access you actually have.|
+N At level 18, the classic support-job quests are offered in Selbina and Mhaura.|N|Load Support jobs for Isacio in Selbina, or Support jobs - Mhaura for Vera. Choose one route.|
 ]],
 })
