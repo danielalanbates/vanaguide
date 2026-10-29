@@ -17,8 +17,8 @@ class ClientTests(unittest.TestCase):
         self.game = Path(self.directory.name) / "prefix/drive_c/Local World"
         self.game.mkdir(parents=True)
 
-    def run_fixture(self, body, *, game=None):
-        environment = dict(os.environ, VG_GAME=str(game or self.game),
+    def run_fixture(self, body, *, game=None, port="3306"):
+        environment = dict(os.environ, VG_DBPORT=port, VG_GAME=str(game or self.game),
                            VG_CLIENT_SCRIPT=str(Path(__file__).with_name("client.sh").resolve()))
         return subprocess.run(["/bin/zsh", "-fc", '''
 source "$VG_CLIENT_SCRIPT"
@@ -28,6 +28,32 @@ sleep(){ :; }
 send(){ print -r -- "SENT:$1"; }
 start(){ print -r -- STARTED; }
 ''' + body], env=environment, text=True, capture_output=True, timeout=5)
+
+    def test_private_database_port_is_validated_before_actions(self):
+        for port in ["1", "3306", "47949", "65535"]:
+            result = self.run_fixture('print -r -- "$DB_PORT"', port=port)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), port)
+        for port in ["0", "65536", "-1", "remote", "3306;touch nope", "999999999999999999999"]:
+            result = self.run_fixture('print UNEXPECTED', port=port)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertNotIn("UNEXPECTED", result.stdout)
+            self.assertIn("database port", result.stderr)
+
+    def test_sql_passes_private_port_to_loopback_client(self):
+        password = Path(self.directory.name) / "fixture-password"
+        password.write_text("fixture-only")
+        result = self.run_fixture('''
+DB_PASS_FILE="${VG_GAME:h:h:h}/fixture-password"
+function /opt/homebrew/opt/mariadb/bin/mariadb() {
+    printf '%s\\n' "$@"
+}
+sql 'select 1;'
+''', port="47949")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--host=127.0.0.1", result.stdout.splitlines())
+        self.assertIn("--port=47949", result.stdout.splitlines())
+        self.assertNotIn("fixture-only", result.stdout)
 
     def test_isolated_install_paths_follow_game_folder(self):
         result = self.run_fixture('printf "%s\\n" "$PIVOT" "$POINTERS" "$WINDOWS_GAME"')
