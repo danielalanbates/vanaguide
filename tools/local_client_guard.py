@@ -30,6 +30,7 @@ class Process:
 
 LOADERS = {"horizon-loader.exe", "xiloader.exe", "gxiloader.exe", "catseye-loader.exe", "pol.exe"}
 INJECTORS = {"ashita-cli.exe", "injector.exe"}
+CARRIERS = {"x87sidecar-coop", "x87sidecar_entitled", "x87sidecar"}
 WINE = {"wine", "wine64", "wine-preloader", "wine64-preloader"}
 SYSTEM = {"services.exe", "explorer.exe", "winedevice.exe", "plugplay.exe", "svchost.exe",
           "rpcss.exe", "tabtip.exe", "conhost.exe", "start.exe", "winemenubuilder.exe",
@@ -58,6 +59,12 @@ def explicit_loopback(arguments: str) -> bool:
 def game_kind(process: Process) -> str | None:
     """Recognize executable identity, never a shell/grep merely mentioning a loader."""
     name = basename(process.executable)
+    if name in CARRIERS:
+        # Cooperative carriers can remain visible before a separate Wine loader appears.
+        # Their embedded command is not enough evidence to bind command delivery to a client.
+        if "--cooperative" in process.arguments or re.search(r"(?i)\.exe(?:[\s\"']|$)", process.arguments):
+            return "ambiguous"
+        return None  # standalone help/probe tools do not launch a game
     if name in LOADERS:
         return "loader"
     if name in INJECTORS:
@@ -133,12 +140,12 @@ def inventory() -> list[Process]:
     result = []
     for pid, name in names.items():
         # A loader/injector that vanished between the two snapshots is uncertainty, not idle.
-        if pid not in args and (basename(name).endswith(".exe") or basename(name) in WINE):
+        if pid not in args and (basename(name).endswith(".exe") or basename(name) in WINE | CARRIERS):
             raise Refused("a game process changed during verification")
         if pid in args:
             result.append(Process(pid, name, args[pid]))
     # A newly started process is equally unsafe. Let a subsequent explicit invocation retry.
-    if any(pid not in names and re.search(r"(?i)\.exe(?:\s|$)|(?:^|/)wine(?:64)?(?:\s|$)", arguments)
+    if any(pid not in names and re.search(r"(?i)\.exe(?:\s|$)|(?:^|/)(?:wine(?:64)?|x87sidecar(?:-coop|_entitled)?)(?:\s|$)", arguments)
            for pid, arguments in args.items()):
         raise Refused("a process started during verification; try again when idle")
     return result

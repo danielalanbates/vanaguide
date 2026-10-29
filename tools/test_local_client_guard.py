@@ -49,6 +49,22 @@ class LocalClientGuardTests(unittest.TestCase):
             with self.assertRaises(guard.Refused):
                 self.allow([MAP] + clients)
 
+    def test_carried_launches_never_count_as_idle_or_bound_clients(self):
+        for name in ["x87sidecar-coop", "x87sidecar_entitled", "x87sidecar"]:
+            carrier = P(40, "/fixture/" + name,
+                        name + " --cooperative wine horizon-loader.exe --server remote --pass private")
+            for clients in [[carrier], [LOCAL, carrier]]:
+                for mode in [{}, {"require_client": False}, {"require_idle": True}]:
+                    with self.subTest(name=name, mode=mode), self.assertRaises(guard.Refused):
+                        self.allow([MAP] + clients, **mode)
+
+    def test_carrier_changes_between_snapshots_are_refused(self):
+        for names, args in [
+            ("10 /fixture/xi_map\n40 /fixture/x87sidecar-coop\n", "10 xi_map\n"),
+            ("10 /fixture/xi_map\n", "10 xi_map\n40 /fixture/x87sidecar-coop --cooperative wine loader.exe\n")]:
+            with patch.object(guard, "read_command", side_effect=[names, args]):
+                with self.assertRaises(guard.Refused): guard.inventory()
+
     def test_local_map_required_even_if_loader_is_local(self):
         with self.assertRaises(guard.Refused):
             self.allow([LOCAL])
