@@ -41,6 +41,9 @@ WRAP="${VG_WRAP:-/Volumes/x10/Video Games/Mac/FFXI/siku.app}"
 WINE="${VG_WINE:-/Volumes/Games/FFXI/wine-coop/wine/bin/wine}"
 CMD="$GAME/addons/Vanaguide/cmd.txt"
 DB_PASS_FILE="${VG_DBPASS:-$HOME/Games/lsb/.dbpass}"
+DB_PORT="${VG_DBPORT:-3306}"
+[[ "$DB_PORT" == <-> && ${#DB_PORT} -le 5 ]] && (( DB_PORT >= 1 && DB_PORT <= 65535 )) \
+  || { print -u2 'Local test refused: database port must be between 1 and 65535.'; exit 1; }
 SAFE_ZONE="${VG_SAFE_ZONE:-230}"          # Southern San d'Oria
 CHARID="${VG_CHARID:-1}"
 [[ "$SAFE_ZONE" == <-> && "$CHARID" == <-> ]] || { print -u2 'Local test refused: numeric zone and character ids required.'; exit 1; }
@@ -165,7 +168,7 @@ sql() {
   guard safe
   local pass; pass=$(cat "$DB_PASS_FILE") || return 1
   # Keep credentials out of process arguments; force the connection to this Mac.
-  MYSQL_PWD="$pass" /opt/homebrew/opt/mariadb/bin/mariadb --protocol=tcp --host=127.0.0.1 -N -B -u xiuser xidb -e "$1" 2>/dev/null \
+  MYSQL_PWD="$pass" /opt/homebrew/opt/mariadb/bin/mariadb --protocol=tcp --host=127.0.0.1 --port="$DB_PORT" -N -B -u xiuser xidb -e "$1" 2>/dev/null \
     || { print -u2 'Local test refused: the local database query failed.'; return 1; }
 }
 
