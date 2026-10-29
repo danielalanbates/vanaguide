@@ -33,6 +33,9 @@ separate reviewed edit. Names, known locations and conflicting suggestions are n
 - `luajit tools/test_offline.lua`: 1,240 assertions pass, zero failures, on the PR #22 base.
   This count is for this branch; the newer gear branch has additional assertions.
 - `actionlint` passes the workflow (shellcheck/pyflakes integrations disabled).
+- GitHub Actions validation also passed on [PR #24](https://github.com/danielalanbates/vanaguide/pull/24)
+  ([run](https://github.com/danielalanbates/vanaguide/actions/runs/40805631146)); the proposal
+  job correctly skipped for the PR event.
 - Running the importer on the actual folder reports zero proposals and leaves data unchanged.
 - No game app, hosted server, user character or installed addon was used for these checks.
 
