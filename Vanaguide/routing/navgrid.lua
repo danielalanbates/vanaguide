@@ -377,8 +377,15 @@ local function line_of_sight(g, x0, z0, x1, z1, y)
         y = height_at(g, x0, z0, l)
         if x0 == x1 and z0 == z1 then return true end
         local e2 = err * 2
-        if e2 > -dz then err = err - dz; x0 = x0 + sx end
-        if e2 < dx then err = err + dx; z0 = z0 + sz end
+        local move_x, move_z = e2 > -dz, e2 < dx
+        -- Smoothing must preserve the search's corner rule. Checking only the
+        -- diagonal destination can erase a valid detour around a blocked side cell.
+        if move_x and move_z then
+            if step_onto(g, x0 + sx, z0, y) == nil
+               or step_onto(g, x0, z0 + sz, y) == nil then return false end
+        end
+        if move_x then err = err - dz; x0 = x0 + sx end
+        if move_z then err = err + dx; z0 = z0 + sz end
     end
 end
 
