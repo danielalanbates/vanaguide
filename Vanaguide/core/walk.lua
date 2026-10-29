@@ -65,6 +65,7 @@ local W = {
     -- and what every walking bot on that side is built on.  Tried after 'server' shipped;
     -- measured below in docs/WALK.md.
     mode = 'follow',
+    server_nudges = true, -- local test recovery; disable for an unassisted walking check
     tick = 0.25,        -- seconds between server steps in 'server' mode
     last_tick = nil,
 }
@@ -99,6 +100,16 @@ function W.stop(reason)
         end
     end
     W.active, W.last, W.last_wp, W.last_tick = false, nil, nil, nil
+end
+
+--- Explicit cancellation also ends pending automatic crossings and their event override.
+function W.cancel(state, event)
+    W.stop('stopped')
+    state.walk_auto, state.walk_wait, state.walk_back = false, nil, false
+    if state.walk_event_auto_was ~= nil then
+        event.auto = state.walk_event_auto_was
+        state.walk_event_auto_was = nil
+    end
 end
 
 --- Point the client's auto-run at a direction (a displacement in addon axes), or stop it.
@@ -265,7 +276,7 @@ function W.update(w)
         -- few yalms along the path (`!walkto`, as 'server' mode does for the whole way),
         -- and the runner takes over again.  Never fires on a hosted world: nothing there
         -- answers `!walkto`, and Walk.start is gated behind /vg walk allow anyway.
-        if stuck and (W.last_tick == nil or now - W.last_tick > 3) then
+        if W.server_nudges and stuck and (W.last_tick == nil or now - W.last_tick > 3) then
             local ax, az, ay = nx, nz, ny
             if points ~= nil and #points >= 2 then
                 local i = Path.nearest_index(points, w.x, w.z, w.y)
@@ -315,6 +326,7 @@ function W.status()
                     ((W.nudges or 0) > 0) and (', ' .. W.nudges .. ' server nudges') or '')
     end
     return 'walk: idle' .. (W.reason and (' (' .. W.reason .. ')') or '')
+        .. (((W.nudges or 0) > 0) and (', ' .. W.nudges .. ' server nudges') or '')
 end
 
 return W

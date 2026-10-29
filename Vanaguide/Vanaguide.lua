@@ -534,8 +534,8 @@ ashita.events.register('command', 'vg_command', function (e)
             if (ok and Qd.quests and Qd.quests[key.area]) then q = Qd.quests[key.area][key.id]; end
         end
         local npc = (q and q.npc) or (step.note or ''):match('Ask ([^.]+)%.') or (step.note or ''):match('Starts with ([^.]+)%.') or '';
-        U.print(('target: step=%d zone=%s x=%s y=%s z=%s npc=%s key=%s,%s name=%s')
-            :format(P.index, tostring(step.zone or (q and q.zone) or ''),
+        U.print(('target: step=%d accept=%s zone=%s x=%s y=%s z=%s npc=%s key=%s,%s name=%s')
+            :format(P.index, tostring(step.quest_accept ~= nil), tostring(step.zone or (q and q.zone) or ''),
                     q and q.x or (step.pos and step.pos.x) or '', q and q.y or '',
                     q and q.z or (step.pos and step.pos.z) or '', npc,
                     key and key.area or '', key and key.id or '', step.text or ''));
@@ -798,11 +798,20 @@ ashita.events.register('command', 'vg_command', function (e)
     if (sub == 'walk') then
         local what = (#args > 2) and args[3]:lower() or '';
         if (what == 'stop' or what == 'off') then
-            Walk.stop('stopped');
+            Walk.cancel(vg, event);
             U.print(Walk.status());
             return;
         end
         if (what == 'status') then U.print(Walk.status()); return; end
+        if (what == 'nudges' and #args > 3) then
+            local setting = args[4]:lower();
+            if (setting ~= 'on' and setting ~= 'off') then
+                U.print('walk nudges: use on or off'); return;
+            end
+            Walk.server_nudges = (setting == 'on');
+            U.print('walk server nudges ' .. setting);
+            return;
+        end
         if (what == 'mode' and #args > 3) then
             Walk.mode = args[4]:lower();
             U.print('walk mode ' .. Walk.mode);

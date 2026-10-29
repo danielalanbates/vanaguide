@@ -9,6 +9,8 @@
 # lines included -- and the harness waits for "walk: arrived" before talking to the NPC.
 # Steps further away than WALK_MAX yalms of route (default 900) are teleported, so a run
 # does not spend ten minutes crossing Ronfaure; say so in RESULTS.md.
+# WALK_STRICT=1 instead verifies authored QA acceptance steps without teleports, server
+# nudges, skips or forced quest completion. A timeout or unadvanced step fails the run.
 #
 # Never run this against a hosted server. It sends GM commands and injects packets.
 #
@@ -20,7 +22,9 @@ guard(){ python3 "$GUARD" check "$GAME" || exit 1; }
 # Verify before creating results, clearing shared logs, taking screenshots or sending anything.
 guard
 A="$GAME/addons"; CMD="$A/cmdpipe/cmd.txt"; CHAT="$A/cmdpipe/chat.txt"
-NARR=/tmp/vanavoice/dialogue.jsonl
+NARR="${VG_NARR:-/tmp/vanavoice/dialogue.jsonl}"
+WALK_STRICT="${WALK_STRICT:-0}"
+[[ "$WALK_STRICT" == 0 || "$WALK_STRICT" == 1 ]] || { print -u2 'WALK_STRICT must be 0 or 1'; exit 1; }
 GUIDE="${1:?guide number}"; STEPS="${2:-5}"; OUT="${3:-$(cd "$(dirname "$0")/.." && pwd)/results/guided-$(date +%Y%m%d-%H%M)}"
 mkdir -p "$OUT"; MD="$OUT/RESULTS.md"
 say(){ python3 "$GUARD" send "$GAME" "$CMD" "$1" || exit 1; }
@@ -38,7 +42,16 @@ print -r -- "# Guided run -- guide $GUIDE, $STEPS steps, $(date '+%Y-%m-%d %H:%M
 print -r -- "" >> "$MD"
 WALK_MAX="${WALK_MAX:-900}"; WALK_TIMEOUT="${WALK_TIMEOUT:-420}"
 say '/vg kick !where'; say '/vg release auto 2'; say '/vg server off'; say '/vg chatlog on'; say '!release'; sleep 3
-say "!exec xi.commands.walkto=dofile('scripts/commands/walkto.lua')"; say '/vg walk allow'; sleep 2
+if (( WALK_STRICT )); then
+  say '/vg walk mode follow'; sleep 2
+  clear_logs "$CHAT"
+  say '/vg walk nudges off'; sleep 2
+  [[ -n "$(last 'walk server nudges off')" ]] || { print -u2 'Guide did not confirm unassisted walking'; exit 1; }
+  print -r -- '- Strict acceptance run: no teleport, server nudge, skip or forced completion.' >> "$MD"
+else
+  say "!exec xi.commands.walkto=dofile('scripts/commands/walkto.lua')"; sleep 2
+fi
+say '/vg walk allow'; sleep 2
 say "/vg load $GUIDE"; sleep 3
 print -r -- "Loaded: $(last 'loaded "')" >> "$MD"; print -r -- "" >> "$MD"
 
@@ -49,9 +62,15 @@ for ((i = 1; i <= STEPS; i++)); do
   T=$(last 'target:'); zone=$(field "$T" zone); x=$(field "$T" x); y=$(field "$T" y); z=$(field "$T" z)
   npc=$(print -r -- "$T" | sed -n 's/.* npc=\(.*\) key=.*/\1/p'); key=$(field "$T" key); name=$(print -r -- "$T" | sed -n 's/.* name=//p')
   step=$(field "$T" step)
+  if (( WALK_STRICT )) && [[ "$(field "$T" accept)" != true ]]; then
+    print -r -- '- FAILED: strict runs require an authored QA acceptance step.' >> "$MD"; exit 1
+  fi
   print -r -- "## Step $step: $name" >> "$MD"
   print -r -- "- target: zone=$zone pos=($x, $y, $z) npc=\"$npc\" quest=$key" >> "$MD"
   if [[ -z "$x" || -z "$zone" ]]; then
+    if (( WALK_STRICT )); then
+      print -r -- '- FAILED: target has no recorded location; no step was skipped.' >> "$MD"; exit 1
+    fi
     print -r -- "- **no location recorded** -- skipped with /vg skip" >> "$MD"; print -r -- "" >> "$MD"
     say '/vg skip'; sleep 2; continue
   fi
@@ -61,7 +80,9 @@ for ((i = 1; i <= STEPS; i++)); do
   shot "step$step-a-before"
   area=${key%%,*}; qid=${key##*,}
   # a clean slate for this quest, so the NPC offers it rather than remembering an earlier run
-  [[ -n "$area" && "$area" != "$qid" ]] && say "!delquest $area $qid"
+  if (( ! WALK_STRICT )) && [[ -n "$area" && "$area" != "$qid" ]]; then
+    say "!delquest $area $qid"; sleep 2
+  fi
   # Walk there.  The step's own zone may be several zones away; /vg walk auto follows the
   # travel legs and crosses zone lines by itself.  Arrival at the NPC prints "walk: arrived".
   clear_logs "$CHAT"; say '/vg walk auto'; t0=$(date +%s); arrived=0
@@ -74,6 +95,10 @@ for ((i = 1; i <= STEPS; i++)); do
     if /usr/bin/grep -a -q 'walk: idle (stuck' "$CHAT"; then break; fi
   done
   if (( arrived == 0 )); then
+    if (( WALK_STRICT )); then
+      say '/vg walk stop'
+      print -r -- "- FAILED: walking did not arrive in ${WALK_TIMEOUT}s; no teleport was used." >> "$MD"; exit 1
+    fi
     print -r -- "- walk did not arrive in ${WALK_TIMEOUT}s ($(last 'walk:')) -- teleporting" >> "$MD"
     say '/vg walk stop'; say "!pos $x ${y:-0} $z $zone"; sleep 22
   else
@@ -95,15 +120,32 @@ for ((i = 1; i <= STEPS; i++)); do
   lines=$(/usr/bin/grep -a -c "^\[6[0-9]*\] " "$CHAT"); said=$(/usr/bin/grep -a "^\[6[0-9]*\] " "$CHAT" | head -1 | cut -c1-200)
   narr=$(/usr/bin/grep -a -c speaker "$NARR" 2>/dev/null); narr=${narr:-0}
   print -r -- "- NPC said ($lines chat lines, $narr narrator lines): $said" >> "$MD"
+  if (( WALK_STRICT && (lines == 0 || narr == 0) )); then
+    print -r -- '- FAILED: no dialogue/narrator sink records.' >> "$MD"; exit 1
+  fi
   shot "step$step-c-dialogue"
   say '/vg advance'; sleep 5
   print -r -- "- advance: $(last 'advance:')" >> "$MD"
   if [[ -n "$area" && -n "$qid" && "$area" != "$qid" ]]; then
     clear_logs "$CHAT"; say "!checkquest $area $qid"; sleep 3
     print -r -- "- server after advance: $(/usr/bin/grep -a 'status for' "$CHAT" | tail -1)" >> "$MD"
-    say "!completequest $area $qid"; sleep 6
+    if (( WALK_STRICT )); then
+      quest_status=$(/usr/bin/grep -a "quest ID $qid is: ACCEPTED" "$CHAT" | tail -1)
+      [[ -n "$quest_status" ]] || { print -r -- '- FAILED: quest acceptance not confirmed.' >> "$MD"; exit 1; }
+      clear_logs "$CHAT"; say '/vg target'; sleep 3
+      next_target=$(last 'target:'); next_step=$(field "$next_target" step)
+      if [[ "$next_target" != *'target: no step'* ]] && [[ "$next_step" != <-> || "$next_step" != "$((step + 1))" ]]; then
+        print -r -- '- FAILED: next sequential guide step was not confirmed.' >> "$MD"; exit 1
+      fi
+    else
+      say "!completequest $area $qid"; sleep 6
+    fi
     clear_logs "$CHAT"; say '/vg status'; sleep 3
-    print -r -- "- after !completequest: $(last 'guide=' )" >> "$MD"
+    if (( WALK_STRICT )); then
+      print -r -- "- after acceptance: $(last 'guide=' )" >> "$MD"
+    else
+      print -r -- "- after !completequest: $(last 'guide=' )" >> "$MD"
+    fi
   fi
   shot "step$step-d-after"
   print -r -- "" >> "$MD"
