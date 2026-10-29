@@ -1,7 +1,7 @@
 -- Copyright (c) 2026 Daniel Bates / Bates LLC. All rights reserved.
 -- Offline walking contracts: no game, memory writes, server, input or wall-clock sleeps.
 package.path = 'Vanaguide/?.lua;Vanaguide/?/init.lua;' .. package.path
-local clock, commands, running = 0, {}, {}
+local clock, commands, running, deltas = 0, {}, {}, {}
 package.loaded.ffi = { cdef = function() end, C = { GetTickCount = function() return clock end } }
 package.loaded['core.util'] = { dist = function(x, z, a, b) return math.sqrt((x-a)^2 + (z-b)^2) end }
 package.loaded['routing.path'] = { to = function() return nil end }
@@ -9,7 +9,7 @@ AshitaCore = {
     GetMemoryManager = function() return {
         GetParty = function() return { GetMemberTargetIndex = function() return 1 end } end,
         GetAutoFollow = function() return setmetatable({}, { __index = function(_, name)
-            return function(_, value) if name == 'SetIsAutoRunning' then running[#running+1] = value end end
+            return function(_, value) if name == 'SetIsAutoRunning' then running[#running+1] = value end; deltas[name] = value end
         end }) end,
     } end,
     GetChatManager = function() return { QueueCommand = function(_, _, text) commands[#commands+1] = text end } end,
@@ -48,3 +48,15 @@ assert(event.auto == false and state.walk_event_auto_was == nil, 'the prior even
 cancelled.cancel(state, event)
 assert(event.auto == false, 'repeated stop does not change the restored event setting')
 print('11 walking contract checks passed')
+
+-- Recovery must be perpendicular to the original heading, including diagonal headings.
+local diagonal = fresh(false)
+diagonal.target = {x=100,z=100}
+clock=100; diagonal.update(w)
+clock=200; diagonal.update(w)
+clock=2800; diagonal.update(w) -- hitch only resets the frame clock
+clock=2900; diagonal.update(w)
+local dx, dz = deltas.SetFollowDeltaX, deltas.SetFollowDeltaY
+local expected_x, expected_z = 100 + 2.5/math.sqrt(2), 100 - 2.5/math.sqrt(2)
+assert(math.abs(dx/dz - expected_x/expected_z) < 1e-10, 'sidestep must use both original heading components')
+print('diagonal recovery geometry passed')
