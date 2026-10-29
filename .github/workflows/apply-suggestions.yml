@@ -3,15 +3,18 @@
 name: apply-suggestions
 on:
   push:
-    paths: ['suggested-changes/**']
+    branches: [master]
+    paths: ['suggested-changes/**', 'Vanaguide/data/quests.lua', 'Vanaguide/data/missions.lua', 'tools/*suggestions.py', '.github/workflows/apply-suggestions.yml']
   pull_request:
-    paths: ['suggested-changes/**']
+    paths: ['suggested-changes/**', 'Vanaguide/data/quests.lua', 'Vanaguide/data/missions.lua', 'tools/*suggestions.py', '.github/workflows/apply-suggestions.yml']
   workflow_dispatch:
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
+defaults:
+  run:
+    shell: bash
 jobs:
-  apply:
+  validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,11 +24,22 @@ jobs:
         run: python3 tools/apply_suggestions.py | tee "$RUNNER_TEMP/applied.txt"
       - name: Offline tests
         run: sudo apt-get install -y luajit >/dev/null && luajit tools/test_offline.lua
+  propose:
+    needs: validate
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fill missing givers
+        run: python3 tools/apply_suggestions.py | tee "$RUNNER_TEMP/applied.txt"
       - name: Pull request
-        if: github.event_name != 'pull_request'
         uses: peter-evans/create-pull-request@v6
         with:
           branch: apply-suggestions
+          base: master
           title: Add suggested quest givers
           commit-message: Add quest givers suggested from VanaGuide Server-Safe
           body-path: ${{ runner.temp }}/applied.txt
