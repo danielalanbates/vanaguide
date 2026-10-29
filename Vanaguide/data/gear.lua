@@ -618,12 +618,13 @@ G.items = {
     [22135] = { 'Arasy Gun', 99, 66560, 'ranged', false, false },
 }
 
---- Jobs are a bitmask, bit 1 = WAR .. bit 22 = GEO, matching the client's job ids.
+--- Jobs are a bitmask, bit 0 = WAR (job id 1) .. bit 21 = RUN (job id 22): item_equipment
+--- stores Fighter's Mask as 1 and Temple Crown (MNK) as 2.
 function G.fits_job(entry, job_id)
     if job_id == nil or job_id == 0 then return true end
     local mask = entry[3]
     if mask == 0 then return true end
-    return math.floor(mask / 2 ^ job_id) % 2 == 1
+    return math.floor(mask / 2 ^ (job_id - 1)) % 2 == 1
 end
 
 --- Everything for a slot that this job can wear at this level, closest to the level first.

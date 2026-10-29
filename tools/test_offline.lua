@@ -439,6 +439,9 @@ do
     -- jobs are a bitmask; a WAR-only piece must not show up for a WHM
     local war = GEAR.for_slot('body', 99, 1)
     ok(#war > 0, 'body armour exists for a warrior')
+    ok(GEAR.fits_job({ 'Fighters Mask', 56, 1, 'head' }, 1), 'job mask 1 (bit 0) is Warrior')
+    ok(not GEAR.fits_job({ 'Fighters Mask', 56, 1, 'head' }, 2), 'and not Monk')
+    ok(GEAR.fits_job({ 'Temple Crown', 56, 2, 'head' }, 2), 'job mask 2 is Monk')
 
     -- tracking turns a lookup into an ordinary one-step guide
     local before = P.guide
