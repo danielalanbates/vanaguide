@@ -224,8 +224,9 @@ function W.update(w)
         local d0 = math.sqrt(dx * dx + dz * dz)
         if d0 > 1e-3 then
             local side = (W.nudge > 0) and 1 or -1
-            dx = dx + (-dz / d0) * 2.5 * side
-            dz = dz + ( dx / d0) * 2.5 * side
+            local side_x, side_z = -dz / d0, dx / d0
+            dx = dx + side_x * 2.5 * side
+            dz = dz + side_z * 2.5 * side
         end
     end
     local d = math.sqrt(dx * dx + dz * dz)
