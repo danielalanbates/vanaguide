@@ -8,6 +8,7 @@ Copyright (c) 2026 Bates LLC. All rights reserved. See LICENSE.
 from __future__ import annotations
 
 import os
+import json
 from pathlib import Path
 import re
 import shlex
@@ -182,10 +183,67 @@ def verify_profile(game: Path) -> None:
         raise Refused("lsb.ini must explicitly name one loopback --server")
 
 
+def isolated_inventory(processes: list[Process], game: Path, cwd: Callable[[int], Path], prefix: Path) -> list[Process]:
+    """Exclude only named hosted clients proven to belong to a disjoint install/prefix."""
+    kept = []
+    for process in processes:
+        kind = game_kind(process)
+        if kind is None:
+            kept.append(process)
+            continue
+        try:
+            directory = cwd(process.pid).resolve()
+        except (OSError, ValueError):
+            raise Refused("a game process install could not be verified") from None
+        if directory.is_relative_to(prefix) or prefix.is_relative_to(directory):
+            kept.append(process)
+            continue
+        name = basename(process.executable)
+        # Only exact loader/carrier identities with a single explicit remote endpoint.
+        if name not in LOADERS | CARRIERS:
+            raise Refused("an unrelated game process is ambiguous")
+        try:
+            tokens = shlex.split(process.arguments)
+        except ValueError:
+            raise Refused("an unrelated client endpoint is ambiguous") from None
+        endpoints = []
+        for index, token in enumerate(tokens):
+            if token == "--server": endpoints.append(tokens[index+1] if index+1 < len(tokens) else "")
+            elif token.startswith("--server="): endpoints.append(token.partition("=")[2])
+        if len(endpoints) != 1 or not endpoints[0] or endpoints[0] in LOOPBACK:
+            raise Refused("an unrelated client endpoint is ambiguous")
+    return kept
+
+
+def isolated_prefix(game: Path) -> Path | None:
+    marker = game / ".vanaguide-isolated.json"
+    if not marker.exists(): return None
+    try:
+        data = json.loads(marker.read_text())
+        prefix = game.parent.parent
+        if game.parent.name != "drive_c" or str(game.resolve()) != data["game"] or data.get("allow_concurrent_hosted") is not True:
+            raise ValueError()
+        for name in ["system.reg", "user.reg", "userdef.reg"]:
+            path = prefix / name
+            if not path.is_file() or path.is_symlink(): raise ValueError()
+        for name in ["addons", "config", "scripts"]:
+            directory = game / name
+            if not directory.is_dir() or directory.is_symlink(): raise ValueError()
+            if any(p.is_symlink() for p in directory.rglob("*")): raise ValueError()
+        verify_profile(game)
+        return prefix.resolve()
+    except (OSError, ValueError, KeyError, TypeError):
+        raise Refused("the isolated fixture files could not be verified") from None
+
+
 def checked(game: Path, mode: str = "check") -> int | None:
     if not game.is_dir():
         raise Refused("the requested game install is missing")
-    pid = authorize(inventory(), game, process_cwd,
+    processes = inventory()
+    prefix = isolated_prefix(game)
+    if prefix is not None:
+        processes = isolated_inventory(processes, game, process_cwd, prefix)
+    pid = authorize(processes, game, process_cwd,
                     require_client=mode not in {"safe", "idle", "start"},
                     require_idle=mode in {"idle", "start"})
     if mode == "start":

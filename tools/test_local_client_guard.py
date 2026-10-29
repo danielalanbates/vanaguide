@@ -3,6 +3,7 @@
 Copyright (c) 2026 Bates LLC. All rights reserved. See LICENSE.
 """
 import contextlib
+import json
 import importlib.util
 import io
 from pathlib import Path
@@ -64,6 +65,37 @@ class LocalClientGuardTests(unittest.TestCase):
             ("10 /fixture/xi_map\n", "10 xi_map\n40 /fixture/x87sidecar-coop --cooperative wine loader.exe\n")]:
             with patch.object(guard, "read_command", side_effect=[names, args]):
                 with self.assertRaises(guard.Refused): guard.inventory()
+
+    def test_isolated_scope_preserves_local_binding_and_excludes_remote_install(self):
+        prefix = Path("/fixture/prefix")
+        game = prefix / "drive_c/game"
+        hosted = P(30, "horizon-loader.exe", "loader --server remote.example")
+        paths = {20: game, 30: Path("/other/prefix/drive_c/game")}
+        scoped = guard.isolated_inventory([MAP, LOCAL, hosted], game, lambda pid: paths[pid], prefix)
+        self.assertEqual(guard.authorize(scoped, game, lambda pid: paths[pid]), 20)
+        self.assertNotIn(hosted, scoped)
+        for endpoint in ["", "--server 127.0.0.1", "--server remote --server other"]:
+            with self.assertRaises(guard.Refused):
+                guard.isolated_inventory([MAP, P(30, "horizon-loader.exe", "loader " + endpoint)], game, lambda pid: paths[pid], prefix)
+        # A hosted loader in the fixture remains visible and blocks local authorization.
+        scoped = guard.isolated_inventory([MAP, hosted], game, lambda pid: game, prefix)
+        with self.assertRaises(guard.Refused): guard.authorize(scoped, game, lambda pid: game)
+
+    def test_isolation_marker_requires_private_mutable_files(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as folder:
+            prefix = Path(folder).resolve() / "prefix"
+            game = prefix / "drive_c/game"
+            for name in ["addons", "config/boot", "scripts"]: (game/name).mkdir(parents=True)
+            for name in ["system.reg", "user.reg", "userdef.reg"]: (prefix/name).write_text("fixture")
+            (game/"config/boot/lsb.ini").write_text("[ashita.boot]\ncommand=loader --server 127.0.0.1\n")
+            marker = game/".vanaguide-isolated.json"
+            marker.write_text(json.dumps({"game": str(game), "allow_concurrent_hosted": True}))
+            self.assertEqual(guard.isolated_prefix(game), prefix)
+            (game/"addons/foreign").symlink_to(prefix/"user.reg")
+            with self.assertRaises(guard.Refused): guard.isolated_prefix(game)
+            (game/"addons/foreign").unlink()
+            marker.write_text("{}")
+            with self.assertRaises(guard.Refused): guard.isolated_prefix(game)
 
     def test_local_map_required_even_if_loader_is_local(self):
         with self.assertRaises(guard.Refused):
