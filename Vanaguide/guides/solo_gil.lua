@@ -114,6 +114,7 @@ t Trade the 1 Quadav Helm to Goraow in Bastok Mines. He still accepts the trade 
 t Reward: 900 gil, Bastok fame, title Avenger.|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
 C Finish Vengeful Wrath and verify the reward.|Q|bastok,32||Z|234||POS|38.000,14.000,8||N|Quest completion can be checked from the client. Repeating an already completed quest needs manual tracking; do not assume the first-completion flag proves another payment.|
 t Minesweeper — check requirements and profit first.|N|Start: Mines. Fame: 1.0. Prerequisite: none listed. Needs: 3 Zeruhn Soot. Listed reward: 150.0. Repeatable: Y. Horizon values may differ from standard LSB details.|
+t Farm Zeruhn Soot from Ding Bats or Tunnel Worm in Zeruhn Mines. Check difficulty; Mouse Bat and River Crab are additional options.|N|Choose targets your job can handle. Compare material sale value with the quest reward before trading.|
 t Talk to Gerbaum in Bastok Mines to accept the quest.|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
 t Obtain 3 Pinches of Zeruhn Soot (this quest's script does not say where).|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
 t Trade all 3 Pinches of Zeruhn Soot to Gerbaum in Bastok Mines at once.|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
@@ -317,6 +318,7 @@ t Return to Maugie in Southern San d'Oria and talk to him to finish.|N|Standard 
 t Reward: 1500 gil and 20 San d'Oria fame.|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
 C Finish Grimy Signposts and verify the reward.|Q|sandoria,66||Z|230||POS|105.000,-16.000,8||N|Quest completion can be checked from the client. Repeating an already completed quest needs manual tracking; do not assume the first-completion flag proves another payment.|
 t The Merchant's Bidding — check requirements and profit first.|N|Start: Southern. Fame: 1.0. Prerequisite: none listed. Needs: 3 Rabbit Hides. Listed reward: 120.0. Repeatable: Y. Horizon values may differ from standard LSB details.|
+t Farm Rabbit Hide from Wild Rabbit in East or West Ronfaure. East Ronfaure is the stronger hide option in the Horizon listings; compare selling the hides with the quest payout.|N|Choose targets your job can handle. Compare material sale value with the quest reward before trading.|
 t Talk to Parvipon in Southern San d'Oria and accept the quest.|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
 t Obtain 3 Rabbit Hides (this quest's script does not say where).|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
 t Trade the 3 Rabbit Hides to Parvipon.|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
@@ -337,6 +339,7 @@ G.register({
     steps = [[
 t Choose profitable errands before spending gil.|N|HorizonXI starter route. Skip unaffordable or unsafe quests. Reward is gross, not profit: subtract materials, food, travel and Auction House fees. Gear rewards are not guaranteed cash. Check current prices; no gil/hour promise.|
 t Teacher's Pet — check requirements and profit first.|N|Start: Waters. Fame: 1.0. Prerequisite: none listed. Needs: Bird Feather Two-Leaf Mandy Bud. Listed reward: 250.0. Repeatable: Y. Horizon values may differ from standard LSB details.|
+t Farm Bird Feather from Carrion Crow in East or West Sarutabaruta. Obtain the other required items separately before returning.|N|Choose targets your job can handle. Compare material sale value with the quest reward before trading.|
 t Talk to Moreno-Toeno in Windurst Waters, then talk to him again and accept the quest.|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
 t Obtain 1 Bird Feather and 1 Two-Leaf Mandragora Bud (this quest's script does not say where).|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
 t Trade the Bird Feather and the Two-Leaf Mandragora Bud together to Moreno-Toeno to finish and receive 250 gil.|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
@@ -378,6 +381,7 @@ t Verify The All New C-2000 on the Horizon wiki before proceeding.|N|No matching
 t Creepy Crawlies — check requirements and profit first.|N|Start: Woods. Fame: 1.0. Prerequisite: none listed. Needs: 3 Silk OR 3 Crawler Calc. Listed reward: 600.0. Repeatable: Y. Horizon values may differ from standard LSB details.|
 t Verify Creepy Crawlies on the Horizon wiki before proceeding.|N|No matching standard quest record found. Review the requirements above and confirm the quest giver before travelling.|
 t Mihgo's Amigo — check requirements and profit first.|N|Start: Woods. Fame: 1.0. Prerequisite: none listed. Needs: 4 Yag Necks. Listed reward: 200.0. Repeatable: Y. Horizon values may differ from standard LSB details.|
+t Farm Yagudo Necklace from Yagudo Acolyte, Yagudo Initiate or Yagudo Scribe in East Sarutabaruta. These enemies can attack and link; pull carefully.|N|Choose targets your job can handle. Compare material sale value with the quest reward before trading.|
 t You cannot start this while The Tenshodo Showdown or As Thick as Thieves is in progress.|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
 t In Windurst Woods, talk to Nanaa Mihgo to start the quest.|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
 t Optional: Bopa Greso and Cha Lebagta in Windurst Woods give hints.|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
