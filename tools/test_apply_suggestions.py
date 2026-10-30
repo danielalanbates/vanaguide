@@ -25,7 +25,7 @@ GOOD = """-- quests.sandoria — Southern San d'Oria
 
 class SuggestionTests(unittest.TestCase):
     def apply(self, files, data=DATA, kind='quests'):
-        with tempfile.TemporaryDirectory() as temp:
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as temp:
             root = Path(temp)
             folder = root / 'suggested-changes'
             folder.mkdir()

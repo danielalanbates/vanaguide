@@ -13,8 +13,9 @@ Quest and mission givers recorded by players in **VanaGuide Server-Safe** Develo
 changed, including entries with only a zone or only a giver and any whitespace around `=`.
 The exported title must match the target quest or mission, so stale ids cannot fill a
 different entry. Conflicting suggestions are left for review; identical duplicates are fine.
-Only static quoted strings are read; suggested Lua is never executed. The GitHub Action
-`apply-suggestions` runs it whenever a file lands here and opens a pull request for review.
+Only static quoted strings are read; suggested Lua is never executed. Once this workflow is
+merged to `master` and Actions may create pull requests, `apply-suggestions` checks files
+that land here and opens a data pull request for review when there are additions.
 
 Files stay here after they are applied: the data files are regenerated from LandSandBoat,
 so the workflow also runs when the quest or mission database changes on `master`.

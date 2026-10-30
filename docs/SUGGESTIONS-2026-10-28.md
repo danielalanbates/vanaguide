@@ -56,3 +56,18 @@ The trusted push trigger is limited to `master`, so the generated `apply-suggest
 cannot create a push loop. PR runs only validate. A manual run also proposes changes only
 when its selected ref is `master`. After activation, check the workflow result; a successful
 no-change run proves neither a real proposal creation nor new quest coverage.
+
+## Current beta integration — 2026-10-29
+
+Recovered the existing importer, submission folder, tests and workflow from
+`suggestions-validation` into the current navigation/local-fixture beta lineage. The launcher
+already emits this exact constrained Lua export format from **Suggest to Guide…**; these
+submissions are parsed as data and never evaluated as Lua. No alternative format or new
+export UI is needed. Suggestion tests now create their dummy files inside the checkout.
+
+All 12 importer tests and all 1,418 current Lua assertions pass. The real submission folder
+contains no player files; importing it reports zero additions and leaves both data files
+unchanged. Existing authored zone/giver fields, partial entries, title mismatches and
+conflicts remain protected. The integration PR must land on the default branch before its
+trusted push automation can run there; a beta-branch checkout alone does not activate it.
+No installed app or game data was changed by this integration.
