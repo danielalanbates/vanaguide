@@ -2,6 +2,7 @@
 local G=require('core.guide')
 local U=require('core.util')
 local guide=G.register{
+ server = 'HorizonXI',
  name = 'Solo EXP - HorizonXI',author='VanaGuide',levels = '1-25',
  desc = 'Solo starting-zone and Tahrongi progression. Check prey difficulty; job, equipment and competition change the pace.',
  steps = [[

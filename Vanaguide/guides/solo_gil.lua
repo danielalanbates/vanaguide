@@ -2,6 +2,7 @@
 -- Built from the user Horizon starter-gil spreadsheet and standard LSB quest facts.
 local G = require("core.guide")
 G.register({
+    server = "HorizonXI",
     name = "Solo Gil - HorizonXI - Bastok",
     desc = "Horizon-specific errands, costs and rewards. Choose your home nation; manually skip unsuitable errands.",
     levels = "Early quests",
@@ -187,6 +188,7 @@ C Finish Bite The Dust and verify the reward.|Q|bastok,46||Z|236||POS|-20.100,24
 ]],
 })
 G.register({
+    server = "HorizonXI",
     name = "Solo Gil - HorizonXI - San d'Oria",
     desc = "Horizon-specific errands, costs and rewards. Choose your home nation; manually skip unsuitable errands.",
     levels = "Early quests",
@@ -333,6 +335,7 @@ C Finish Starting a Flame and verify the reward.|Q|sandoria,77||Z|230||POS|82.00
 ]],
 })
 G.register({
+    server = "HorizonXI",
     name = "Solo Gil - HorizonXI - Windurst",
     desc = "Horizon-specific errands, costs and rewards. Choose your home nation; manually skip unsuitable errands.",
     levels = "Early quests",

@@ -134,6 +134,7 @@ function G.register(def)
         name = def.name,
         author = def.author or 'unknown',
         nation = def.nation,
+        server = def.server,
         levels = def.levels,
         desc = def.desc,
         steps = steps,
