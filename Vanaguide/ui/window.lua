@@ -116,6 +116,24 @@ function W.draw(w, on_pick)
                 imgui.Text(('(%d/%d)'):format(math.min(P.index, P.count()), P.count()))
             end
 
+            local starts, current_start = {}, nil
+            for i, candidate in ipairs(guide.steps) do
+                if candidate.starting_location then
+                    starts[#starts + 1] = { index = i, name = candidate.starting_location }
+                    if i <= P.index then current_start = candidate.starting_location end
+                end
+            end
+            if #starts > 0 then
+                if imgui.BeginCombo('Starting location', current_start or starts[1].name) then
+                    for _, location in ipairs(starts) do
+                        if imgui.Selectable(location.name, current_start == location.name) then
+                            P.index = location.index
+                        end
+                    end
+                    imgui.EndCombo()
+                end
+            end
+
             local step = P.step()
             if step == nil then
                 text_colored({ 0.4, 1.0, 0.4, 1.0 }, 'Guide complete.')
@@ -123,6 +141,10 @@ function W.draw(w, on_pick)
                 imgui.Separator()
                 text_colored({ 0.9, 0.9, 1.0, 1.0 },
                     ('%s: %s'):format(VERB_LABEL[step.kind] or '?', step.text))
+                if narrow and step.note then
+                    local location = step.note:match('^Starting location: ([^.]+)%.')
+                    if location then wrapped('Starting location: ' .. location) end
+                end
                 -- The note is the first thing to go when the window is small: the buttons
                 -- have to stay above the fold, because clicking them is the only way to move
                 -- the guide by hand and this client cannot scroll an ImGui window.

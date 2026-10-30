@@ -516,5 +516,23 @@ do
     A.move(0.5, 0.28)
 end
 
+-- The merged gil route must keep all quest targets and city entry points.
+do
+    require('guides.solo_gil')
+    local merged = G.guides['Solo Gil - HorizonXI']
+    ok(merged ~= nil, 'one combined Horizon gil guide registers')
+    local starts, quests = {}, {}
+    for _, step in ipairs(merged.steps) do
+        if step.starting_location then starts[#starts + 1] = step.starting_location end
+        ok(step.note and step.note:find('Starting location:', 1, true), 'gil step identifies its starting city')
+        if step.quest then quests[step.quest.area .. ',' .. step.quest.id] = true end
+    end
+    eq(table.concat(starts, ';'), "Windurst;San d'Oria;Bastok", 'three starting-city options in requested order')
+    local count = 0
+    for _ in pairs(quests) do count = count + 1 end
+    eq(count, 61, 'merged guide retains every distinct quest')
+    ok(G.guides['Solo Gil - HorizonXI - Bastok'] == nil, 'separate nation gil entries removed')
+end
+
 print(('\n%d passed, %d failed'):format(pass, fail))
 os.exit(fail == 0 and 0 or 1)

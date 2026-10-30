@@ -28,3 +28,15 @@ Recovered Something Fishy52, Mandragora Mad34, The Postman Always KOs Twice19 an
 Resolved the final five catalogue mismatches: Waters of the Cheval1, Curses Foiled Again32, Gates to Paradise18, Undying Flames26 and Thick Shells117. Used existing generated procedures for the first two; inspected legacy Olbergieut/Pagisalis/Faurbellant/Vounebariont handlers and zone-matched npc_list coordinates for the rest. No unresolved catalogue placeholders remain in the61-entry source route. This proves source coverage, not live Horizon completion, safe travel or profitability.
 
 Installed-content verification: three nation routes now contain61 requirement headers and61 quest completion targets (Bastok25, San d Oria23, Windurst13). No unresolved catalogue placeholder or visible workbook reference remains. Signed ALPHA104 companion packaged this content and passed its own parser checks; installed standalone content hash matches the candidate. Previous app archived, reopened once in background; hosted client/launcher were not signalled. These are source and package checks, not proof of live quest completion or profitability.
+
+## Combined Solo Gil guide (2026-10-30)
+
+The three nation entries are now one `Solo Gil - HorizonXI` guide, with 395 steps and
+all 61 original distinct quest targets preserved. `START` tags identify the Windurst,
+San d'Oria, and Bastok section entry points. Both the companion and addon offer a
+Starting location selector that jumps to these sections. Every step note identifies its
+starting-city route; this is its route origin, not a claim that every action occurs there.
+Existing quest IDs, destination coordinates, prerequisites, rewards and source caveats
+are retained. Old saved addon nation-route records are left intact; the combined route
+has a new name and starts fresh. Companion quest completion remains keyed by quest ID.
+No addon was installed or tested on a hosted server.
