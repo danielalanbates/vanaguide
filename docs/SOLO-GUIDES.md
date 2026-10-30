@@ -16,3 +16,5 @@ Copyright (c) 2026 Daniel Bates / Bates LLC. All rights reserved.
 https://batesai.org · help@batesai.org
 
 Product text update: removed visible spreadsheet references while retaining provenance here. Solo EXP now names Wild Rabbit, Huge Hornet, Tiny Mandragora, Bumblebee, Forest Hare, Scarab Beetle, Maneating Hornet, Mandragora, Savanna Rarab, Crawler, Killer Bee, Pygmaioi, Strolling Sapling, Canyon Rarab and Wild Dhalmel with relevant zone names. Source facts reviewed from Horizon wiki monster/zone listings; exact camp pins are not inferred from generic zone membership. Higher-level BST entries retain sourced map grids where available.
+
+Added sourced BST14-18 Tahrongi camp E-5/F-5 with Wild Dhalmel and Akbaba (E-5), from the indexed Horizon Beastmaster Leveling Guide. These camp grids are specific to BST strategy and are not presented as generic safe camps for all jobs.
