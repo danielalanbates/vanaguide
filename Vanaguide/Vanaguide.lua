@@ -803,7 +803,7 @@ ashita.events.register('command', 'vg_command', function (e)
             U.print(Walk.status());
             return;
         end
-        if (what == 'status') then U.print(Walk.status()); return; end
+        if (what == 'status') then U.print(Walk.status()); U.print(Walk.diagnostics()); return; end
         if (what == 'nudges' and #args > 3) then
             local setting = args[4]:lower();
             if (setting ~= 'on' and setting ~= 'off') then
