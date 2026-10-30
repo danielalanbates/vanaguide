@@ -6,6 +6,7 @@ import contextlib
 import json
 import importlib.util
 import io
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -96,6 +97,40 @@ class LocalClientGuardTests(unittest.TestCase):
             (game/"addons/foreign").unlink()
             marker.write_text("{}")
             with self.assertRaises(guard.Refused): guard.isolated_prefix(game)
+
+    def make_isolated_fixture(self, root):
+        prefix = root / "prefix"
+        game = prefix / "drive_c/game"
+        for name in ["addons", "config/boot", "scripts"]: (game/name).mkdir(parents=True)
+        for name in ["system.reg", "user.reg", "userdef.reg"]: (prefix/name).write_text("fixture")
+        (game/"config/boot/lsb.ini").write_text("[ashita.boot]\ncommand=loader --server 127.0.0.1\n")
+        (game/".vanaguide-isolated.json").write_text(json.dumps({"game": str(game.resolve()), "allow_concurrent_hosted": True}))
+        return prefix, game
+
+    def test_isolation_refuses_symlinked_game_or_c_drive(self):
+        for component in ["game", "drive_c"]:
+            with self.subTest(component=component), tempfile.TemporaryDirectory(dir=Path(__file__).parent) as folder:
+                root = Path(folder).resolve()
+                prefix, game = self.make_isolated_fixture(root)
+                original = game if component == "game" else game.parent
+                shared = root / "shared"
+                original.rename(shared)
+                original.symlink_to(shared, target_is_directory=True)
+                # Reproduces a misleading but internally consistent marker in a linked tree.
+                (game/".vanaguide-isolated.json").write_text(json.dumps({"game": str(game.resolve()), "allow_concurrent_hosted": True}))
+                with self.assertRaises(guard.Refused): guard.isolated_prefix(game)
+
+    def test_isolation_refuses_hardlinked_mutable_files(self):
+        for relative in ["user.reg", "drive_c/game/addons/test.lua", "drive_c/game/config/test.ini", "drive_c/game/scripts/test.txt"]:
+            with self.subTest(relative=relative), tempfile.TemporaryDirectory(dir=Path(__file__).parent) as folder:
+                root = Path(folder).resolve()
+                prefix, game = self.make_isolated_fixture(root)
+                shared = root / "shared.txt"
+                shared.write_text("fixture only")
+                target = prefix / relative
+                if target.exists(): target.unlink()
+                os.link(shared, target)
+                with self.assertRaises(guard.Refused): guard.isolated_prefix(game)
 
     def test_local_map_required_even_if_loader_is_local(self):
         with self.assertRaises(guard.Refused):

@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 import re
 import shlex
+import stat
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -223,13 +224,24 @@ def isolated_prefix(game: Path) -> Path | None:
         prefix = game.parent.parent
         if game.parent.name != "drive_c" or str(game.resolve()) != data["game"] or data.get("allow_concurrent_hosted") is not True:
             raise ValueError()
+        # A valid marker inside a linked game tree does not make that tree private.
+        # Resolve the prefix separately so neither drive_c nor the game root can point
+        # at a shared/hosted install while the registry files appear independent.
+        if game.resolve() != prefix.resolve() / "drive_c" / game.name:
+            raise ValueError()
         for name in ["system.reg", "user.reg", "userdef.reg"]:
             path = prefix / name
-            if not path.is_file() or path.is_symlink(): raise ValueError()
+            info = path.lstat()
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1: raise ValueError()
         for name in ["addons", "config", "scripts"]:
             directory = game / name
             if not directory.is_dir() or directory.is_symlink(): raise ValueError()
-            if any(p.is_symlink() for p in directory.rglob("*")): raise ValueError()
+            for path in directory.rglob("*"):
+                info = path.lstat()
+                if stat.S_ISDIR(info.st_mode): continue
+                # cp -al/hardlinked files are shared writes just like symlinks. Reject
+                # special files too: the fixture must contain ordinary private files.
+                if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1: raise ValueError()
         verify_profile(game)
         return prefix.resolve()
     except (OSError, ValueError, KeyError, TypeError):

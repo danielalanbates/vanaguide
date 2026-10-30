@@ -28,6 +28,14 @@ behavior without a game, and the standard offline suite covers the existing guid
 An explicit `/vg walk stop` also clears pending crossing retries and restores the prior event
 setting; it must not leave an automatic crossing able to restart movement after a timeout.
 
+The guide number, step count and `WALK_TIMEOUT` must be positive integers of at most nine
+digits. They and `WALK_STRICT` are checked before any runtime inspection, command delivery or
+evidence file is created. Previously zero, negative or overflowed step counts could skip the
+whole loop and still print `Done`. `python3 -m unittest tools/test_guided_walk.py` exercises the
+actual shell script with its Python guard and sleeps replaced by local shell functions. All
+11 invalid-input cases failed before this correction; the corrected script refuses them
+without touching the fake runtime and still accepts ordinary positive arguments.
+
 These source checks do not prove a live walk or speaker output. Active owner play takes
 priority: do not log out that session or launch a competing client to run this harness.
 
