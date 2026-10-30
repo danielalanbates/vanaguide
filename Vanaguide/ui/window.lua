@@ -109,24 +109,24 @@ function W.draw(w, on_pick)
             local narrow = fw < 320
             if narrow then
                 text_colored({ 1.0, 0.82, 0.2, 1.0 },
-                    ('%s  (%d/%d)'):format(guide.name, math.min(P.index, P.count()), P.count()))
+                    ('%s  (%d/%d)'):format(guide.name, math.min(P.route_index(), P.route_count()), P.route_count()))
             else
                 text_colored({ 1.0, 0.82, 0.2, 1.0 }, guide.name)
                 imgui.SameLine()
-                imgui.Text(('(%d/%d)'):format(math.min(P.index, P.count()), P.count()))
+                imgui.Text(('(%d/%d)'):format(math.min(P.route_index(), P.route_count()), P.route_count()))
             end
 
-            local starts, current_start = {}, nil
+            local starts, current_start = {}, P.starting_location
             for i, candidate in ipairs(guide.steps) do
                 if candidate.starting_location then
                     starts[#starts + 1] = { index = i, name = candidate.starting_location }
-                    if i <= P.index then current_start = candidate.starting_location end
                 end
             end
             if #starts > 0 then
                 if imgui.BeginCombo('Starting location', current_start or starts[1].name) then
                     for _, location in ipairs(starts) do
                         if imgui.Selectable(location.name, current_start == location.name) then
+                            P.starting_location = location.name
                             P.index = location.index
                         end
                     end

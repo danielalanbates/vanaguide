@@ -19,6 +19,12 @@ function P.set_guide(guide, saved)
     P.index = (saved and saved.index) or 1
     P.skipped = (saved and saved.skipped) or {}
     P.checked = (saved and saved.checked) or {}
+    P.starting_location = saved and saved.starting_location or nil
+    if not P.starting_location then
+        for _, step in ipairs(guide.steps) do
+            if step.starting_location then P.starting_location = step.starting_location; break end
+        end
+    end
     return P.guide
 end
 
@@ -34,7 +40,27 @@ function P.count()
     return #P.guide.steps
 end
 
+local function on_route(step)
+    return step == nil or step.home == nil or step.home == P.starting_location
+end
+
+function P.route_count()
+    local n = 0
+    for _, step in ipairs(P.guide and P.guide.steps or {}) do if on_route(step) then n = n + 1 end end
+    return n
+end
+
+function P.route_index()
+    local n = 0
+    for i, step in ipairs(P.guide and P.guide.steps or {}) do
+        if i > P.index then break end
+        if on_route(step) then n = n + 1 end
+    end
+    return n
+end
+
 local function satisfied(i, w)
+    if not on_route(P.guide.steps[i]) then return true end
     if P.checked[i] or P.skipped[i] then return true end
     local step = P.guide.steps[i]
     if step == nil then return true end
@@ -90,7 +116,7 @@ function P.complete()
 end
 
 function P.save_state()
-    return { index = P.index, skipped = P.skipped, checked = P.checked }
+    return { index = P.index, skipped = P.skipped, checked = P.checked, starting_location = P.starting_location }
 end
 
 return P

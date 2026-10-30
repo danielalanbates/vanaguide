@@ -93,6 +93,10 @@ function G.parse_line(line, lineno)
             step.rank = tonumber(value)
         elseif tag == 'SP' then
             step.spell = tonumber(value)
+        elseif tag == 'HOME' then
+            step.home = value
+        elseif tag == 'SRC' then
+            step.source = value
         elseif tag == 'START' then
             step.starting_location = value
         elseif tag == 'N' then

@@ -516,22 +516,56 @@ do
     A.move(0.5, 0.28)
 end
 
--- The merged gil route must keep all quest targets and city entry points.
+-- The gil itinerary combines leveling, quests, materials and NM opportunities.
 do
     require('guides.solo_gil')
     local merged = G.guides['Solo Gil - HorizonXI']
     ok(merged ~= nil, 'one combined Horizon gil guide registers')
-    local starts, quests = {}, {}
+    local starts, quests, nms = {}, {}, 0
     for _, step in ipairs(merged.steps) do
         if step.starting_location then starts[#starts + 1] = step.starting_location end
-        ok(step.note and step.note:find('Starting location:', 1, true), 'gil step identifies its starting city')
+        ok(step.note and step.note:find('Starting location:', 1, true), 'gil step identifies applicable starting cities')
+        ok(step.source and step.source:find('https://horizonffxi.wiki/', 1, true) == 1, 'gil step has a reviewed Horizon wiki source')
+        ok(not step.note:find('may differ', 1, true) and not step.note:find('Standard LSB', 1, true), 'gil step uses Horizon instructions instead of generic caveats')
         if step.quest then quests[step.quest.area .. ',' .. step.quest.id] = true end
+        if step.text:find('Optional NM', 1, true) then nms = nms + 1 end
+        if step.level then
+            ok(step.note:find('EXP:', 1, true) and step.note:find('GIL:', 1, true), 'every leveling camp pairs EXP and gil mobs')
+        end
     end
-    eq(table.concat(starts, ';'), "Windurst;San d'Oria;Bastok", 'three starting-city options in requested order')
-    local count = 0
-    for _ in pairs(quests) do count = count + 1 end
-    eq(count, 61, 'merged guide retains every distinct quest')
-    ok(G.guides['Solo Gil - HorizonXI - Bastok'] == nil, 'separate nation gil entries removed')
+    eq(table.concat(starts, ';'), "Windurst;San d'Oria;Bastok", 'three starting-city entry points')
+    ok(quests['sandoria,81'] and quests['sandoria,78'], 'San d Oria detours keep correct quest IDs')
+    ok(nms >= 6, 'itinerary includes several named NM opportunities')
+    for _, nation in ipairs(starts) do
+        local covered = {}
+        for _, step in ipairs(merged.steps) do
+            if (not step.home or step.home == nation) and step.level then
+                local lo, hi = step.text:match('Levels (%d+)%-(%d+):')
+                ok(lo ~= nil and hi ~= nil, 'level band is explicit')
+                for level = tonumber(lo), tonumber(hi) do
+                    ok(not covered[level], 'selected city route does not repeat a level band')
+                    covered[level] = true
+                end
+            end
+        end
+        for level = 1, 75 do ok(covered[level], 'selected city route covers level ' .. level) end
+    end
+    P.set_guide(merged)
+    P.starting_location = 'Windurst'
+    local lastWindurst
+    for i, step in ipairs(merged.steps) do
+        if step.home == 'Windurst' and step.text:find('Creepy Crawlies', 1, true) then lastWindurst = i end
+    end
+    P.index = lastWindurst
+    P.check(); P.advance({})
+    ok(not merged.steps[P.index].home, 'finishing Windurst starter branch skips other city branches')
+    eq(P.save_state().starting_location, 'Windurst', 'selected origin persists through shared camps')
+    eq(P.route_count(), 30, 'displayed route count excludes other city branches')
+    local archived = assert(io.open('archive/2026-10-30/solo_gil-quest-only.lua'))
+    local oldText = archived:read('*a'); archived:close()
+    local oldCount = 0
+    for _ in oldText:gmatch('|Q|') do oldCount = oldCount + 1 end
+    eq(oldCount, 61, 'superseded quest-only route remains archived with every quest target')
 end
 
 print(('\n%d passed, %d failed'):format(pass, fail))

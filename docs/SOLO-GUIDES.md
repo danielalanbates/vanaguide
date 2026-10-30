@@ -56,3 +56,13 @@ Jack or later-era standard variants. Jack's entry retains West Ronfaure, levels 
 G-9–H-9 Forest Hare lottery and Rabbit Charm. Other families remain explicitly labelled
 standard reference until separately sourced for the server. This is not a complete
 Horizon bestiary. No private client files or account data were exported.
+
+## Leveling itinerary replaces the quest-only list
+
+The active Solo Gil guide now follows the 1–75 itinerary documented in
+[HORIZON-GIL-ROUTE.md](HORIZON-GIL-ROUTE.md), with 30 steps per selected starting city.
+The previous 61-quest list is archived rather than presented as a leveling route. Included
+quest instructions were checked against Horizon wiki pages, and recurring generic LSB
+caveats were removed from the active guide. Six NM opportunities and 16 paired EXP/gil
+camp stages provide alternatives to quest-only income. Market prices remain user-checked;
+no source can establish a permanent current Auction House value.
