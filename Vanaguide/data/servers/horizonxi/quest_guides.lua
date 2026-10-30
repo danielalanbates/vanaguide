@@ -13,5 +13,11 @@ S.guides = {
     { title = '70-75: Uleguerand', note = 'The community route suggests F-10/F-11 rabbits and buffalo. Snoll explosions and tiger paralysis add risk.' },
     { title = '71-75: Ro Maeve', note = 'Consider weapons near the entrance; prepare for Diaga II removing shadows.' },
  } },
+ { name = 'Black Mage pet solo camp options', group = 'Solo EXP',
+   desc = 'BLM-specific community camps; verify current Horizon spawns. Source: https://horizonffxi.wiki/Black_Mage_Solo_Guide', steps = {
+    { title = '19-22: Lower Delkfutt\'s Tower, first floor (H-9)', note = 'Target Gigas\'s Bat belonging to Giant Sentry. Nearby gigas and bats can attack or link. Scout the parent and retreat before pulling.' },
+    { title = '28-30: Bibiki Bay (H-6)', note = 'Target Goblin\'s Rarab belonging to Goblin Pathfinder near the incline and rock. Nearby Island Rarab can link by sight; fog may bring spell-sensitive Ignis Fatuus.' },
+    { title = 'Check the camp before committing', note = 'This community guide includes older imported information. Confirm the pet, parent and escape route in game. These are pet-pulling camps for BLM, not ordinary melee or party recommendations.' },
+ } },
 }
 return S
