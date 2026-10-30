@@ -8,7 +8,7 @@ S.guides = {
   { title = 'Levels 20-25: dhalmels', note = 'Consider dhalmels after checking difficulty and your recovery needs. Meat and hides may provide additional income. This route does not establish suitability for every job.' },
  } },
  { name = 'Guide library coverage', group = 'Server', desc = 'Coverage inventory, not a complete wiki import. Source: https://horizonffxi.wiki/Category:Guides', steps = {
-  { title = 'Coverage still expanding', note = 'The wiki category lists 89 guide pages as reviewed on 2026-10-30. Current local content covers early solo EXP and spreadsheet-based starter gil errands. Job, crafting, mission, event and endgame guides remain incomplete.' },
+  { title = 'Coverage still expanding', note = 'The wiki category lists 89 guide pages as reviewed on 2026-10-30. Current local content covers early solo EXP and starter gil errands. Job, crafting, mission, event and endgame guides remain incomplete.' },
   { title = 'Choose the right source', note = 'Use Horizon-specific instructions for custom systems. Standard LandSandBoat quest procedures are a fallback and may differ in rewards, requirements or mechanics.' },
  } },
 }
