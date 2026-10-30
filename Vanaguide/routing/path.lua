@@ -172,6 +172,36 @@ function Path.nearest_index(points, x, z, y)
     return best
 end
 
+--- Distance left along a route, rather than straight through the wall it goes around.
+--- Project onto the closest segment; height distinguishes stacked floors. Segment lengths
+--- themselves are physical distances, without the floor-selection height penalty.
+function Path.remaining(points, x, z, y)
+    if points == nil or #points < 2 or x == nil or z == nil then return nil end
+    local lengths, total = {}, 0
+    for i = 1, #points - 1 do
+        local a, b = points[i], points[i + 1]
+        local dx, dz, dy = b.x - a.x, b.z - a.z, (b.y or 0) - (a.y or 0)
+        lengths[i] = math.sqrt(dx * dx + dz * dz + dy * dy)
+        total = total + lengths[i]
+    end
+    local before, best_distance, best_remaining = 0, nil, nil
+    for i = 1, #points - 1 do
+        local a, b = points[i], points[i + 1]
+        local dx, dz = b.x - a.x, b.z - a.z
+        local dy = (y ~= nil) and ((b.y or 0) - (a.y or 0)) * 3 or 0
+        local px, pz = x - a.x, z - a.z
+        local py = (y ~= nil) and (y - (a.y or 0)) * 3 or 0
+        local square = dx * dx + dz * dz + dy * dy
+        local t = (square > 0) and math.max(0, math.min(1, (px * dx + pz * dz + py * dy) / square)) or 0
+        local off = (px - t * dx)^2 + (pz - t * dz)^2 + (py - t * dy)^2
+        if best_distance == nil or off < best_distance then
+            best_distance, best_remaining = off, total - before - t * lengths[i]
+        end
+        before = before + lengths[i]
+    end
+    return best_remaining
+end
+
 --- Throw the cached path away.  Called when the step changes, and by the tests.
 function Path.forget()
     cache.zone, cache.tx, cache.tz, cache.ax, cache.az, cache.points = nil, nil, nil, nil, nil, nil

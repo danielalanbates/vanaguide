@@ -87,6 +87,7 @@ function W.start(target, label)
     W.last, W.walked, W.reason = nil, 0, nil
     W.stuck_since, W.stuck_pos, W.nudge = nil, nil, 0
     W.last_wp, W.last_tick, W.aim, W.nudges, W.best_remaining = nil, nil, nil, 0, nil
+    W.progress_path, W.progress_target = nil, nil
     return true
 end
 
@@ -150,16 +151,28 @@ function W.update(w)
     W.last = now
     if dt <= 0 or dt > 0.5 then return false end     -- a hitch or a zone: skip, do not leap
 
-    -- Progress check: has the entity actually gone anywhere since we last looked?
-    -- Progress means the target got nearer, not that the position changed: a runner
-    -- pressed against a wall bounces half a yalm either way all day (measured 2026-08-29).
     local t = W.target
     local remaining = U.dist(w.x, w.z, t.x, t.z)
+    local points, source
+    if remaining > 4 then points, source = Path.to(w, t) end
+    -- A valid detour can run away from the destination for many seconds. Compare distance
+    -- left along its navmesh path, not the straight line through the obstacle. Stationary
+    -- wall bounce still cannot improve the best remaining distance by half a yalm.
+    local progress = (source == 'navmesh' and Path.remaining)
+        and Path.remaining(points, w.x, w.z, w.y) or remaining
+    local progress_path = (source == 'navmesh') and points or nil
+    local prior_target = W.progress_target
+    if W.progress_path ~= progress_path or prior_target == nil
+        or prior_target.x ~= t.x or prior_target.z ~= t.z or prior_target.y ~= t.y then
+        W.stuck_pos, W.stuck_since, W.best_remaining = nil, nil, nil
+        W.progress_path, W.progress_target = progress_path, {x=t.x,z=t.z,y=t.y}
+    end
     if W.stuck_pos == nil or (W.mode ~= 'follow' and U.dist(w.x, w.z, W.stuck_pos.x, W.stuck_pos.z) > 0.3)
-       or (W.mode == 'follow' and remaining < (W.best_remaining or math.huge) - 0.5) then
+       or (W.mode == 'follow' and progress < (W.best_remaining or math.huge) - 0.5) then
+        local moved = W.stuck_pos and U.dist(w.x, w.z, W.stuck_pos.x, W.stuck_pos.z) or 0
         W.stuck_pos, W.stuck_since = { x = w.x, z = w.z }, now
-        W.best_remaining = remaining
-        if W.nudge ~= 0 and U.dist(w.x, w.z, W.stuck_pos.x, W.stuck_pos.z) > 3 then W.nudge = 0 end
+        W.best_remaining = progress
+        if W.nudge ~= 0 and moved > 3 then W.nudge = 0 end
     elseif now - W.stuck_since > W.stuck_limit then
         W.stop(('stuck at (%.1f, %.1f)'):format(w.x, w.z))
         return false
@@ -181,7 +194,6 @@ function W.update(w)
     -- Follow the drawn path when there is one; otherwise straight at the target.  The last
     -- few yalms go to the target itself, height included: a gate's trigger area is a box
     -- a couple of yalms tall, and arriving at the grid's idea of the floor can miss it.
-    local points = (remaining > 4) and Path.to(w, t) or nil
     local nx, nz, ny = t.x, t.z, t.y
     if points ~= nil and #points >= 2 then
         local i = Path.nearest_index(points, w.x, w.z, w.y)

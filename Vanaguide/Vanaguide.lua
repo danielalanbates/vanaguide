@@ -180,6 +180,7 @@ ashita.events.register('load', 'vg_load', function ()
 end);
 
 ashita.events.register('unload', 'vg_unload', function ()
+    Walk.stop('unloaded');
     save_progress();
     settings.save();
 end);
@@ -842,6 +843,9 @@ ashita.events.register('command', 'vg_command', function (e)
         local rec = R.recommend(step, w);
         if (rec.target == nil) then U.print('walk: the step has no place to walk to (' .. tostring(rec.text) .. ')'); return; end
         local label = (rec.mode == 'travel') and U.zone_name(rec.leg and rec.leg.to) or step.text;
+        -- Restarting must end old crossing retries and restore the original event setting
+        -- before borrowing it again. Saving an already-forced true loses the player's false.
+        Walk.cancel(vg, event);
         Walk.start(rec.target, label);
         vg.walk_auto = (what == 'auto');
         -- Auto-walking ends every event it runs into: a city gate is a gatekeeper event whose
@@ -1225,6 +1229,10 @@ ashita.events.register('d3d_present', 'vg_present', function ()
     end
 
     Window.draw(w, function (name) load_guide(name); end);
+
+    -- A final automatic condition can consume the last step between frames. There is then
+    -- no recommendation branch below to stop the old runner or restore its event override.
+    if (vg.goto_step == nil and P.step() == nil) then Walk.cancel(vg, event); end
 
     if (P.guide ~= nil or vg.goto_step ~= nil) then
         -- A destination asked for by name outranks the guide's own step: the player said
