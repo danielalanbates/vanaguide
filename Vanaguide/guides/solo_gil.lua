@@ -349,7 +349,9 @@ t Trade the Bird Feather and the Two-Leaf Mandragora Bud together to Moreno-Toen
 t Reward: 250 gil and Windurst fame +10. You can keep trading the same pair afterwards for another 250 gil each time.|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
 C Finish Teacher's Pet and verify the reward.|Q|windurst,28||Z|238||POS|169.000,159.000,8||N|Quest completion can be checked from the client. Repeating an already completed quest needs manual tracking; do not assume the first-completion flag proves another payment.|
 t In A Pickle — check requirements and profit first.|N|Start: Waters. Fame: 1.0. Prerequisite: none listed. Needs: Smooth Stone. Listed reward: 200 Bone Hairpin. Repeatable: N. Horizon values may differ from standard LSB details.|
-t Verify In A Pickle on the Horizon wiki before proceeding.|N|No matching standard quest record found. Review the requirements above and confirm the quest giver before travelling.|
+t Talk to Chamama in Windurst Waters North (F-10) and accept In a Pickle.|Z|238|N|You may need to talk more than once before the offer appears.|
+t Trade one Smooth Stone to Chamama.|Z|238|N|The standard quest may reject and consume the stone. Budget for replacement stones and confirm Horizon behavior before buying several.|
+C Finish In a Pickle with Chamama.|Q|windurst,5|Z|238|N|Standard first-clear reward: Bone Hairpin and 200 gil. Later repeats require zoning and another offer. Confirm the Horizon reward before spending.|
 t Truth Justice and the Onion Way — check requirements and profit first.|N|Start: Port Windy. Fame: 1.0. Prerequisite: none listed. Needs: Rarab Tail. Listed reward: Justice Badge. Repeatable: N. Horizon values may differ from standard LSB details.|
 t Talk to Kohlo-Lakolo in Port Windurst and accept the quest in the cutscene.|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
 t Obtain 1 Rarab Tail (this quest's script does not say where).|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
@@ -382,7 +384,9 @@ t Verify Postman Always KO's Twice on the Horizon wiki before proceeding.|N|No m
 t The All New C-2000 — check requirements and profit first.|N|Start: Woods. Fame: 1.0. Prerequisite: none listed. Needs: Rabbit Hide, 2Leaf, Insect Wing. Listed reward: 200.0. Repeatable: N. Horizon values may differ from standard LSB details.|
 t Verify The All New C-2000 on the Horizon wiki before proceeding.|N|No matching standard quest record found. Review the requirements above and confirm the quest giver before travelling.|
 t Creepy Crawlies — check requirements and profit first.|N|Start: Woods. Fame: 1.0. Prerequisite: none listed. Needs: 3 Silk OR 3 Crawler Calc. Listed reward: 600.0. Repeatable: Y. Horizon values may differ from standard LSB details.|
-t Verify Creepy Crawlies on the Horizon wiki before proceeding.|N|No matching standard quest record found. Review the requirements above and confirm the quest giver before travelling.|
+t Talk to Illu Bohjaa in Windurst Woods (I-6) and accept Creepy Crawlies.|Z|241|
+t Obtain three Crawler Calculus or three Silk Thread and trade one full set to Illu Bohjaa.|Z|241|N|Compare selling Silk Thread with the 600-gil standard reward before trading it away. Crawler in East/West Sarutabaruta is a farming option; check difficulty.|
+C Finish Creepy Crawlies and verify the payment.|Q|windurst,39|Z|241|N|Repeatable in standard scripts; later payments need manual tracking rather than the first-completion flag.|
 t Mihgo's Amigo — check requirements and profit first.|N|Start: Woods. Fame: 1.0. Prerequisite: none listed. Needs: 4 Yag Necks. Listed reward: 200.0. Repeatable: Y. Horizon values may differ from standard LSB details.|
 t Farm Yagudo Necklace from Yagudo Acolyte, Yagudo Initiate or Yagudo Scribe in East Sarutabaruta. These enemies can attack and link; pull carefully.|N|Choose targets your job can handle. Compare material sale value with the quest reward before trading.|
 t You cannot start this while The Tenshodo Showdown or As Thick as Thieves is in progress.|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
@@ -392,6 +396,8 @@ t Obtain 4 Yagudo Bead Necklaces (this quest's script does not say where) and tr
 t Reward: 200 gil, Norg fame, and the title Cat Burglar Groupie. Repeatable: trade 4 more necklaces any time for 200 gil and a little Norg fame.|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
 C Finish Mihgo's Amigo and verify the reward.|Q|windurst,25||Z|241||POS|62.000,240.000,8||N|Quest completion can be checked from the client. Repeating an already completed quest needs manual tracking; do not assume the first-completion flag proves another payment.|
 t Paying Lip Service — check requirements and profit first.|N|Start: Woods. Fame: 1.0. Prerequisite: none listed. Needs: 3 Beehive Chip or 2 Remi Shell. Listed reward: 150.0. Repeatable: Y. Horizon values may differ from standard LSB details.|
-t Verify Paying Lip Service on the Horizon wiki before proceeding.|N|No matching standard quest record found. Review the requirements above and confirm the quest giver before travelling.|
+t Talk to Tapoh Lihzeh in Windurst Woods (I-8) and accept Paying Lip Service.|Z|241|POS|51.011,54.402,8|
+t Trade three Beehive Chip OR two Remi Shell to Tapoh Lihzeh.|Z|241|POS|51.011,54.402,8|N|Standard rewards differ: chips pay 150 gil, shells pay 200 gil. Compare the sale value of the materials before trading; confirm Horizon values.|
+C Finish Paying Lip Service and verify the payment.|Q|windurst,60|Z|241|POS|51.011,54.402,8|N|Another active Tapoh quest can take dialogue priority. Complete or progress that conversation if this offer is unavailable.|
 ]],
 })

@@ -20,3 +20,5 @@ Product text update: removed visible spreadsheet references while retaining prov
 Added sourced BST14-18 Tahrongi camp E-5/F-5 with Wild Dhalmel and Akbaba (E-5), from the indexed Horizon Beastmaster Leveling Guide. These camp grids are specific to BST strategy and are not presented as generic safe camps for all jobs.
 
 Named material routes added from Horizon wiki item/monster listings: Zeruhn Soot (Ding Bats/Tunnel Worm, Zeruhn Mines), Bird Feather (Carrion Crow, East/West Sarutabaruta), Yagudo Necklace (Yagudo Acolyte/Initiate/Scribe, East Sarutabaruta), Rabbit Hide (Wild Rabbit, East/West Ronfaure). No unsourced map pin or drop-rate guarantee is added.
+
+Recovered legacy NPC-script instructions for In a Pickle (windurst5), Creepy Crawlies (39), and Paying Lip Service (60). Quest IDs verified in globals/quests.lua and handlers Chamama.lua, Illu_Bohjaa.lua and Tapoh_Lihzeh.lua in the private pinned LSB source. Tapoh coordinates are taken from its explicit !pos comment, not guessed. Added stone rejection/consumption, silk opportunity cost, distinct chip/shell rewards and dialogue-priority notes. Horizon equivalence is not claimed.
