@@ -366,11 +366,15 @@ t Trade the Block of Animal Glue to Hakkuru-Rinkuru.|N|Standard LSB procedure; c
 t Reward: 1,500 gil, Windurst fame, and the title Quick Fixer.|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
 C Finish Making Amends and verify the reward.|Q|windurst,3||Z|240||POS|-111.000,101.000,8||N|Quest completion can be checked from the client. Repeating an already completed quest needs manual tracking; do not assume the first-completion flag proves another payment.|
 t Something Fishy — check requirements and profit first.|N|Start: Port Windy. Fame: 1.0. Prerequisite: none listed. Needs: Bastore Sardine. Listed reward: 70.0. Repeatable: Y. Horizon values may differ from standard LSB details.|
-t Verify Something Fishy on the Horizon wiki before proceeding.|N|No matching standard quest record found. Review the requirements above and confirm the quest giver before travelling.|
+t Talk to Tokaka and accept Something Fishy.|Z|240|POS|-189.678,66.335,8|N|Location and procedure follow standard server scripts; confirm Horizon differences.|
+t Trade exactly one Bastore Sardine after accepting the quest. Standard payout is 70 gil; zone and speak again before another trade.|Z|240|POS|-189.678,66.335,8|
+C Finish Something Fishy with Tokaka.|Q|windurst,52|Z|240|POS|-189.678,66.335,8|N|Verify the actual payment before repeating. The first-completion flag does not prove another turn-in.|
 t Curses, Foiled Again! — check requirements and profit first.|N|Start: Walls. Fame: 1.0. Prerequisite: none listed. Needs: 2 Bone Chips, 1 Bomb Ash. Listed reward: Brass Rod. Repeatable: N. Horizon values may differ from standard LSB details.|
 t Verify Curses, Foiled Again! on the Horizon wiki before proceeding.|N|No matching standard quest record found. Review the requirements above and confirm the quest giver before travelling.|
 t Mandragora Mad — check requirements and profit first.|N|Start: Walls. Fame: 1.0. Prerequisite: none listed. Needs: Cornette,4Leaf,Snobby,3Leaf, Y. Sulfer. Listed reward: 120-5500. Repeatable: Y. Horizon values may differ from standard LSB details.|
-t Verify Mandragora Mad on the Horizon wiki before proceeding.|N|No matching standard quest record found. Review the requirements above and confirm the quest giver before travelling.|
+t Talk to Yoran-Oran and accept Mandragora Mad.|Z|239|POS|-109.987,203.338,8|N|Location and procedure follow standard server scripts; confirm Horizon differences.|
+t Trade one accepted item: Cornette, Yuhtunga Sulfur, Three-Leaf Mandragora Bud, Four-Leaf Mandragora Bud or Snobby Letter. Standard payouts are 200, 250, 1200, 120 and 5500 gil respectively. Compare sale value before trading.|Z|239|POS|-109.987,203.338,8|
+C Finish Mandragora Mad with Yoran-Oran.|Q|windurst,34|Z|239|POS|-109.987,203.338,8|N|Verify the actual payment before repeating. The first-completion flag does not prove another turn-in.|
 t Star Struck — check requirements and profit first.|N|Start: Walls. Fame: 1.0. Prerequisite: none listed. Needs: Torn Epistle, Meteorite. Listed reward: Comp. Eye Circ. Repeatable: N. Horizon values may differ from standard LSB details.|
 t Requires a Torn Epistle in your inventory (this quest's script does not say where to get it).|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
 t Talk to Koru-Moru in Windurst Walls and accept the quest.|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
@@ -380,9 +384,13 @@ t Trade the Meteorite to Koru-Moru in Windurst Walls to finish.|N|Standard LSB p
 t Reward: Compound Eye Circlet and Windurst fame +20.|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
 C Finish Star Struck and verify the reward.|Q|windurst,10||Z|239||POS|-120.000,124.000,8||N|Quest completion can be checked from the client. Repeating an already completed quest needs manual tracking; do not assume the first-completion flag proves another payment.|
 t Postman Always KO's Twice — check requirements and profit first.|N|Start: Walls. Fame: 1.0. Prerequisite: none listed. Needs: Damp, Muddy, Odd, Torn. Listed reward: 50-500. Repeatable: Y. Horizon values may differ from standard LSB details.|
-t Verify Postman Always KO's Twice on the Horizon wiki before proceeding.|N|No matching standard quest record found. Review the requirements above and confirm the quest giver before travelling.|
+t Talk to Ambrosius and accept Postman Always KO's Twice.|Z|239|POS|65.175,-63.231,8|N|Location and procedure follow standard server scripts; confirm Horizon differences.|
+t Trade one each of any combination of Torn Epistle, Muddy Bar Tab, Odd Postcard and Damp Envelope. Standard payouts for 1/2/3/4 different items are 50/150/250/500 gil. Duplicate copies or extra items are not a valid set.|Z|239|POS|65.175,-63.231,8|
+C Finish Postman Always KO's Twice with Ambrosius.|Q|windurst,19|Z|239|POS|65.175,-63.231,8|N|Verify the actual payment before repeating. The first-completion flag does not prove another turn-in.|
 t The All New C-2000 — check requirements and profit first.|N|Start: Woods. Fame: 1.0. Prerequisite: none listed. Needs: Rabbit Hide, 2Leaf, Insect Wing. Listed reward: 200.0. Repeatable: N. Horizon values may differ from standard LSB details.|
-t Verify The All New C-2000 on the Horizon wiki before proceeding.|N|No matching standard quest record found. Review the requirements above and confirm the quest giver before travelling.|
+t Talk to Kopuro-Popuro and accept The All New C-2000.|Z|241|POS|-0.037,-22.589,8|N|Location and procedure follow standard server scripts; confirm Horizon differences.|
+t Trade one Rabbit Hide, one Two-Leaf Mandragora Bud and one Insect Wing together. Standard payout is 200 gil; retain inventory space and confirm the reward.|Z|241|POS|-0.037,-22.589,8|
+C Finish The All New C-2000 with Kopuro-Popuro.|Q|windurst,24|Z|241|POS|-0.037,-22.589,8|N|Verify the actual payment before repeating. The first-completion flag does not prove another turn-in.|
 t Creepy Crawlies — check requirements and profit first.|N|Start: Woods. Fame: 1.0. Prerequisite: none listed. Needs: 3 Silk OR 3 Crawler Calc. Listed reward: 600.0. Repeatable: Y. Horizon values may differ from standard LSB details.|
 t Talk to Illu Bohjaa in Windurst Woods (I-6) and accept Creepy Crawlies.|Z|241|
 t Obtain three Crawler Calculus or three Silk Thread and trade one full set to Illu Bohjaa.|Z|241|N|Compare selling Silk Thread with the 600-gil standard reward before trading it away. Crawler in East/West Sarutabaruta is a farming option; check difficulty.|
