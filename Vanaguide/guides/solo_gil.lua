@@ -192,7 +192,7 @@ G.register({
     steps = [[
 t Choose profitable errands before spending gil.|N|HorizonXI starter route. Skip unaffordable or unsafe quests. Reward is gross, not profit: subtract materials, food, travel and Auction House fees. Gear rewards are not guaranteed cash. Check current prices; no gil/hour promise.|
 t Waters of Cheval — check requirements and profit first.|N|Start: North. Fame: 1.0. Prerequisite: none listed. Needs: Running. Listed reward: Wing Pendant. Repeatable: N. Horizon values may differ from standard LSB details.|
-t Verify Waters of Cheval on the Horizon wiki before proceeding.|N|No matching standard quest record found. Use the spreadsheet requirements above; no invented NPC or arrow.|
+t Verify Waters of Cheval on the Horizon wiki before proceeding.|N|No matching standard quest record found. Review the requirements above and confirm the quest giver before travelling.|
 t The Vicasque's Sermon — check requirements and profit first.|N|Start: North. Fame: 2.0. Prerequisite: Waters of Cheval. Needs: 70g. Listed reward: Brass Ring. Repeatable: N. Horizon values may differ from standard LSB details.|
 t Requires Waters of the Cheval completed.|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
 t Talk to Abioleget in Northern San d'Oria to start the quest.|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
@@ -208,9 +208,9 @@ t Return to Northern San d'Oria and trade the Clump of Batagreens to Abeaule.|N|
 t Reward: Robe, San d'Oria fame, title Green Grocer.|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
 C Finish The Trader in the Forest and verify the reward.|Q|sandoria,7||Z|231||POS|-136.000,56.000,8||N|Quest completion can be checked from the client. Repeating an already completed quest needs manual tracking; do not assume the first-completion flag proves another payment.|
 t Gates To Paradise — check requirements and profit first.|N|Start: North. Fame: 2.0. Prerequisite: none listed. Needs: Running. Listed reward: Cotton Cape. Repeatable: N. Horizon values may differ from standard LSB details.|
-t Verify Gates To Paradise on the Horizon wiki before proceeding.|N|No matching standard quest record found. Use the spreadsheet requirements above; no invented NPC or arrow.|
+t Verify Gates To Paradise on the Horizon wiki before proceeding.|N|No matching standard quest record found. Review the requirements above and confirm the quest giver before travelling.|
 t Undying Flames — check requirements and profit first.|N|Start: North. Fame: 2.0. Prerequisite: none listed. Needs: 2 Beeswax. Listed reward: Friar's Rope. Repeatable: N. Horizon values may differ from standard LSB details.|
-t Verify Undying Flames on the Horizon wiki before proceeding.|N|No matching standard quest record found. Use the spreadsheet requirements above; no invented NPC or arrow.|
+t Verify Undying Flames on the Horizon wiki before proceeding.|N|No matching standard quest record found. Review the requirements above and confirm the quest giver before travelling.|
 t Fear of the Dark — check requirements and profit first.|N|Start: North. Fame: ?. Prerequisite: none listed. Needs: 2 Bat Wings. Listed reward: 200.0. Repeatable: Y. Horizon values may differ from standard LSB details.|
 t Talk to Secodiand in Northern San d'Oria and choose to accept the quest.|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
 t Obtain 2 Bat Wings (this quest's script does not say where).|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
@@ -253,7 +253,7 @@ t Trade the 3 Chunks of Lufet Salt to Nogelle.|N|Standard LSB procedure; confirm
 t Reward: 600 gil, 10 San d'Oria fame, title Bean Cuisine Salter.|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
 C Finish Lufet's Lake Salt and verify the reward.|Q|sandoria,81||Z|232||POS|-70.000,-33.000,8||N|Quest completion can be checked from the client. Repeating an already completed quest needs manual tracking; do not assume the first-completion flag proves another payment.|
 t Thick Shells — check requirements and profit first.|N|Start: Port S. Fame: 2.0. Prerequisite: none listed. Needs: 5 Beetle Shells. Listed reward: 750.0. Repeatable: Y. Horizon values may differ from standard LSB details.|
-t Verify Thick Shells on the Horizon wiki before proceeding.|N|No matching standard quest record found. Use the spreadsheet requirements above; no invented NPC or arrow.|
+t Verify Thick Shells on the Horizon wiki before proceeding.|N|No matching standard quest record found. Review the requirements above and confirm the quest giver before travelling.|
 t A Sentry's Peril — check requirements and profit first.|N|Start: Southern. Fame: 1.0. Prerequisite: none listed. Needs: Running. Listed reward: Bronze Subl. Repeatable: N. Horizon values may differ from standard LSB details.|
 t Talk to Glenne in Southern San d'Oria and accept. She gives you a Dose of Ointment, and she gives you another if you lose it.|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
 t Go to West Ronfaure and find the guard Aaveleon on the road to Ghelsba Outpost (G-6).|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
@@ -343,7 +343,7 @@ t Trade the Bird Feather and the Two-Leaf Mandragora Bud together to Moreno-Toen
 t Reward: 250 gil and Windurst fame +10. You can keep trading the same pair afterwards for another 250 gil each time.|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
 C Finish Teacher's Pet and verify the reward.|Q|windurst,28||Z|238||POS|169.000,159.000,8||N|Quest completion can be checked from the client. Repeating an already completed quest needs manual tracking; do not assume the first-completion flag proves another payment.|
 t In A Pickle — check requirements and profit first.|N|Start: Waters. Fame: 1.0. Prerequisite: none listed. Needs: Smooth Stone. Listed reward: 200 Bone Hairpin. Repeatable: N. Horizon values may differ from standard LSB details.|
-t Verify In A Pickle on the Horizon wiki before proceeding.|N|No matching standard quest record found. Use the spreadsheet requirements above; no invented NPC or arrow.|
+t Verify In A Pickle on the Horizon wiki before proceeding.|N|No matching standard quest record found. Review the requirements above and confirm the quest giver before travelling.|
 t Truth Justice and the Onion Way — check requirements and profit first.|N|Start: Port Windy. Fame: 1.0. Prerequisite: none listed. Needs: Rarab Tail. Listed reward: Justice Badge. Repeatable: N. Horizon values may differ from standard LSB details.|
 t Talk to Kohlo-Lakolo in Port Windurst and accept the quest in the cutscene.|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
 t Obtain 1 Rarab Tail (this quest's script does not say where).|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
@@ -358,11 +358,11 @@ t Trade the Block of Animal Glue to Hakkuru-Rinkuru.|N|Standard LSB procedure; c
 t Reward: 1,500 gil, Windurst fame, and the title Quick Fixer.|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
 C Finish Making Amends and verify the reward.|Q|windurst,3||Z|240||POS|-111.000,101.000,8||N|Quest completion can be checked from the client. Repeating an already completed quest needs manual tracking; do not assume the first-completion flag proves another payment.|
 t Something Fishy — check requirements and profit first.|N|Start: Port Windy. Fame: 1.0. Prerequisite: none listed. Needs: Bastore Sardine. Listed reward: 70.0. Repeatable: Y. Horizon values may differ from standard LSB details.|
-t Verify Something Fishy on the Horizon wiki before proceeding.|N|No matching standard quest record found. Use the spreadsheet requirements above; no invented NPC or arrow.|
+t Verify Something Fishy on the Horizon wiki before proceeding.|N|No matching standard quest record found. Review the requirements above and confirm the quest giver before travelling.|
 t Curses, Foiled Again! — check requirements and profit first.|N|Start: Walls. Fame: 1.0. Prerequisite: none listed. Needs: 2 Bone Chips, 1 Bomb Ash. Listed reward: Brass Rod. Repeatable: N. Horizon values may differ from standard LSB details.|
-t Verify Curses, Foiled Again! on the Horizon wiki before proceeding.|N|No matching standard quest record found. Use the spreadsheet requirements above; no invented NPC or arrow.|
+t Verify Curses, Foiled Again! on the Horizon wiki before proceeding.|N|No matching standard quest record found. Review the requirements above and confirm the quest giver before travelling.|
 t Mandragora Mad — check requirements and profit first.|N|Start: Walls. Fame: 1.0. Prerequisite: none listed. Needs: Cornette,4Leaf,Snobby,3Leaf, Y. Sulfer. Listed reward: 120-5500. Repeatable: Y. Horizon values may differ from standard LSB details.|
-t Verify Mandragora Mad on the Horizon wiki before proceeding.|N|No matching standard quest record found. Use the spreadsheet requirements above; no invented NPC or arrow.|
+t Verify Mandragora Mad on the Horizon wiki before proceeding.|N|No matching standard quest record found. Review the requirements above and confirm the quest giver before travelling.|
 t Star Struck — check requirements and profit first.|N|Start: Walls. Fame: 1.0. Prerequisite: none listed. Needs: Torn Epistle, Meteorite. Listed reward: Comp. Eye Circ. Repeatable: N. Horizon values may differ from standard LSB details.|
 t Requires a Torn Epistle in your inventory (this quest's script does not say where to get it).|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
 t Talk to Koru-Moru in Windurst Walls and accept the quest.|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
@@ -372,11 +372,11 @@ t Trade the Meteorite to Koru-Moru in Windurst Walls to finish.|N|Standard LSB p
 t Reward: Compound Eye Circlet and Windurst fame +20.|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
 C Finish Star Struck and verify the reward.|Q|windurst,10||Z|239||POS|-120.000,124.000,8||N|Quest completion can be checked from the client. Repeating an already completed quest needs manual tracking; do not assume the first-completion flag proves another payment.|
 t Postman Always KO's Twice — check requirements and profit first.|N|Start: Walls. Fame: 1.0. Prerequisite: none listed. Needs: Damp, Muddy, Odd, Torn. Listed reward: 50-500. Repeatable: Y. Horizon values may differ from standard LSB details.|
-t Verify Postman Always KO's Twice on the Horizon wiki before proceeding.|N|No matching standard quest record found. Use the spreadsheet requirements above; no invented NPC or arrow.|
+t Verify Postman Always KO's Twice on the Horizon wiki before proceeding.|N|No matching standard quest record found. Review the requirements above and confirm the quest giver before travelling.|
 t The All New C-2000 — check requirements and profit first.|N|Start: Woods. Fame: 1.0. Prerequisite: none listed. Needs: Rabbit Hide, 2Leaf, Insect Wing. Listed reward: 200.0. Repeatable: N. Horizon values may differ from standard LSB details.|
-t Verify The All New C-2000 on the Horizon wiki before proceeding.|N|No matching standard quest record found. Use the spreadsheet requirements above; no invented NPC or arrow.|
+t Verify The All New C-2000 on the Horizon wiki before proceeding.|N|No matching standard quest record found. Review the requirements above and confirm the quest giver before travelling.|
 t Creepy Crawlies — check requirements and profit first.|N|Start: Woods. Fame: 1.0. Prerequisite: none listed. Needs: 3 Silk OR 3 Crawler Calc. Listed reward: 600.0. Repeatable: Y. Horizon values may differ from standard LSB details.|
-t Verify Creepy Crawlies on the Horizon wiki before proceeding.|N|No matching standard quest record found. Use the spreadsheet requirements above; no invented NPC or arrow.|
+t Verify Creepy Crawlies on the Horizon wiki before proceeding.|N|No matching standard quest record found. Review the requirements above and confirm the quest giver before travelling.|
 t Mihgo's Amigo — check requirements and profit first.|N|Start: Woods. Fame: 1.0. Prerequisite: none listed. Needs: 4 Yag Necks. Listed reward: 200.0. Repeatable: Y. Horizon values may differ from standard LSB details.|
 t You cannot start this while The Tenshodo Showdown or As Thick as Thieves is in progress.|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
 t In Windurst Woods, talk to Nanaa Mihgo to start the quest.|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
@@ -385,6 +385,6 @@ t Obtain 4 Yagudo Bead Necklaces (this quest's script does not say where) and tr
 t Reward: 200 gil, Norg fame, and the title Cat Burglar Groupie. Repeatable: trade 4 more necklaces any time for 200 gil and a little Norg fame.|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
 C Finish Mihgo's Amigo and verify the reward.|Q|windurst,25||Z|241||POS|62.000,240.000,8||N|Quest completion can be checked from the client. Repeating an already completed quest needs manual tracking; do not assume the first-completion flag proves another payment.|
 t Paying Lip Service — check requirements and profit first.|N|Start: Woods. Fame: 1.0. Prerequisite: none listed. Needs: 3 Beehive Chip or 2 Remi Shell. Listed reward: 150.0. Repeatable: Y. Horizon values may differ from standard LSB details.|
-t Verify Paying Lip Service on the Horizon wiki before proceeding.|N|No matching standard quest record found. Use the spreadsheet requirements above; no invented NPC or arrow.|
+t Verify Paying Lip Service on the Horizon wiki before proceeding.|N|No matching standard quest record found. Review the requirements above and confirm the quest giver before travelling.|
 ]],
 })
