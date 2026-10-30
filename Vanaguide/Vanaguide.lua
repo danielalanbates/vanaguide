@@ -120,7 +120,7 @@ local function load_guide(name)
         U.print('no guide named "' .. tostring(name) .. '"');
         return false;
     end
-    P.set_guide(guide, vg.settings.progress[guide.progress_id or guide.name]);
+    P.set_guide(guide, vg.settings.progress[name] or vg.settings.progress[guide.progress_id or guide.name], name);
     save_progress();
     U.print(('loaded "%s" (%d steps, on step %d)'):format(guide.name, P.count(), P.index));
     return true;

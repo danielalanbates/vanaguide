@@ -14,7 +14,25 @@ local P = {
 }
 
 --- Start (or resume) a guide.  Resuming keeps whatever was already recorded for it.
-function P.set_guide(guide, saved)
+function P.set_guide(guide, saved, requested_name)
+    if saved and guide.legacy_steps and saved.revision ~= guide.revision then
+        local location = (requested_name == guide.legacy_progress_id and guide.legacy_start)
+            or saved.starting_location or guide.default_start
+        local route = {}
+        for i, step in ipairs(guide.steps) do
+            if not step.home or step.home == location then route[#route + 1] = i end
+        end
+        local function flags(old)
+            local new = {}
+            for i, value in pairs(old or {}) do
+                if route[tonumber(i)] then new[route[tonumber(i)]] = value end
+            end
+            return new
+        end
+        saved = { index = route[saved.index or 1] or (#guide.steps + 1),
+                  checked = flags(saved.checked), skipped = flags(saved.skipped),
+                  starting_location = location, revision = guide.revision }
+    end
     P.guide = guide
     P.index = (saved and saved.index) or 1
     P.skipped = (saved and saved.skipped) or {}
@@ -116,7 +134,7 @@ function P.complete()
 end
 
 function P.save_state()
-    return { index = P.index, skipped = P.skipped, checked = P.checked, starting_location = P.starting_location }
+    return { index = P.index, skipped = P.skipped, checked = P.checked, starting_location = P.starting_location, revision = P.guide and P.guide.revision }
 end
 
 return P

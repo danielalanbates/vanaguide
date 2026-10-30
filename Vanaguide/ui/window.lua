@@ -123,7 +123,7 @@ function W.draw(w, on_pick)
                 end
             end
             if #starts > 0 then
-                if imgui.BeginCombo('Starting location', current_start or starts[1].name) then
+                if imgui.BeginCombo(guide.start_label or 'Starting location', current_start or starts[1].name) then
                     for _, location in ipairs(starts) do
                         if imgui.Selectable(location.name, current_start == location.name) then
                             P.starting_location = location.name

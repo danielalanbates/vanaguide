@@ -50,3 +50,18 @@ The generated 506-quest/mission checklists remain checklists. Correcting these t
 routes does not turn every entry into a complete walkthrough. Next work should source
 farming instructions, validate both routes on the user's local LSB world, then add other
 quests with the same source and evidence discipline. Never test addons on hosted servers.
+
+## Combined town selector (2026-10-30)
+
+The active file now registers one Support jobs guide with Selbina and Mhaura branches.
+There are 17 stored steps and 10 steps per selected route. The two alternatives remain
+mutually exclusive; the route picker never asks a character to complete both. Each branch
+includes the exact item sources, NPC G-10, verified single-item trade checkpoints, and a
+shared final instruction to change zones before setting the support job at a Mog House.
+Horizon wiki Elder_Memories, The_Old_Lady and each material/monster page were reviewed for
+these additions. No precise spawn pin or soloability guarantee is inferred from zone tables.
+
+Existing Selbina identity stays stable. Mhaura's old name resolves to the combined guide;
+legacy cursors and manual flags migrate into the selected branch. Native migration matches
+instruction titles and retains completion of either alternative as the same unlocked guide.
+The prior two-registration file is archived outside the active guide directory.

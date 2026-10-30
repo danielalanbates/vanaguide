@@ -179,9 +179,9 @@ ok(shipped >= 3, 'at least three guides ship')
 do
     local qdb = require('data.quests')
     local routes = {
-        { name = 'Support jobs', quest = 24, zone = 248, x = -54, z = -44,
+        { name = 'Support jobs', town = 'Selbina', quest = 24, zone = 248, x = -54, z = -44,
           npc = 'Isacio', items = { 538, 537, 539 } },
-        { name = 'Support jobs - Mhaura', quest = 10, zone = 249, x = -49, z = 20,
+        { name = 'Support jobs - Mhaura', town = 'Mhaura', quest = 10, zone = 249, x = -49, z = 20,
           npc = 'Vera', items = { 542, 541, 540 } },
     }
     local old_current = story.quest.current.other
@@ -191,7 +191,10 @@ do
         ok(g ~= nil, route.name .. ' is registered by guides.init')
         if g then
             local accept, turnin, level, items, trades = nil, nil, nil, {}, {}
-            for _, s in ipairs(g.steps) do
+            local routeSteps = {}
+            for _, step in ipairs(g.steps) do if not step.home or step.home == route.town then routeSteps[#routeSteps + 1] = step end end
+            eq(#routeSteps, 10, route.town .. ' combined support route has ten steps')
+            for _, s in ipairs(routeSteps) do
                 if s.quest_accept then accept = s end
                 if s.quest then turnin = s end
                 if s.level then level = s end
@@ -237,6 +240,17 @@ do
             ok(C.done(turnin, w), route.name .. ' completed quest ticks final turn-in')
         end
     end
+    local support = G.get('Support jobs')
+    eq(G.guides['Support jobs - Mhaura'], nil, 'support-job alternatives share one menu entry')
+    P.set_guide(support, { index = 7, checked = { [6] = true } }, 'Support jobs - Mhaura')
+    eq(P.starting_location, 'Mhaura', 'legacy Mhaura progress retains its town')
+    eq(P.step().home, 'Mhaura', 'legacy Mhaura step maps into its combined branch')
+    eq(P.step().text, 'Trade one Wild Rabbit Tail to Vera, then finish the dialogue.', 'legacy Mhaura trade cursor is preserved')
+    local savedSupport = P.save_state()
+    P.set_guide(support, savedSupport, 'Support jobs')
+    eq(P.step().text, 'Trade one Wild Rabbit Tail to Vera, then finish the dialogue.', 'new support progress is not migrated twice')
+    P.set_guide(support, { index = 10 }, 'Support jobs')
+    eq(P.index, #support.steps, 'old Selbina final step maps to shared ending')
     story.quest.current.other = old_current
     story.quest.completed.other = old_completed
     local starter_text = {}
