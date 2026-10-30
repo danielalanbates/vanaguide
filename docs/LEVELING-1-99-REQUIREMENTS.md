@@ -10,3 +10,5 @@ Current official-source review2026-10-30: Horizon homepage advertises75 cap and 
 
 Copyright (c)2026 Daniel Bates / Bates LLC. All rights reserved.
 https://batesai.org · help@batesai.org
+
+Implemented explicit EXP/GIL target pairs in each of the five existing Horizon starter combat steps. Named loot sources are sourced from the Horizon item/monster pages reviewed in this session. This improves the starter content but does not complete1-75/99 coverage; do not relabel the route as complete. Higher-level camps and NM alternatives require continued source verification.
