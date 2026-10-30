@@ -96,7 +96,7 @@ function W.draw(w, on_pick)
     else
         imgui.SetNextWindowSize({ fw, fh }, ImGuiCond_FirstUseEver)
     end
-    if imgui.Begin('Vanaguide', W.open) then
+    if imgui.Begin('VanaGuide (Beta)', W.open) then
         local guide = P.guide
         if guide == nil then
             imgui.Text('No guide loaded.')
@@ -188,7 +188,7 @@ function W.draw(w, on_pick)
         imgui.SetNextWindowSize({ math.min(340, W.screen.w - 40), math.min(240, W.screen.h - 60) },
                                 ImGuiCond_FirstUseEver)
         -- Plain hyphen: FFXI's font has no em dash and prints garbage for it.
-        if imgui.Begin('Vanaguide - guides', W.picker) then
+        if imgui.Begin('VanaGuide (Beta) - guides', W.picker) then
             for _, g in ipairs(G.list()) do
                 if imgui.Button(g.name) then
                     if on_pick ~= nil then on_pick(g.name) end
