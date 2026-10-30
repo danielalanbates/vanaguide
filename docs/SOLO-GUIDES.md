@@ -1,0 +1,16 @@
+# Solo guides and starting food
+
+Starting out now resolves food advice from the current main job and nation each time the step is read. Named home-nation shops and stock restrictions are included. The static guide text includes all three vendors for readers that do not execute Lua. Existing saved step indices may need reviewing because the weapon/food step was split.
+
+Solo EXP - HorizonXI currently covers 1-25, including starting-region and caster/melee notes. Its Tahrongi progression is an original summary of Jordy’s https://horizonffxi.wiki/A_solo_guide_to_leveling, reviewed 2026-10-30. It makes no EXP/hour claim and explicitly ends at 25 pending further camp validation.
+
+Solo Gil - HorizonXI provides three nation guides from 61 factual rows in the user-provided HorizonXI Low Lvl Quests For Gear And Gil.xlsx, Hor-Early Quests sheet. Personal completion columns are excluded. Quest procedures and coordinates come from existing standard LSB data and are labelled accordingly; they are not verified Horizon overrides. Spreadsheet reward estimates remain identified as such. Buying costs, prerequisites, repeatability and gear-versus-cash distinctions appear before procedures.
+
+Guides use static registration payloads readable by both addon and companion. Companion support for note steps and live character-dependent food still needs implementation/verification. No installed apps changed. No hosted addon testing performed.
+
+Validation: 1,477 offline assertions passed; all 18 starting-job/home-nation food combinations checked. Live gameplay, standalone parsing/layout and app packaging remain pending.
+
+Further requested scope: solo EXP beyond 25, expanded server-specific wiki guide inventory/imports, Horizon validation of spreadsheet discrepancies, and standalone character-specific presentation.
+
+Copyright (c) 2026 Daniel Bates / Bates LLC. All rights reserved.
+https://batesai.org · help@batesai.org

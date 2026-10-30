@@ -24,7 +24,9 @@ end
 
 function P.step(i)
     if P.guide == nil then return nil end
-    return P.guide.steps[i or P.index]
+    local step = P.guide.steps[i or P.index]
+    if step and step.resolve then return step.resolve(step) end
+    return step
 end
 
 function P.count()
