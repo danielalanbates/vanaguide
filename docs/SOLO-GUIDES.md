@@ -40,3 +40,19 @@ Existing quest IDs, destination coordinates, prerequisites, rewards and source c
 are retained. Old saved addon nation-route records are left intact; the combined route
 has a new name and starts fresh. Companion quest completion remains keyed by quest ID.
 No addon was installed or tested on a hosted server.
+
+## Searchable monster reference
+
+`data/monster_search.lua` is generated from public LSB SQL and `data/ecosystems.yaml`
+by `tools/gen_monster_search.py` (requires PyYAML). It has 10,793 distinct name/zone
+records, joined by both group ID and zone; levels come from spawn rows. It is a standard
+reference, not proof of a private server's population. Drop names are a union of possible
+positive-rate source entries, without a rate or profitability promise.
+
+`data/servers/horizonxi/monster_search.lua` supplies 30 Horizon rabbit/zone entries from
+https://horizonffxi.wiki/Category:Rabbits (reviewed 2026-10-30). A server-specific family
+replaces the standard family in search, so Horizon rabbit results do not include a Nyzul
+Jack or later-era standard variants. Jack's entry retains West Ronfaure, levels 9–10,
+G-9–H-9 Forest Hare lottery and Rabbit Charm. Other families remain explicitly labelled
+standard reference until separately sourced for the server. This is not a complete
+Horizon bestiary. No private client files or account data were exported.
