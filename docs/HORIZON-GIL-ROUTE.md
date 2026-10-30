@@ -1,4 +1,4 @@
-# Horizon Solo Gil leveling itinerary
+# Horizon Solo Guide itinerary
 
 Reviewed 2026-10-30 using HorizonXI Wiki pages and indexed copies of those pages. The wiki
 is the source for included monster levels, drops, quest payments, NPC locations and named
@@ -38,7 +38,7 @@ It is not loaded or bundled. Its generic standard-LSB procedures have not all be
 against Horizon and must not be described as verified. The new active itinerary uses
 reviewed Horizon instructions and removes the repeated “may differ” placeholders.
 
-Run `python3 tools/build_horizon_gil.py` to regenerate. The source inventory below records
+Run `python3 tools/build_horizon_solo.py` to regenerate. The source inventory below records
 all shipped steps and their principal reference; a step can also use facts reviewed on the
 related monster, item and zone pages cited throughout this work. Cached wiki text is not
 published. Offline tests check source links, all city branches, level coverage, paired mob
@@ -92,3 +92,15 @@ targets, correct quest flags, branch skipping, and retention of the superseded r
 | 42 | Levels 71-75: Polar Hare. | All starts | [Wiki](https://horizonffxi.wiki/Uleguerand_Range) |
 | 43 | Optional NM at 75: Bonnacon. | All starts | [Wiki](https://horizonffxi.wiki/Bonnacon) |
 | 44 | Level 75: keep your best gil circuit. | All starts | [Wiki](https://horizonffxi.wiki/Character_Progression_Guide_1-75_for_New_Players) |
+
+## Unified guide and separate goals
+
+`Solo Guide - HorizonXI` replaces both EXP and Gil menu entries. Each leveling step keeps
+EXP and Gil in separate data tags, rendered as two bullet points by both readers. Notes,
+quest detours, NM opportunities, city choices and the 30-step per-origin itinerary remain.
+`progress_id = "Solo Gil - HorizonXI"` keeps the stable bookmark identity for the previous
+itinerary; `legacy_progress_id` identifies the old EXP route for native migration by level
+band. Retired EXP source and generator are archived outside the active guide directory.
+The addon resolves old guide names to the unified guide and uses the stable Gil save key.
+A legacy addon EXP-only index cannot safely identify its new instruction and starts the
+unified route unless an existing Gil bookmark is available; old EXP saved data is retained.

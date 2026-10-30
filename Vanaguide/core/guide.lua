@@ -93,6 +93,10 @@ function G.parse_line(line, lineno)
             step.rank = tonumber(value)
         elseif tag == 'SP' then
             step.spell = tonumber(value)
+        elseif tag == 'EXP' then
+            step.exp_goal = value
+        elseif tag == 'GIL' then
+            step.gil_goal = value
         elseif tag == 'HOME' then
             step.home = value
         elseif tag == 'SRC' then
@@ -141,6 +145,8 @@ function G.register(def)
         author = def.author or 'unknown',
         nation = def.nation,
         server = def.server,
+        progress_id = def.progress_id,
+        legacy_progress_id = def.legacy_progress_id,
         levels = def.levels,
         desc = def.desc,
         steps = steps,
@@ -151,7 +157,13 @@ function G.register(def)
     return guide
 end
 
-function G.get(name) return G.guides[name] end
+function G.get(name)
+    if name == nil then return nil end
+    if G.guides[name] then return G.guides[name] end
+    for _, guide in pairs(G.guides) do
+        if name == guide.progress_id or name == guide.legacy_progress_id then return guide end
+    end
+end
 
 function G.list()
     local out = {}

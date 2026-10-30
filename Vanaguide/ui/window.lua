@@ -141,6 +141,8 @@ function W.draw(w, on_pick)
                 imgui.Separator()
                 text_colored({ 0.9, 0.9, 1.0, 1.0 },
                     ('%s: %s'):format(VERB_LABEL[step.kind] or '?', step.text))
+                if step.exp_goal then wrapped('- EXP: ' .. step.exp_goal) end
+                if step.gil_goal then wrapped('- Gil: ' .. step.gil_goal) end
                 if narrow and step.note then
                     local location = step.note:match('^Starting location: ([^.]+)%.')
                     if location then wrapped('Starting location: ' .. location) end

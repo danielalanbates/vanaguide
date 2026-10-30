@@ -66,3 +66,9 @@ quest instructions were checked against Horizon wiki pages, and recurring generi
 caveats were removed from the active guide. Six NM opportunities and 16 paired EXP/gil
 camp stages provide alternatives to quest-only income. Market prices remain user-checked;
 no source can establish a permanent current Auction House value.
+
+## One Horizon Solo Guide
+
+The active menu now shows `Solo Guide - HorizonXI`, with explicit EXP/Gil goal bullets.
+The separate EXP and Gil registrations were removed. Source details and the unified
+itinerary are documented in HORIZON-GIL-ROUTE.md; regenerate with build_horizon_solo.py.

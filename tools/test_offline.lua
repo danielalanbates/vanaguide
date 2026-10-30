@@ -518,9 +518,14 @@ end
 
 -- The gil itinerary combines leveling, quests, materials and NM opportunities.
 do
-    require('guides.solo_gil')
-    local merged = G.guides['Solo Gil - HorizonXI']
+    require('guides.solo_horizon')
+    local merged = G.guides['Solo Guide - HorizonXI']
     ok(merged ~= nil, 'one combined Horizon gil guide registers')
+    eq(G.get(nil), nil, 'missing saved guide does not match an absent alias')
+    eq(G.guides['Solo EXP - HorizonXI'], nil, 'separate EXP menu entry removed')
+    eq(G.guides['Solo Gil - HorizonXI'], nil, 'separate gil menu entry removed')
+    eq(G.get('Solo Gil - HorizonXI'), merged, 'saved gil guide name resolves to unified route')
+    eq(G.get('Solo EXP - HorizonXI'), merged, 'saved EXP guide name resolves to unified route')
     local starts, quests, nms = {}, {}, 0
     for _, step in ipairs(merged.steps) do
         if step.starting_location then starts[#starts + 1] = step.starting_location end
@@ -530,7 +535,7 @@ do
         if step.quest then quests[step.quest.area .. ',' .. step.quest.id] = true end
         if step.text:find('Optional NM', 1, true) then nms = nms + 1 end
         if step.level then
-            ok(step.note:find('EXP:', 1, true) and step.note:find('GIL:', 1, true), 'every leveling camp pairs EXP and gil mobs')
+            ok(step.exp_goal and step.gil_goal, 'every leveling camp has separate EXP and gil goals')
         end
     end
     eq(table.concat(starts, ';'), "Windurst;San d'Oria;Bastok", 'three starting-city entry points')
