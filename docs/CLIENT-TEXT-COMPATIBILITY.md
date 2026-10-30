@@ -22,3 +22,11 @@ After compatibility is established, rerun strict two-quest acceptance without te
 
 Copyright (c) 2026 Daniel Bates / Bates LLC. All rights reserved.
 https://batesai.org · help@batesai.org
+
+## Newer-client runtime retest, 2026-10-30
+
+The complete candidate root was staged privately and all 64 root entries verified against its source. Normal minimum-version locking was restored. The client entered Port San d Oria and the server registered the character. Guide, voice, command pipe and autologin loaded. The login log still emitted an incorrect-version warning before entry; full protocol compatibility remains unproven.
+
+With guide commit 403ee39 copied only into the private fixture and reloaded once, follow mode with server nudges disabled selected the generated Northern San d Oria crossing. It reported 24 yalms walked, then stopped stuck at (-23.3, -123.1), still in zone 232. This is a failed route, not strict acceptance. Quest 12 was retained from the earlier diagnostic and no new quest acceptance was proven.
+
+A single normal /shutdown was sent after recording the result. Exit must be verified before stopping the owned private server. Next inspect the start position, navmesh path and client collision geometry; do not convert this into a pass using teleports or server movement.
