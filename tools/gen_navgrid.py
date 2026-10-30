@@ -159,7 +159,7 @@ def choose_cell(width, height, max_cells, wanted):
     return 16.0
 
 
-def rasterise(polys, cell, max_cells, wanted):
+def rasterise(polys, cell, max_cells, wanted, center_only=False):
     """-> (ox, oz, w, h, mask, heights) with mask a bytearray of 0/1 and heights a list."""
     xs = [p[0] for ring in polys for p in ring]
     zs = [p[1] for ring in polys for p in ring]
@@ -196,6 +196,8 @@ def rasterise(polys, cell, max_cells, wanted):
         plane = plane_of(ring)
 
         def put(c, r, y):
+            if center_only and not inside(ring, ox + (c + 0.5) * cell, oz + (r + 0.5) * cell):
+                return
             if c < 0 or r < 0 or c >= w or r >= h:
                 return
             if y < ylo:
@@ -335,6 +337,8 @@ def main():
                     help='finest cell size in yalms (default 2)')
     ap.add_argument('--max-cells', type=int, default=150000,
                     help='cap on cells per zone; the cell size grows to fit (default 150000)')
+    ap.add_argument('--center-only', action='store_true',
+                    help='experimental: exclude boundary cells whose centers lie outside mesh polygons; may disconnect narrow passages')
     args = ap.parse_args()
 
     root = args.root
@@ -373,7 +377,7 @@ def main():
             skipped += 1
             continue
         ox, oz, w, h, cell, mask, heights, upper = rasterise(polys, args.cell,
-                                                             args.max_cells, args.cell)
+                                                             args.max_cells, args.cell, args.center_only)
         n = write_grid(os.path.join(args.out, '%d.vgnav' % zone), zone,
                        ox, oz, w, h, cell, mask, heights, upper)
         total_bytes += n
