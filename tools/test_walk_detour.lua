@@ -38,3 +38,24 @@ assert(not Walk.active and Walk.reason:find('stuck') and running==0,
        'wall bounce must still stop and release autorun')
 assert(#commands==0,'a blocked strict run must never send a nudge')
 print('4 detour/wall-bounce regressions passed')
+
+-- A blocked navmesh follower must keep the first corridor leg. Skipping later
+-- corners or sidestepping outside the route defeats collision-aware planning.
+local deltas={}
+AshitaCore.GetMemoryManager=function() return {
+ GetParty=function() return {GetMemberTargetIndex=function() return 1 end} end,
+ GetAutoFollow=function() return setmetatable({}, {__index=function(_,name)
+  return function(_,value) deltas[name]=value end
+ end}) end,
+} end
+Path.forget()
+assert(Walk.start({x=100,z=0,y=0},'blocked corridor'))
+for i=1,40 do
+ clock=(400+i)*100
+ Walk.update({x=0,z=0,y=0,zone=232})
+end
+assert(Walk.active,'test samples recovery before terminal stuck timeout')
+assert(math.abs(deltas.SetFollowDeltaX)<1e-9 and deltas.SetFollowDeltaY>0,
+ 'navmesh recovery must keep the corridor heading instead of skipping corners or sidestepping')
+Walk.stop('fixture complete')
+print('navmesh recovery corridor check passed')

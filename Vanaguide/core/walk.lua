@@ -200,7 +200,8 @@ function W.update(w)
         -- Aim past the nearest point so a point already reached does not pin us in place.
         local j = i
         while j < #points and U.dist(w.x, w.z, points[j].x, points[j].z) < 1.5 do j = j + 1 end
-        if stuck then j = math.min(#points, j + math.abs(W.nudge)) end
+        -- Keep mesh corners intact: unvalidated skips can cut through a wall.
+        if stuck and source ~= 'navmesh' then j = math.min(#points, j + math.abs(W.nudge)) end
         if W.mode == 'server' or W.mode == 'follow' then
             -- Aim at the far end of the straight stretch ahead, not the next sample: the
             -- server walks a straight line anyway, and one command per corner is quieter
@@ -231,7 +232,9 @@ function W.update(w)
     end
 
     local dx, dz = nx - w.x, nz - w.z
-    if stuck and W.nudge ~= 0 then
+    -- A mesh path already encodes traversable space; arbitrary lateral recovery
+    -- has no collision clearance. Retain the normal blocked timeout instead.
+    if stuck and W.nudge ~= 0 and source ~= 'navmesh' then
         -- Sidestep: a perpendicular shove of a couple of yalms, side chosen by the nudge sign.
         local d0 = math.sqrt(dx * dx + dz * dz)
         if d0 > 1e-3 then
