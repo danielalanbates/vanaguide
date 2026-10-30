@@ -46,7 +46,7 @@ automation. Keep data proposals as reviewable PRs; this workflow never merges th
 publishes an application release. A source-data improvement reaches shipped guide snapshots
 only when the beta app is rebuilt and later passes the public release gates.
 
-The repository's Actions settings currently report `can_approve_pull_request_reviews=false`,
+The repository's Actions settings initially reported `can_approve_pull_request_reviews=false`,
 which also prevents `GITHUB_TOKEN` from creating proposal PRs. Enabling the repository setting
 “Allow GitHub Actions to create and approve pull requests” is required for automatic proposals;
 keep default token permissions read-only and grant writes only in the proposal job. No secret
@@ -71,3 +71,13 @@ unchanged. Existing authored zone/giver fields, partial entries, title mismatche
 conflicts remain protected. The integration PR must land on the default branch before its
 trusted push automation can run there; a beta-branch checkout alone does not activate it.
 No installed app or game data was changed by this integration.
+
+The owner's automatic-suggestion instruction authorizes the necessary repository setting.
+Enabled GitHub's bundled **Allow GitHub Actions to create and approve pull requests** setting
+and read it back: `can_approve_pull_request_reviews=true`; default workflow permissions remain
+`read`. GitHub bundles the ability to create PRs with approval permission in this setting.
+This workflow creates proposal PRs only: it has no approval or merge step, and never publishes
+an application. PR validation still has read-only permissions; the write-granted proposal job
+runs only on the trusted `master` branch, never on `pull_request` events. Its importer parses
+suggested exports without evaluating their Lua. The setting is ready, but the workflow still
+needs to reach `master` before automatic proposal generation is active there.
