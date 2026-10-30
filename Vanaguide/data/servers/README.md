@@ -16,7 +16,7 @@ for anything a folder lacks.
 | `leveldown99/` | LevelDown's own site (the Fandom wiki refused an honest crawler) | notes |
 | `mistxi/`, `moghousexi/` | mistxi.com; moghouse.cc and tagban/moghouse-lsb | notes |
 
-Not collected: HorizonXI and AscensionXI wikis (their robots.txt blocks AI crawlers).
+HorizonXI now has a small, attributed early-solo summary and coverage note from pages available through the browser search service (reviewed 2026-10-30). This is not a bulk wiki import: the category lists 89 guides and most remain uncollected. Direct crawler restrictions still apply; no blocked endpoint was bypassed. AscensionXI remains uncollected.
 
 Gear and skill files are factual data (ids, rates, recipes, prices, sources). Notes and quest
 walkthroughs from sites that state no licence were rewritten as short summaries in our own words

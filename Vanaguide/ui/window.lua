@@ -96,7 +96,7 @@ function W.draw(w, on_pick)
     else
         imgui.SetNextWindowSize({ fw, fh }, ImGuiCond_FirstUseEver)
     end
-    if imgui.Begin('Vanaguide', W.open) then
+    if imgui.Begin('VanaGuide (Beta)', W.open) then
         local guide = P.guide
         if guide == nil then
             imgui.Text('No guide loaded.')
@@ -109,11 +109,29 @@ function W.draw(w, on_pick)
             local narrow = fw < 320
             if narrow then
                 text_colored({ 1.0, 0.82, 0.2, 1.0 },
-                    ('%s  (%d/%d)'):format(guide.name, math.min(P.index, P.count()), P.count()))
+                    ('%s  (%d/%d)'):format(guide.name, math.min(P.route_index(), P.route_count()), P.route_count()))
             else
                 text_colored({ 1.0, 0.82, 0.2, 1.0 }, guide.name)
                 imgui.SameLine()
-                imgui.Text(('(%d/%d)'):format(math.min(P.index, P.count()), P.count()))
+                imgui.Text(('(%d/%d)'):format(math.min(P.route_index(), P.route_count()), P.route_count()))
+            end
+
+            local starts, current_start = {}, P.starting_location
+            for i, candidate in ipairs(guide.steps) do
+                if candidate.starting_location then
+                    starts[#starts + 1] = { index = i, name = candidate.starting_location }
+                end
+            end
+            if #starts > 0 then
+                if imgui.BeginCombo(guide.start_label or 'Starting location', current_start or starts[1].name) then
+                    for _, location in ipairs(starts) do
+                        if imgui.Selectable(location.name, current_start == location.name) then
+                            P.starting_location = location.name
+                            P.index = location.index
+                        end
+                    end
+                    imgui.EndCombo()
+                end
             end
 
             local step = P.step()
@@ -123,6 +141,12 @@ function W.draw(w, on_pick)
                 imgui.Separator()
                 text_colored({ 0.9, 0.9, 1.0, 1.0 },
                     ('%s: %s'):format(VERB_LABEL[step.kind] or '?', step.text))
+                if step.exp_goal then wrapped('- EXP: ' .. step.exp_goal) end
+                if step.gil_goal then wrapped('- Gil: ' .. step.gil_goal) end
+                if narrow and step.note then
+                    local location = step.note:match('^Starting location: ([^.]+)%.')
+                    if location then wrapped('Starting location: ' .. location) end
+                end
                 -- The note is the first thing to go when the window is small: the buttons
                 -- have to stay above the fold, because clicking them is the only way to move
                 -- the guide by hand and this client cannot scroll an ImGui window.
@@ -164,7 +188,7 @@ function W.draw(w, on_pick)
         imgui.SetNextWindowSize({ math.min(340, W.screen.w - 40), math.min(240, W.screen.h - 60) },
                                 ImGuiCond_FirstUseEver)
         -- Plain hyphen: FFXI's font has no em dash and prints garbage for it.
-        if imgui.Begin('Vanaguide - guides', W.picker) then
+        if imgui.Begin('VanaGuide (Beta) - guides', W.picker) then
             for _, g in ipairs(G.list()) do
                 if imgui.Button(g.name) then
                     if on_pick ~= nil then on_pick(g.name) end

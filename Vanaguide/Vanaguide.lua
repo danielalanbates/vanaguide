@@ -109,7 +109,7 @@ local vg = {
 local function save_progress()
     if (P.guide == nil) then return; end
     vg.settings.guide = P.guide.name;
-    vg.settings.progress[P.guide.name] = P.save_state();
+    vg.settings.progress[P.guide.progress_id or P.guide.name] = P.save_state();
     vg.settings.learned = graph.save_learned();
     settings.save();
 end
@@ -120,7 +120,7 @@ local function load_guide(name)
         U.print('no guide named "' .. tostring(name) .. '"');
         return false;
     end
-    P.set_guide(guide, vg.settings.progress[name]);
+    P.set_guide(guide, vg.settings.progress[name] or vg.settings.progress[guide.progress_id or guide.name], name);
     save_progress();
     U.print(('loaded "%s" (%d steps, on step %d)'):format(guide.name, P.count(), P.index));
     return true;
@@ -435,7 +435,7 @@ ashita.events.register('command', 'vg_command', function (e)
     if (sub == 'back') then P.back(); save_progress(); return; end
     if (sub == 'reset') then
         if (P.guide ~= nil) then
-            vg.settings.progress[P.guide.name] = nil;
+            vg.settings.progress[P.guide.progress_id or P.guide.name] = nil;
             P.set_guide(P.guide, nil);
             save_progress();
             U.print('progress reset');
