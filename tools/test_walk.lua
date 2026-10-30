@@ -60,3 +60,15 @@ local dx, dz = deltas.SetFollowDeltaX, deltas.SetFollowDeltaY
 local expected_x, expected_z = 100 + 2.5/math.sqrt(2), 100 - 2.5/math.sqrt(2)
 assert(math.abs(dx/dz - expected_x/expected_z) < 1e-10, 'sidestep must use both original heading components')
 print('diagonal recovery geometry passed')
+
+local stationary = fresh(false)
+for i=1,95 do clock=i*100; stationary.update(w) end
+assert(stationary.observed==0 and stationary.walked>0, 'stationary commands are not observed movement')
+assert(stationary.diagnostics():find('observed=0.0'), 'stopped diagnostics retain observed distance')
+local measured=fresh(false)
+clock=100; measured.update(w)
+clock=200; measured.update({x=3,z=4,y=0,zone=232})
+assert(measured.observed==5, 'observed distance comes from position samples')
+clock=300; measured.update({x=100,z=100,y=0,zone=231})
+assert(measured.observed==5, 'zone changes are not walking distance')
+print('observed walking distance checks passed')

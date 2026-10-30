@@ -88,6 +88,7 @@ function W.start(target, label)
     W.stuck_since, W.stuck_pos, W.nudge = nil, nil, 0
     W.last_wp, W.last_tick, W.aim, W.nudges, W.best_remaining = nil, nil, nil, 0, nil
     W.progress_path, W.progress_target = nil, nil
+    W.observed, W.observed_pos, W.aim = 0, nil, nil
     return true
 end
 
@@ -137,12 +138,18 @@ function W.update(w)
         -- Zoning: no position for a while.  Nothing here is stuck; forget the progress
         -- check so the load time is not counted against the walk.
         W.last, W.stuck_pos, W.stuck_since = nil, nil, nil
+        W.observed_pos = nil
         return false
     end
     if W.zone_seen ~= w.zone then
         W.zone_seen = w.zone
         W.stuck_pos, W.stuck_since, W.last_wp, W.last_tick = nil, nil, nil, nil
     end
+    local prior = W.observed_pos
+    if prior and prior.zone == w.zone then
+        W.observed = (W.observed or 0) + U.dist(w.x, w.z, prior.x, prior.z)
+    end
+    W.observed_pos = {x=w.x,z=w.z,zone=w.zone}
     local idx = player_index()
     if idx == nil then W.last = nil; return false end
 
@@ -231,6 +238,7 @@ function W.update(w)
         nx, nz, ny = points[j].x, points[j].z, points[j].y
     end
 
+    W.aim = {x=nx,z=nz,y=ny,source=source or 'direct'}
     local dx, dz = nx - w.x, nz - w.z
     -- A mesh path already encodes traversable space; arbitrary lateral recovery
     -- has no collision clearance. Retain the normal blocked timeout instead.
@@ -334,11 +342,18 @@ function W.update(w)
     return false
 end
 
+function W.diagnostics()
+    local a = W.aim
+    return ('walk diagnostics: mode=%s observed=%.1f commanded=%.1f%s')
+        :format(W.mode, W.observed or 0, W.walked or 0,
+          a and (' aim=(%.1f,%.1f) source=%s'):format(a.x,a.z,a.source) or '')
+end
+
 function W.status()
     if W.active then
         local t = W.target
-        return ('walk: to (%.1f, %.1f)%s, %.0f yalms walked%s')
-            :format(t.x, t.z, W.label and (' ' .. W.label) or '', W.walked,
+        return ('walk: to (%.1f, %.1f)%s, %.0f yalms observed%s')
+            :format(t.x, t.z, W.label and (' ' .. W.label) or '', W.observed or 0,
                     ((W.nudges or 0) > 0) and (', ' .. W.nudges .. ' server nudges') or '')
     end
     return 'walk: idle' .. (W.reason and (' (' .. W.reason .. ')') or '')
