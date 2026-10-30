@@ -16,6 +16,16 @@
 #
 # Copyright (c) 2026 Bates LLC.  All rights reserved.
 set -u
+GUIDE="${1:-}"; STEPS="${2:-5}"
+WALK_STRICT="${WALK_STRICT:-0}"
+WALK_TIMEOUT="${WALK_TIMEOUT:-420}"
+# Validate before the process guard, command channel or results directory is touched.
+# Zero/negative/overflowed counts used to skip the loop and print a successful "Done".
+positive_integer(){ [[ "$1" == <-> && ${#1} -le 9 ]] && (( $1 > 0 )); }
+positive_integer "$GUIDE" || { print -u2 'Guide number must be a positive integer.'; exit 2; }
+positive_integer "$STEPS" || { print -u2 'Step count must be a positive integer.'; exit 2; }
+positive_integer "$WALK_TIMEOUT" || { print -u2 'WALK_TIMEOUT must be a positive integer in seconds.'; exit 2; }
+[[ "$WALK_STRICT" == 0 || "$WALK_STRICT" == 1 ]] || { print -u2 'WALK_STRICT must be 0 or 1'; exit 2; }
 GAME="${VG_GAME:-/Volumes/x10/Video Games/Mac/FFXI/siku.app/Contents/SharedSupport/prefix10/drive_c/HorizonXI}"
 GUARD="${0:A:h}/local_client_guard.py"
 guard(){ python3 "$GUARD" check "$GAME" || exit 1; }
@@ -23,9 +33,7 @@ guard(){ python3 "$GUARD" check "$GAME" || exit 1; }
 guard
 A="$GAME/addons"; CMD="$A/cmdpipe/cmd.txt"; CHAT="$A/cmdpipe/chat.txt"
 NARR="${VG_NARR:-/tmp/vanavoice/dialogue.jsonl}"
-WALK_STRICT="${WALK_STRICT:-0}"
-[[ "$WALK_STRICT" == 0 || "$WALK_STRICT" == 1 ]] || { print -u2 'WALK_STRICT must be 0 or 1'; exit 1; }
-GUIDE="${1:?guide number}"; STEPS="${2:-5}"; OUT="${3:-$(cd "$(dirname "$0")/.." && pwd)/results/guided-$(date +%Y%m%d-%H%M)}"
+OUT="${3:-$(cd "$(dirname "$0")/.." && pwd)/results/guided-$(date +%Y%m%d-%H%M)}"
 mkdir -p "$OUT"; MD="$OUT/RESULTS.md"
 say(){ python3 "$GUARD" send "$GAME" "$CMD" "$1" || exit 1; }
 clear_logs(){ guard; local file; for file in "$@"; do : > "$file"; done; }
@@ -40,7 +48,7 @@ shot(){ guard; local w; w=$(wid) || exit 1; [[ -n "$w" ]] && screencapture -x -l
 
 print -r -- "# Guided run -- guide $GUIDE, $STEPS steps, $(date '+%Y-%m-%d %H:%M')" > "$MD"
 print -r -- "" >> "$MD"
-WALK_MAX="${WALK_MAX:-900}"; WALK_TIMEOUT="${WALK_TIMEOUT:-420}"
+WALK_MAX="${WALK_MAX:-900}"
 say '/vg kick !where'; say '/vg release auto 2'; say '/vg server off'; say '/vg chatlog on'; say '!release'; sleep 3
 if (( WALK_STRICT )); then
   say '/vg walk mode follow'; sleep 2
