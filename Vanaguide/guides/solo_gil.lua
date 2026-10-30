@@ -195,7 +195,10 @@ G.register({
     steps = [[
 t Choose profitable errands before spending gil.|N|HorizonXI starter route. Skip unaffordable or unsafe quests. Reward is gross, not profit: subtract materials, food, travel and Auction House fees. Gear rewards are not guaranteed cash. Check current prices; no gil/hour promise.|
 t Waters of Cheval — check requirements and profit first.|N|Start: North. Fame: 1.0. Prerequisite: none listed. Needs: Running. Listed reward: Wing Pendant. Repeatable: N. Horizon values may differ from standard LSB details.|
-t Verify Waters of Cheval on the Horizon wiki before proceeding.|N|No matching standard quest record found. Review the requirements above and confirm the quest giver before travelling.|
+t Talk to Miageau in Northern San d'Oria (L-7) to accept Waters of the Cheval.|Z|231|POS|115,108,8|
+t Trade 10 gil to Nouveil beside Miageau for a Blessed Waterskin.|Z|231|N|Keep the waterskin for the river interaction.|
+t Trade the Blessed Waterskin to the Cheval River at East Ronfaure (H-5).|Z|101|N|Use the river target at the top of the river to receive the filled skin.|
+C Return the Skin of Cheval River Water to Miageau.|Q|sandoria,1|Z|231|POS|115,108,8|N|Standard reward: Wing Pendant. Confirm Horizon behavior.|
 t The Vicasque's Sermon — check requirements and profit first.|N|Start: North. Fame: 2.0. Prerequisite: Waters of Cheval. Needs: 70g. Listed reward: Brass Ring. Repeatable: N. Horizon values may differ from standard LSB details.|
 t Requires Waters of the Cheval completed.|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
 t Talk to Abioleget in Northern San d'Oria to start the quest.|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
@@ -211,9 +214,13 @@ t Return to Northern San d'Oria and trade the Clump of Batagreens to Abeaule.|N|
 t Reward: Robe, San d'Oria fame, title Green Grocer.|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
 C Finish The Trader in the Forest and verify the reward.|Q|sandoria,7||Z|231||POS|-136.000,56.000,8||N|Quest completion can be checked from the client. Repeating an already completed quest needs manual tracking; do not assume the first-completion flag proves another payment.|
 t Gates To Paradise — check requirements and profit first.|N|Start: North. Fame: 2.0. Prerequisite: none listed. Needs: Running. Listed reward: Cotton Cape. Repeatable: N. Horizon values may differ from standard LSB details.|
-t Verify Gates To Paradise on the Horizon wiki before proceeding.|N|No matching standard quest record found. Review the requirements above and confirm the quest giver before travelling.|
+t At San d'Oria fame 2, accept Gates to Paradise from Olbergieut.|Z|231|POS|93.031,118.495,8|N|Receive Scripture of Wind before leaving.|
+t Talk to Faurbellant in La Theine Plateau to exchange Scripture of Wind for Scripture of Water.|Z|102|POS|481.310,-89.908,8|N|Plan the journey and avoid aggressive enemies; this is a delivery route, not a combat task.|
+C Return to Olbergieut with Scripture of Water.|Q|sandoria,18|Z|231|POS|93.031,118.495,8|N|Leave inventory space for the Cotton Cape reward.|
 t Undying Flames — check requirements and profit first.|N|Start: North. Fame: 2.0. Prerequisite: none listed. Needs: 2 Beeswax. Listed reward: Friar's Rope. Repeatable: N. Horizon values may differ from standard LSB details.|
-t Verify Undying Flames on the Horizon wiki before proceeding.|N|No matching standard quest record found. Review the requirements above and confirm the quest giver before travelling.|
+t At San d'Oria fame 2, accept Undying Flames from Pagisalis.|Z|231|POS|138.641,131.738,8|
+t Trade exactly two Beeswax to Pagisalis.|Z|231|POS|138.641,131.738,8|N|Keep inventory space. Compare material cost against the value of Friar's Rope before buying wax.|
+C Finish Undying Flames with Pagisalis.|Q|sandoria,26|Z|231|POS|138.641,131.738,8|N|Verify the actual reward; this gear reward is not a guaranteed gil payout.|
 t Fear of the Dark — check requirements and profit first.|N|Start: North. Fame: ?. Prerequisite: none listed. Needs: 2 Bat Wings. Listed reward: 200.0. Repeatable: Y. Horizon values may differ from standard LSB details.|
 t Talk to Secodiand in Northern San d'Oria and choose to accept the quest.|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
 t Obtain 2 Bat Wings (this quest's script does not say where).|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
@@ -256,7 +263,9 @@ t Trade the 3 Chunks of Lufet Salt to Nogelle.|N|Standard LSB procedure; confirm
 t Reward: 600 gil, 10 San d'Oria fame, title Bean Cuisine Salter.|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
 C Finish Lufet's Lake Salt and verify the reward.|Q|sandoria,81||Z|232||POS|-70.000,-33.000,8||N|Quest completion can be checked from the client. Repeating an already completed quest needs manual tracking; do not assume the first-completion flag proves another payment.|
 t Thick Shells — check requirements and profit first.|N|Start: Port S. Fame: 2.0. Prerequisite: none listed. Needs: 5 Beetle Shells. Listed reward: 750.0. Repeatable: Y. Horizon values may differ from standard LSB details.|
-t Verify Thick Shells on the Horizon wiki before proceeding.|N|No matching standard quest record found. Review the requirements above and confirm the quest giver before travelling.|
+t At San d'Oria fame 2, talk to Vounebariont in Port San d'Oria and accept Thick Shells.|Z|232|POS|-1.606,-148.930,8|
+t Trade exactly five Beetle Shell to Vounebariont.|Z|232|POS|-1.606,-148.930,8|N|Standard payout: 750 gil. Compare selling the shells before trading.|
+C Finish Thick Shells and verify payment.|Q|sandoria,117|Z|232|POS|-1.606,-148.930,8|N|Repeat turn-ins require manual payment tracking; the completed quest flag only proves the first clear.|
 t A Sentry's Peril — check requirements and profit first.|N|Start: Southern. Fame: 1.0. Prerequisite: none listed. Needs: Running. Listed reward: Bronze Subl. Repeatable: N. Horizon values may differ from standard LSB details.|
 t Talk to Glenne in Southern San d'Oria and accept. She gives you a Dose of Ointment, and she gives you another if you lose it.|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
 t Go to West Ronfaure and find the guard Aaveleon on the road to Ghelsba Outpost (G-6).|N|Standard LSB procedure; confirm Horizon-specific differences before spending or travelling.|
@@ -370,7 +379,9 @@ t Talk to Tokaka and accept Something Fishy.|Z|240|POS|-189.678,66.335,8|N|Locat
 t Trade exactly one Bastore Sardine after accepting the quest. Standard payout is 70 gil; zone and speak again before another trade.|Z|240|POS|-189.678,66.335,8|
 C Finish Something Fishy with Tokaka.|Q|windurst,52|Z|240|POS|-189.678,66.335,8|N|Verify the actual payment before repeating. The first-completion flag does not prove another turn-in.|
 t Curses, Foiled Again! — check requirements and profit first.|N|Start: Walls. Fame: 1.0. Prerequisite: none listed. Needs: 2 Bone Chips, 1 Bomb Ash. Listed reward: Brass Rod. Repeatable: N. Horizon values may differ from standard LSB details.|
-t Verify Curses, Foiled Again! on the Horizon wiki before proceeding.|N|No matching standard quest record found. Review the requirements above and confirm the quest giver before travelling.|
+t Accept Curses, Foiled Again! from Shantotto in Windurst Walls.|Z|239|POS|122,112,8|N|Choose the accepting answer.|
+t Trade one Bomb Ash and two Bone Chips together to Shantotto.|Z|239|POS|122,112,8|N|Compare the material sale value with the Brass Rod reward.|
+C Finish Curses, Foiled Again! with Shantotto.|Q|windurst,32|Z|239|POS|122,112,8|N|The later quest is separate; standard scripts require a Vana'diel day and zoning before it opens.|
 t Mandragora Mad — check requirements and profit first.|N|Start: Walls. Fame: 1.0. Prerequisite: none listed. Needs: Cornette,4Leaf,Snobby,3Leaf, Y. Sulfer. Listed reward: 120-5500. Repeatable: Y. Horizon values may differ from standard LSB details.|
 t Talk to Yoran-Oran and accept Mandragora Mad.|Z|239|POS|-109.987,203.338,8|N|Location and procedure follow standard server scripts; confirm Horizon differences.|
 t Trade one accepted item: Cornette, Yuhtunga Sulfur, Three-Leaf Mandragora Bud, Four-Leaf Mandragora Bud or Snobby Letter. Standard payouts are 200, 250, 1200, 120 and 5500 gil respectively. Compare sale value before trading.|Z|239|POS|-109.987,203.338,8|
