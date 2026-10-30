@@ -12,3 +12,11 @@ Copyright (c)2026 Daniel Bates / Bates LLC. All rights reserved.
 https://batesai.org · help@batesai.org
 
 Implemented explicit EXP/GIL target pairs in each of the five existing Horizon starter combat steps. Named loot sources are sourced from the Horizon item/monster pages reviewed in this session. This improves the starter content but does not complete1-75/99 coverage; do not relabel the route as complete. Higher-level camps and NM alternatives require continued source verification.
+
+## Horizon full-range ALPHA draft
+
+The generated Horizon route now contains16 EXP/GIL camp pairs covering every level1-75 and limit-break reminders. tools/build_horizon_leveling.lua owns the structured bands and verifies no gaps/overlaps. Monster names, zones, loot facts and available camp grids draw from the Horizon solo/BST guide and individual monster/item pages reviewed during this task. Band assignment is an authored estimate, not measured all-job acceptance; several source camps were pet-job reports, explicitly disclosed in the product. No all-job safety or performance claim is made.
+
+Source references: https://horizonffxi.wiki/Beastmaster_Leveling_Guide ; https://horizonffxi.wiki/A_solo_guide_to_leveling ; https://horizonffxi.wiki/Uleguerand_Range ; https://horizonffxi.wiki/Coeurl_Meat ; https://horizonffxi.wiki/Dhalmel_Hide ; https://horizonffxi.wiki/Crawler . The late-route Buffalo/Polar Hare names were checked against Horizon's zone listing to avoid importing another server's names.
+
+This replaces the eight-step1-25 starter draft, but does not complete server-wide1-99 coverage or live route verification. Native parser and offline guide checks pass (1527 assertions).
