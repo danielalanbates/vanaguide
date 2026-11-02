@@ -28,3 +28,12 @@ assert(not sight(grid(nil,'1,0'),0,0,2,2,0), 'unclimbable side floor blocks corn
 assert(sight(grid('0,1'),0,0,2,0,0), 'unrelated wall does not block cardinal run')
 assert(not sight(grid('1,0'),0,0,2,0,0), 'wall on cardinal run blocks visibility')
 print('13 navigation smoothing checks passed')
+
+-- Fractional grids must remain distinguishable in live diagnostic evidence.
+local previous = nav.grid
+nav.grid = {zone=232,w=8,h=12,cell=0.5,layers=2}
+assert(nav.status():find('at 0.5 yalms', 1, true), 'half-yalm grid is not rounded to one')
+nav.grid.cell = 1
+assert(nav.status():find('at 1 yalms', 1, true), 'whole-yalm grid remains readable')
+nav.grid = previous
+print('2 navigation status precision checks passed')

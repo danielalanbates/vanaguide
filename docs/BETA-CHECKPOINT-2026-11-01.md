@@ -33,3 +33,25 @@ active hosted game. Run one finite sequential quest scenario without server-side
 or teleport shortcuts when claiming normal playability. Verify actual movement, accepts,
 turn-ins, arrows, NPC text and narration. Keep all accounts, chat, screenshots and database
 records in ignored private Downloads fixtures. No periodic test loop is installed.
+
+
+## Finite live retest
+
+After the hosted game exited, the private fixture was started once. The guard verified one
+local loader. A screenshot showed the textured scene, guide window, direction arrow and
+route line. Strict guide 40 resumed its second authored acceptance step (Abeaule in Northern
+San d'Oria) from Port San d'Oria. It failed to arrive within 120 seconds and stopped near the
+same wall, around (-18.5, -125.3), from (-18.3, -125.3). No teleport, server nudge, forced quest
+completion, or new quest acceptance occurred. This is a failed route, not a walkthrough pass.
+
+The tested grid header confirms 0.5-yalm cells. The UI misleadingly showed 1 yalm because
+`N.status()` rounded cell size with `%.0f`. Diagnostics now preserve fractional cell size;
+two synthetic status checks cover 0.5 and 1.0. This does not fix traversability. Preserve the
+failed-grid snapshot and screenshot in private ignored acceptance storage. Next investigation
+should compare the first commanded waypoint and floor against actual collision at that wall,
+rather than assuming a complete A* path is traversable.
+
+One guarded `/shutdown` ended the client. Only then were the owned fixture holder/narrator
+stopped; all four server processes and the private database exited 0. The narrator ran with
+one generic Apple voice at 20% volume, but no target NPC was reached; no new audible narration
+or sequential quest acceptance is claimed. No hosted addon or bot test occurred.
