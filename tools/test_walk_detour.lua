@@ -59,3 +59,24 @@ assert(math.abs(deltas.SetFollowDeltaX)<1e-9 and deltas.SetFollowDeltaY>0,
  'navmesh recovery must keep the corridor heading instead of skipping corners or sidestepping')
 Walk.stop('fixture complete')
 print('navmesh recovery corridor check passed')
+
+-- A mesh corner within the old 1.5-yalm skip radius still changes the route.
+-- Shortcutting directly to its later leg walks through the inside of the corner.
+Path.forget()
+route={{x=0,z=0.05,y=0},{x=1,z=0,y=0},{x=1,z=-1.5,y=0},
+       {x=1,z=-3,y=0},{x=-20,z=-3,y=0}}
+assert(Walk.start({x=-20,z=-3,y=0},'near corner'))
+clock=50000;Walk.update({x=0,z=0.05,y=0,zone=232})
+clock=50100;Walk.update({x=0,z=0.05,y=0,zone=232})
+assert(Walk.aim.x==1 and Walk.aim.z==0,
+ 'nearby mesh corner must be reached before turning onto the next leg')
+-- On a long straight leg, being nearer the prior vertex must not turn us back.
+Path.forget()
+route={{x=0,z=0,y=0},{x=0,z=6,y=0},{x=0,z=12,y=0},{x=0,z=30,y=0}}
+assert(Walk.start({x=0,z=30,y=0},'forward segment'))
+clock=51000;Walk.update({x=0,z=1,y=0,zone=232})
+clock=51100;Walk.update({x=0,z=1,y=0,zone=232})
+assert(Walk.aim.z>1 and deltas.SetFollowDeltaY>0,
+ 'closest-segment steering must continue forward rather than return to the prior vertex')
+Walk.stop('fixture complete')
+print('2 near-corner and forward-segment steering checks passed')
