@@ -175,6 +175,7 @@ end
 --- Distance left along a route, rather than straight through the wall it goes around.
 --- Project onto the closest segment; height distinguishes stacked floors. Segment lengths
 --- themselves are physical distances, without the floor-selection height penalty.
+--- The second return is the closest segment index, so a walker can aim forward along it.
 function Path.remaining(points, x, z, y)
     if points == nil or #points < 2 or x == nil or z == nil then return nil end
     local lengths, total = {}, 0
@@ -184,7 +185,7 @@ function Path.remaining(points, x, z, y)
         lengths[i] = math.sqrt(dx * dx + dz * dz + dy * dy)
         total = total + lengths[i]
     end
-    local before, best_distance, best_remaining = 0, nil, nil
+    local before, best_distance, best_remaining, best_segment = 0, nil, nil, nil
     for i = 1, #points - 1 do
         local a, b = points[i], points[i + 1]
         local dx, dz = b.x - a.x, b.z - a.z
@@ -195,11 +196,11 @@ function Path.remaining(points, x, z, y)
         local t = (square > 0) and math.max(0, math.min(1, (px * dx + pz * dz + py * dy) / square)) or 0
         local off = (px - t * dx)^2 + (pz - t * dz)^2 + (py - t * dy)^2
         if best_distance == nil or off < best_distance then
-            best_distance, best_remaining = off, total - before - t * lengths[i]
+            best_distance, best_remaining, best_segment = off, total - before - t * lengths[i], i
         end
         before = before + lengths[i]
     end
-    return best_remaining
+    return best_remaining, best_segment
 end
 
 --- Throw the cached path away.  Called when the step changes, and by the tests.

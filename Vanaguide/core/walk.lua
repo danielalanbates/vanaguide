@@ -165,8 +165,10 @@ function W.update(w)
     -- A valid detour can run away from the destination for many seconds. Compare distance
     -- left along its navmesh path, not the straight line through the obstacle. Stationary
     -- wall bounce still cannot improve the best remaining distance by half a yalm.
-    local progress = (source == 'navmesh' and Path.remaining)
-        and Path.remaining(points, w.x, w.z, w.y) or remaining
+    local progress, segment = remaining, nil
+    if source == 'navmesh' and Path.remaining then
+        progress, segment = Path.remaining(points, w.x, w.z, w.y)
+    end
     local progress_path = (source == 'navmesh') and points or nil
     local prior_target = W.progress_target
     if W.progress_path ~= progress_path or prior_target == nil
@@ -203,10 +205,13 @@ function W.update(w)
     -- a couple of yalms tall, and arriving at the grid's idea of the floor can miss it.
     local nx, nz, ny = t.x, t.z, t.y
     if points ~= nil and #points >= 2 then
-        local i = Path.nearest_index(points, w.x, w.z, w.y)
-        -- Aim past the nearest point so a point already reached does not pin us in place.
+        -- The closest vertex can be behind us halfway along a segment. Aim at that
+        -- segment's forward end instead; proximity alone must not skip a mesh corner.
+        local i = segment and math.min(#points, segment + 1)
+            or Path.nearest_index(points, w.x, w.z, w.y)
         local j = i
-        while j < #points and U.dist(w.x, w.z, points[j].x, points[j].z) < 1.5 do j = j + 1 end
+        local reached = (source == 'navmesh') and 0.2 or 1.5
+        while j < #points and U.dist(w.x, w.z, points[j].x, points[j].z) < reached do j = j + 1 end
         -- Keep mesh corners intact: unvalidated skips can cut through a wall.
         if stuck and source ~= 'navmesh' then j = math.min(#points, j + math.abs(W.nudge)) end
         if W.mode == 'server' or W.mode == 'follow' then
@@ -228,7 +233,9 @@ function W.update(w)
                 for m = j, k do
                     local px, pz = points[m].x - w.x, points[m].z - w.z
                     local off = math.abs(px * vz - pz * vx) / vl
-                    if off > 1.0 then straight = false; break end
+                    -- A one-yalm approximation erases half-yalm mesh corners.
+                    local tolerance = (source == 'navmesh') and 0.01 or 1.0
+                    if off > tolerance then straight = false; break end
                 end
                 if not straight then break end
                 k = k + 1
