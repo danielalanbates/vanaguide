@@ -29,3 +29,7 @@ dialogue.jsonl
 __pycache__/
 *.pyc
 results/guided-*/
+
+# Local credential stores are never source artifacts.
+**/CREDENTIALS.md
+**/secrets.json
