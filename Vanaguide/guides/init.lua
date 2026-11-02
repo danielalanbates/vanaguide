@@ -6,6 +6,7 @@
 
 require('guides.starting_out')
 require('guides.subjob')
+require('guides.solo_horizon')
 
 -- Every quest the server implements, one guide per area, built from data/quests.lua.
 require('guides.generated')

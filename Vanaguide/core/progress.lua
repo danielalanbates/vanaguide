@@ -14,17 +14,43 @@ local P = {
 }
 
 --- Start (or resume) a guide.  Resuming keeps whatever was already recorded for it.
-function P.set_guide(guide, saved)
+function P.set_guide(guide, saved, requested_name)
+    if saved and guide.legacy_steps and saved.revision ~= guide.revision then
+        local location = (requested_name == guide.legacy_progress_id and guide.legacy_start)
+            or saved.starting_location or guide.default_start
+        local route = {}
+        for i, step in ipairs(guide.steps) do
+            if not step.home or step.home == location then route[#route + 1] = i end
+        end
+        local function flags(old)
+            local new = {}
+            for i, value in pairs(old or {}) do
+                if route[tonumber(i)] then new[route[tonumber(i)]] = value end
+            end
+            return new
+        end
+        saved = { index = route[saved.index or 1] or (#guide.steps + 1),
+                  checked = flags(saved.checked), skipped = flags(saved.skipped),
+                  starting_location = location, revision = guide.revision }
+    end
     P.guide = guide
     P.index = (saved and saved.index) or 1
     P.skipped = (saved and saved.skipped) or {}
     P.checked = (saved and saved.checked) or {}
+    P.starting_location = saved and saved.starting_location or nil
+    if not P.starting_location then
+        for _, step in ipairs(guide.steps) do
+            if step.starting_location then P.starting_location = step.starting_location; break end
+        end
+    end
     return P.guide
 end
 
 function P.step(i)
     if P.guide == nil then return nil end
-    return P.guide.steps[i or P.index]
+    local step = P.guide.steps[i or P.index]
+    if step and step.resolve then return step.resolve(step) end
+    return step
 end
 
 function P.count()
@@ -32,7 +58,27 @@ function P.count()
     return #P.guide.steps
 end
 
+local function on_route(step)
+    return step == nil or step.home == nil or step.home == P.starting_location
+end
+
+function P.route_count()
+    local n = 0
+    for _, step in ipairs(P.guide and P.guide.steps or {}) do if on_route(step) then n = n + 1 end end
+    return n
+end
+
+function P.route_index()
+    local n = 0
+    for i, step in ipairs(P.guide and P.guide.steps or {}) do
+        if i > P.index then break end
+        if on_route(step) then n = n + 1 end
+    end
+    return n
+end
+
 local function satisfied(i, w)
+    if not on_route(P.guide.steps[i]) then return true end
     if P.checked[i] or P.skipped[i] then return true end
     local step = P.guide.steps[i]
     if step == nil then return true end
@@ -88,7 +134,7 @@ function P.complete()
 end
 
 function P.save_state()
-    return { index = P.index, skipped = P.skipped, checked = P.checked }
+    return { index = P.index, skipped = P.skipped, checked = P.checked, starting_location = P.starting_location, revision = P.guide and P.guide.revision }
 end
 
 return P

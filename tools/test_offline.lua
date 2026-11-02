@@ -179,9 +179,9 @@ ok(shipped >= 3, 'at least three guides ship')
 do
     local qdb = require('data.quests')
     local routes = {
-        { name = 'Support jobs', quest = 24, zone = 248, x = -54, z = -44,
+        { name = 'Support jobs', town = 'Selbina', quest = 24, zone = 248, x = -54, z = -44,
           npc = 'Isacio', items = { 538, 537, 539 } },
-        { name = 'Support jobs - Mhaura', quest = 10, zone = 249, x = -49, z = 20,
+        { name = 'Support jobs - Mhaura', town = 'Mhaura', quest = 10, zone = 249, x = -49, z = 20,
           npc = 'Vera', items = { 542, 541, 540 } },
     }
     local old_current = story.quest.current.other
@@ -191,7 +191,10 @@ do
         ok(g ~= nil, route.name .. ' is registered by guides.init')
         if g then
             local accept, turnin, level, items, trades = nil, nil, nil, {}, {}
-            for _, s in ipairs(g.steps) do
+            local routeSteps = {}
+            for _, step in ipairs(g.steps) do if not step.home or step.home == route.town then routeSteps[#routeSteps + 1] = step end end
+            eq(#routeSteps, 10, route.town .. ' combined support route has ten steps')
+            for _, s in ipairs(routeSteps) do
                 if s.quest_accept then accept = s end
                 if s.quest then turnin = s end
                 if s.level then level = s end
@@ -237,6 +240,17 @@ do
             ok(C.done(turnin, w), route.name .. ' completed quest ticks final turn-in')
         end
     end
+    local support = G.get('Support jobs')
+    eq(G.guides['Support jobs - Mhaura'], nil, 'support-job alternatives share one menu entry')
+    P.set_guide(support, { index = 7, checked = { [6] = true } }, 'Support jobs - Mhaura')
+    eq(P.starting_location, 'Mhaura', 'legacy Mhaura progress retains its town')
+    eq(P.step().home, 'Mhaura', 'legacy Mhaura step maps into its combined branch')
+    eq(P.step().text, 'Trade one Wild Rabbit Tail to Vera, then finish the dialogue.', 'legacy Mhaura trade cursor is preserved')
+    local savedSupport = P.save_state()
+    P.set_guide(support, savedSupport, 'Support jobs')
+    eq(P.step().text, 'Trade one Wild Rabbit Tail to Vera, then finish the dialogue.', 'new support progress is not migrated twice')
+    P.set_guide(support, { index = 10 }, 'Support jobs')
+    eq(P.index, #support.steps, 'old Selbina final step maps to shared ending')
     story.quest.current.other = old_current
     story.quest.completed.other = old_completed
     local starter_text = {}
@@ -514,6 +528,63 @@ do
     ok(A.pos_x > 0 and A.pos_x < 640, 'an absurd position is clamped onto the screen')
     ok(A.pos_y > 0 and A.pos_y < 480, 'in both directions')
     A.move(0.5, 0.28)
+end
+
+-- The gil itinerary combines leveling, quests, materials and NM opportunities.
+do
+    require('guides.solo_horizon')
+    local merged = G.guides['Solo Guide - HorizonXI']
+    ok(merged ~= nil, 'one combined Horizon gil guide registers')
+    eq(G.get(nil), nil, 'missing saved guide does not match an absent alias')
+    eq(G.guides['Solo EXP - HorizonXI'], nil, 'separate EXP menu entry removed')
+    eq(G.guides['Solo Gil - HorizonXI'], nil, 'separate gil menu entry removed')
+    eq(G.get('Solo Gil - HorizonXI'), merged, 'saved gil guide name resolves to unified route')
+    eq(G.get('Solo EXP - HorizonXI'), merged, 'saved EXP guide name resolves to unified route')
+    local starts, quests, nms = {}, {}, 0
+    for _, step in ipairs(merged.steps) do
+        if step.starting_location then starts[#starts + 1] = step.starting_location end
+        ok(step.note and step.note:find('Starting location:', 1, true), 'gil step identifies applicable starting cities')
+        ok(step.source and step.source:find('https://horizonffxi.wiki/', 1, true) == 1, 'gil step has a reviewed Horizon wiki source')
+        ok(not step.note:find('may differ', 1, true) and not step.note:find('Standard LSB', 1, true), 'gil step uses Horizon instructions instead of generic caveats')
+        if step.quest then quests[step.quest.area .. ',' .. step.quest.id] = true end
+        if step.text:find('Optional NM', 1, true) then nms = nms + 1 end
+        if step.level then
+            ok(step.exp_goal and step.gil_goal, 'every leveling camp has separate EXP and gil goals')
+        end
+    end
+    eq(table.concat(starts, ';'), "Windurst;San d'Oria;Bastok", 'three starting-city entry points')
+    ok(quests['sandoria,81'] and quests['sandoria,78'], 'San d Oria detours keep correct quest IDs')
+    ok(nms >= 6, 'itinerary includes several named NM opportunities')
+    for _, nation in ipairs(starts) do
+        local covered = {}
+        for _, step in ipairs(merged.steps) do
+            if (not step.home or step.home == nation) and step.level then
+                local lo, hi = step.text:match('Levels (%d+)%-(%d+):')
+                ok(lo ~= nil and hi ~= nil, 'level band is explicit')
+                for level = tonumber(lo), tonumber(hi) do
+                    ok(not covered[level], 'selected city route does not repeat a level band')
+                    covered[level] = true
+                end
+            end
+        end
+        for level = 1, 75 do ok(covered[level], 'selected city route covers level ' .. level) end
+    end
+    P.set_guide(merged)
+    P.starting_location = 'Windurst'
+    local lastWindurst
+    for i, step in ipairs(merged.steps) do
+        if step.home == 'Windurst' and step.text:find('Creepy Crawlies', 1, true) then lastWindurst = i end
+    end
+    P.index = lastWindurst
+    P.check(); P.advance({})
+    ok(not merged.steps[P.index].home, 'finishing Windurst starter branch skips other city branches')
+    eq(P.save_state().starting_location, 'Windurst', 'selected origin persists through shared camps')
+    eq(P.route_count(), 30, 'displayed route count excludes other city branches')
+    local archived = assert(io.open('archive/2026-10-30/solo_gil-quest-only.lua'))
+    local oldText = archived:read('*a'); archived:close()
+    local oldCount = 0
+    for _ in oldText:gmatch('|Q|') do oldCount = oldCount + 1 end
+    eq(oldCount, 61, 'superseded quest-only route remains archived with every quest target')
 end
 
 print(('\n%d passed, %d failed'):format(pass, fail))

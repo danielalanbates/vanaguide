@@ -479,7 +479,7 @@ function N.status()
     if N.grid == nil then
         return 'navmesh: none loaded (see docs/NAVMESH.md)'
     end
-    return ('navmesh: zone %d, %dx%d at %.0f yalms, %d floor%s, %s (%d cells searched)')
+    return ('navmesh: zone %d, %dx%d at %g yalms, %d floor%s, %s (%d cells searched)')
         :format(N.grid.zone, N.grid.w, N.grid.h, N.grid.cell, N.grid.layers,
                 N.grid.layers == 1 and '' or 's', N.state, N.searched)
 end
