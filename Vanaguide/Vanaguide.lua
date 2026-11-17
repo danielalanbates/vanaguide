@@ -820,11 +820,11 @@ ashita.events.register('command', 'vg_command', function (e)
         end
         if (what == 'allow') then
             vg.walk_allowed = true;
-            U.print('walk: allowed on this world');
+            U.print('walk: opted in; use only on your own local world');
             return;
         end
         if (not vg.walk_allowed) then
-            U.print('walk: only on the local world. /vg walk allow  says this is it (never on a hosted server).');
+            U.print('walk: disabled; /vg walk allow is a manual opt-in, not a server check');
             return;
         end
         local step = vg.goto_step or P.step();

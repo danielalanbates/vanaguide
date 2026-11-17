@@ -191,6 +191,11 @@ function S.mission_current(area)
     return cur
 end
 
+--- Is this mission active, or has it already been completed?
+function S.mission_active(area, id)
+    return S.mission_current(area) == id or S.mission_done(area, id)
+end
+
 --- Forget everything.  Called on zone-out to a new character / logout, because the flags
 --- belong to whoever is logged in, and a stale set would silently mark steps done.
 function S.reset()

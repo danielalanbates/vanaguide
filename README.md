@@ -18,7 +18,7 @@ not prove. Not yet run on a hosted server, and it must not be (see below).
 | Travel routing (flight paths, boats) | ✅ `routing/zonegraph.lua` — Dijkstra over the zone graph, with airships and the Selbina/Mhaura ferry as real edges |
 | A travel graph that is actually complete | ⚠️ partly. The seed graph covers the base world; **the addon learns every zone line you walk through** and saves it, so it fills itself in from play instead of from guesswork |
 | Gear finder / "where does this drop?" | ✅ `/vg find`, `/vg gear <slot>`, `/vg nm` over 365 notorious monsters, 1,167 purchasable items and 485 sourced equipment pieces ([docs/LOOT_AND_HUNTING.md](docs/LOOT_AND_HUNTING.md)) |
-| Guide library | **506 quests and 459 missions**, generated from server data into 25 guides — one per quest area, one per storyline ([docs/QUEST_DATABASE.md](docs/QUEST_DATABASE.md)) — plus hand-written guides in `Vanaguide/guides/` |
+| Guide library | **506 quests and 459 missions**, generated from server data into 25 catalogs — one per quest area, one per storyline ([docs/QUEST_DATABASE.md](docs/QUEST_DATABASE.md)) — plus authored routes for all three nations' M1-1 missions, San d'Oria M1-2, Bastok M1-2/M1-3, Windurst M1-2, and A Squire's Test, A Squire's Test II, and A Knight's Test |
 | Guide editor | ❌ — but `/vg mark` writes a paste-ready guide line for wherever you are standing |
 
 ## Install
@@ -85,7 +85,7 @@ docs/         format, routing, packets, arrow calibration, verification, pathway
 ## Testing
 
 ```sh
-luajit tools/test_offline.lua      # 1239 assertions, no game required
+luajit tools/test_offline.lua      # source-derived guide routes; no game required
 ```
 
 The harness fakes Ashita's globals (`tools/stubs.lua`), so the parser, the completion
@@ -103,6 +103,7 @@ launching anything.
 * [docs/VERIFICATION.md](docs/VERIFICATION.md) — what is proven and what is not
 * [docs/PATHWAYS.md](docs/PATHWAYS.md) — where this goes next, for whoever picks it up
 * [docs/SERVERS.md](docs/SERVERS.md) — the addon-policy problem, honestly
+* [docs/RETROACHIEVEMENTS.md](docs/RETROACHIEVEMENTS.md) — read-only achievement progress bridge and companion plan
 * [docs/INSTALL_MAC.md](docs/INSTALL_MAC.md) — installing into FFXI-on-Mac, and loading it only where it is allowed
 
 ## Credits
