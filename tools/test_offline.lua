@@ -25,6 +25,15 @@ local story  = require('core.story')
 local graph  = require('routing.zonegraph')
 local R      = require('routing.router')
 
+-- The quest-source generator test uses temporary input files and writes no game state.
+local generator_test = os.execute('python3 tools/test_gen_quests.py')
+if generator_test == true or generator_test == 0 then
+    pass = pass + 1
+else
+    fail = fail + 1
+    print('FAIL: quest source generator fixtures')
+end
+
 -- ---- zone data ----------------------------------------------------------------
 eq(zones.name[230], "Southern San d'Oria", 'zone 230 name')
 eq(zones.find("southern san d'oria"), 230, 'zone lookup by name')
@@ -46,8 +55,19 @@ eq(steps[1].kind, 'talk', 'verb t -> talk')
 eq(steps[1].pos.r, 8, 'explicit radius')
 eq(steps[4].pos.r, 10, 'default radius')
 eq(steps[2].mission.area, 'sandoria', 'mission tag')
+local mission_accept_parse = G.parse_line('A Accept mission|MA|sandoria,0|')
+eq(mission_accept_parse.mission_accept.id, 0, 'mission-accepted tag parses the current mission id')
+ok(C.is_automatic(mission_accept_parse), 'mission acceptance is an automatic condition')
 eq(steps[3].item.count, 3, 'item count')
 ok(select(2, G.parse('q nonsense|Z|230|'))[1] ~= nil, 'bad verb reported')
+ok(select(2, G.parse('A Accept quest|QA|sandoria,10|QAZ|sandoria,10|'))[1]
+    :match('unknown tag'), 'unknown tag rejected instead of ignored')
+ok(select(2, G.parse('C Complete objective|LV|7|LV|8|'))[1]
+    :match('duplicate tag'), 'duplicate tag rejected')
+ok(select(2, G.parse('C Collect item|IT|not-an-id|'))[1]
+    :match('IT needs'), 'malformed item condition rejected')
+ok(select(2, G.parse('L Reach level|LV|0|'))[1]
+    :match('LV needs'), 'zero level condition rejected')
 
 -- ---- conditions ---------------------------------------------------------------
 WORLD.zone, WORLD.x, WORLD.z = 230, -140, 120
@@ -62,6 +82,18 @@ WORLD.items[1122] = 3
 ok(C.done(steps[3], C.world()), '3 of 3 tusks is done')
 WORLD.main_job_level = 10
 ok(C.done(steps[5], C.world()), 'level step')
+local zone_only_travel = G.parse_line('F Travel to Ordelles Caves|Z|193|')
+ok(not C.done(zone_only_travel, { zone = 230 }), 'zone-only travel waits outside destination')
+ok(C.done(zone_only_travel, { zone = 193 }), 'zone-only travel completes on zone arrival')
+local fixed_checkpoint = G.parse_line('t Examine marker|Z|193|POS|10,20|FIXED||')
+ok(fixed_checkpoint.fixed, 'FIXED checkpoint tag parses')
+fixed_checkpoint.index = 1
+P.set_guide(G.register({ name = 'Fixed checkpoint fixture', steps = { fixed_checkpoint } }))
+WORLD.zone, WORLD.x, WORLD.z = 193, 10, 20
+eq(P.advance(), 0, 'FIXED waypoint remains active on arrival')
+P.check()
+eq(P.advance(), 1, 'FIXED waypoint advances after manual Done')
+P.set_guide(nil)
 
 -- ---- story flags from packet 0x056 --------------------------------------------
 local function packet_0056(page, ids)
@@ -78,9 +110,18 @@ local function packet_0056(page, ids)
         .. string.rep('\0', 8)
     return body
 end
+story.on_packet(0x056, packet_0056(0x0090, {}), 48)
+story.on_packet(0x056, packet_0056(0x0050, { 5 }), 48)       -- current, San d'Oria
+local accepted_step = G.parse_line("A Accept quest|QA|sandoria,5|")
+ok(story.quest_active('sandoria', 5), 'accepted quest flag read from current page')
+ok(not story.quest_done('sandoria', 5), 'accepted quest is not yet completed')
+ok(C.done(accepted_step, { story = story }), 'QA condition completes on active quest flag')
+story.on_packet(0x056, packet_0056(0x0050, {}), 48)
 story.on_packet(0x056, packet_0056(0x0090, { 5, 12 }), 48)     -- completed, San d'Oria
+ok(not story.quest_active('sandoria', 5), 'turn-in clears the active quest flag')
 ok(story.quest_done('sandoria', 5), 'quest flag 5 read from packet')
 ok(story.quest_done('sandoria', 12), 'quest flag 12 read from packet')
+ok(C.done(accepted_step, { story = story }), 'QA condition stays complete after turn-in')
 ok(not story.quest_done('sandoria', 6), 'unset flag stays unset')
 ok(not story.quest_done('jeuno', 5), 'flags do not leak between areas')
 
@@ -94,6 +135,15 @@ local mission = string.char(0, 0, 0, 0)
 story.on_packet(0x056, mission, #mission)
 ok(story.mission_done('sandoria', 2), 'mission 2 done when current is 3')
 ok(not story.mission_done('sandoria', 3), 'the current mission is not done')
+local accepted_mission_packet = mission:sub(1, 8) .. string.char(0, 0, 0, 0) .. mission:sub(13)
+story.on_packet(0x056, accepted_mission_packet, #accepted_mission_packet)
+local accept_mission_step = G.parse_line('A Accept mission|MA|sandoria,0|')
+ok(story.mission_active('sandoria', 0), 'current mission id identifies an accepted mission')
+ok(not story.mission_done('sandoria', 0), 'an accepted mission is not yet completed')
+ok(C.done(accept_mission_step, { story = story }), 'MA completes once the server marks the mission active')
+story.on_packet(0x056, mission, #mission)
+ok(story.mission_active('sandoria', 3), 'the current mission remains active')
+ok(story.mission_active('sandoria', 0), 'a completed prior mission stays satisfied')
 
 -- 65535 means "no mission active", not "past every mission". A fresh character reports it
 -- for every storyline, and reading it as progress marked all 24 San d'Oria missions done.
@@ -131,6 +181,34 @@ P.check(3); P.advance()
 eq(P.index, 4, 'cursor walks over everything satisfied')
 P.back()
 eq(P.index, 3, 'back undoes the last tick')
+local saved_progress = P.save_state()
+P.set_guide(guide, saved_progress)
+eq(P.index, 3, 'matching guide structure resumes saved progress')
+ok(P.checked[1] == true, 'matching guide structure retains manual checks')
+local revised_steps = {}
+for i, step in ipairs(steps) do revised_steps[i] = step end
+revised_steps[#revised_steps + 1] = G.parse_line('N New step|')
+local revised_guide = G.register({ name = 'Test guide revision', steps = revised_steps })
+P.set_guide(revised_guide, saved_progress)
+eq(P.index, 1, 'changed guide structure resets stale cursor')
+ok(next(P.checked) == nil and next(P.skipped) == nil,
+    'changed guide structure clears stale step marks')
+P.set_guide(guide, saved_progress)
+eq(P.index, 3, 'original guide structure can restore its saved progress')
+local out_of_range = P.save_state()
+out_of_range.index = #guide.steps + 50
+P.set_guide(guide, out_of_range)
+eq(P.index, #guide.steps + 1, 'matching but out-of-range cursor is clamped')
+local damaged_progress = P.save_state()
+damaged_progress.index = 'not-a-number'
+damaged_progress.checked = { [1] = true, [0] = true, [999] = true, invalid = true }
+damaged_progress.skipped = 'not-a-table'
+P.set_guide(guide, damaged_progress)
+eq(P.index, 1, 'malformed saved cursor defaults safely to step one')
+ok(P.checked[1] == true and P.checked[0] == nil and P.checked[999] == nil,
+    'saved manual checks are restricted to valid step indices')
+ok(next(P.skipped) == nil, 'malformed saved skip map defaults to empty')
+P.set_guide(guide)
 
 -- ---- routing ------------------------------------------------------------------
 local legs, cost = graph.route(230, 246)
@@ -172,7 +250,757 @@ for _, g in ipairs(G.list()) do
         end
     end
 end
-ok(shipped >= 3, 'at least three guides ship')
+ok(shipped >= 4, 'at least four guides ship')
+
+local squire_intro = G.get("San d'Oria - A Squire's Test")
+ok(squire_intro ~= nil, 'the first Squire quest walkthrough ships')
+if squire_intro ~= nil then
+    eq(#squire_intro.errors, 0, 'the first Squire quest walkthrough parses cleanly')
+    eq(squire_intro.levels, 'Open at any level', 'the guide metadata does not invent a level gate')
+    eq(squire_intro.steps[1].level, nil, 'quest acceptance has no level-gate condition')
+    eq(squire_intro.steps[1].quest_accept.id, 10, 'the quest acceptance checks flag 10')
+    eq(squire_intro.steps[1].pos.x, -138.33, 'the Balasiel arrow uses the local NPC x coordinate')
+    eq(squire_intro.steps[1].pos.z, 65.76, 'the Balasiel arrow uses the local NPC z coordinate')
+    eq(squire_intro.steps[2].zone, 190, 'the in-game quest hint routes to King Ranperre’s Tomb')
+    eq(squire_intro.steps[3].item.id, 940, 'the guide waits for a Revival Tree Root')
+    eq(squire_intro.steps[3].zone, 190, 'the root objective is in King Ranperre’s Tomb')
+    eq(squire_intro.steps[3].pos.x, 2.9, 'the Spook arrow uses the local spawn x coordinate')
+    eq(squire_intro.steps[3].pos.z, -99.3, 'the Spook arrow uses the local spawn z coordinate')
+    eq(squire_intro.steps[3].pos.r, 10, 'the Spook arrow uses the default arrival radius')
+    eq(squire_intro.steps[5].quest.id, 10, 'turn-in waits for the quest completion flag')
+    WORLD.zone, WORLD.x, WORLD.z = 230, -138.33, 65.76
+    local balasiel = R.recommend(squire_intro.steps[1], C.world())
+    eq(balasiel.mode, 'here', 'Balasiel has a local arrow')
+    ok(balasiel.distance < 0.1, 'the Balasiel arrow reaches the local SQL NPC position')
+    eq(R.recommend(squire_intro.steps[2], C.world()).mode, 'travel', 'the guide routes to the Tomb')
+    WORLD.zone, WORLD.x, WORLD.z = 190, 2.912, -99.302
+    local spook = R.recommend(squire_intro.steps[3], C.world())
+    eq(spook.mode, 'here', 'the Spook drop location uses a local arrow')
+    ok(spook.distance < 0.1, 'the Spook arrow reaches the rounded SQL spawn point')
+    story.reset()
+    WORLD.main_job_level = 1
+    WORLD.zone = 230
+    P.set_guide(squire_intro)
+    P.advance()
+    eq(P.index, 1, 'the first Squire guide offers quest acceptance at level 1')
+    story.on_packet(0x056, packet_0056(0x0050, { 10 }), 48)
+    P.advance()
+    eq(P.index, 2, 'quest acceptance advances to the Tomb route')
+    WORLD.zone = 190
+    P.advance()
+    eq(P.index, 3, 'entering the Tomb advances to the item objective')
+    ok(not P.complete(), 'the root drop is required before returning')
+    WORLD.items[940] = 1
+    P.advance()
+    eq(P.index, 4, 'the Revival Tree Root advances to the return route')
+    WORLD.zone = 230
+    P.advance()
+    eq(P.index, 5, 'returning to San d’Oria advances to turn-in')
+    story.on_packet(0x056, packet_0056(0x0090, { 10 }), 48)
+    P.advance()
+    ok(P.complete(), 'quest completion finishes the full first Squire route')
+    story.reset()
+    P.set_guide(nil)
+    WORLD.items[940] = nil
+end
+
+local sandoria_first_mission = G.get("San d'Oria - Smash the Orcish Scouts")
+ok(sandoria_first_mission ~= nil, 'the first San d’Oria mission walkthrough ships')
+if sandoria_first_mission ~= nil then
+    eq(#sandoria_first_mission.errors, 0, 'the first San d’Oria mission walkthrough parses cleanly')
+    eq(sandoria_first_mission.steps[1].mission_accept.id, 0, 'the mission acceptance waits for mission 0')
+    eq(sandoria_first_mission.steps[3].item.id, 16656, 'the objective waits for an Orcish Axe')
+    eq(sandoria_first_mission.steps[3].zone, 100, 'the item waypoint is in West Ronfaure')
+    eq(sandoria_first_mission.steps[5].mission.id, 0, 'turn-in waits for mission 0 completion')
+    eq(sandoria_first_mission.steps[5].pos.x, -112.82, 'Endracion arrow uses the local NPC x coordinate')
+    eq(sandoria_first_mission.steps[5].pos.z, -37.19, 'Endracion arrow uses the local NPC z coordinate')
+    eq(sandoria_first_mission.steps[1].pos.x, 93.42, 'Ambrotien arrow uses the exact local NPC x coordinate')
+    eq(sandoria_first_mission.steps[1].pos.z, -57.35, 'Ambrotien arrow uses the exact local NPC z coordinate')
+    WORLD.zone, WORLD.x, WORLD.z = 230, 93.42, -57.35
+    eq(R.recommend(sandoria_first_mission.steps[1], C.world()).mode, 'here', 'Ambrotien has a mission-start arrow')
+    story.reset()
+    P.set_guide(sandoria_first_mission)
+    P.advance()
+    eq(P.index, 1, 'the mission route waits for server-side acceptance')
+    story.on_packet(0x056, accepted_mission_packet, #accepted_mission_packet)
+    P.advance()
+    eq(P.index, 2, 'mission acceptance advances to West Ronfaure')
+    WORLD.zone = 100
+    P.advance()
+    eq(P.index, 3, 'entering West Ronfaure advances to the item objective')
+    WORLD.x, WORLD.z = -366.087, 215.323
+    local orc = R.recommend(sandoria_first_mission.steps[3], C.world())
+    eq(orc.mode, 'here', 'the Orcish Fodder spawn has an arrow')
+    ok(orc.distance < 0.1, 'the Orcish Fodder arrow uses the local SQL spawn coordinates')
+    WORLD.items[16656] = 1
+    P.advance()
+    eq(P.index, 4, 'the Orcish Axe advances to the return route')
+    WORLD.zone = 230
+    P.advance()
+    eq(P.index, 5, 'returning advances to the mission turn-in')
+    WORLD.zone, WORLD.x, WORLD.z = 230, -112.82, -37.19
+    local endracion = R.recommend(sandoria_first_mission.steps[5], C.world())
+    eq(endracion.mode, 'here', 'the mission turn-in arrow reaches Endracion')
+    ok(endracion.distance < 0.1, 'the Endracion arrow reaches the local SQL NPC position')
+    story.on_packet(0x056, packet_0056(0x00D0, { 0 }), 48)
+    P.advance()
+    ok(P.complete(), 'mission completion finishes the entire M1-1 route')
+    story.reset()
+    P.set_guide(nil)
+    WORLD.items[16656] = nil
+end
+
+local function nation_mission_packet(nation, current)
+    return string.char(0, 0, 0, 0)
+        .. string.char(nation, 0, 0, 0)
+        .. string.char(current % 256, math.floor(current / 256) % 256, 0, 0)
+        .. string.rep('\0', 0x24 - 0x0C)
+        .. string.char(0xFF, 0xFF, 0, 0)
+        .. string.rep('\0', 8)
+end
+
+local sandoria_second_mission = G.get("San d'Oria - Bat Hunt")
+ok(sandoria_second_mission ~= nil, 'the second San d’Oria mission walkthrough ships')
+if sandoria_second_mission ~= nil then
+    eq(#sandoria_second_mission.errors, 0, 'the San d’Oria M1-2 walkthrough parses cleanly')
+    eq(sandoria_second_mission.steps[1].mission_accept.id, 1, 'San d’Oria M1-2 acceptance waits for mission 1')
+    eq(sandoria_second_mission.steps[3].zone, 190, 'the upper tombstone is in King Ranperre’s Tomb')
+    eq(sandoria_second_mission.steps[4].item.id, 1112, 'the objective waits for Orcish Mail Scales item 1112')
+    eq(sandoria_second_mission.steps[4].zone, 190, 'the item waypoint is in King Ranperre’s Tomb')
+    eq(sandoria_second_mission.steps[6].mission.id, 1, 'San d’Oria M1-2 turn-in waits for mission 1 completion')
+    eq(sandoria_second_mission.steps[1].pos.x, 93.42, 'Bat Hunt arrow uses Ambrotien local x')
+    eq(sandoria_second_mission.steps[1].pos.z, -57.35, 'Bat Hunt arrow uses Ambrotien local z')
+    WORLD.zone, WORLD.x, WORLD.z = 230, 93.42, -57.35
+    eq(R.recommend(sandoria_second_mission.steps[1], C.world()).mode, 'here', 'Ambrotien has a local M1-2 acceptance arrow')
+    story.reset()
+    P.set_guide(sandoria_second_mission)
+    local packet = nation_mission_packet(0, 1)
+    story.on_packet(0x056, packet, #packet)
+    P.advance()
+    eq(P.index, 2, 'San d’Oria M1-2 acceptance advances to King Ranperre’s Tomb')
+    WORLD.zone = 190
+    P.advance()
+    eq(P.index, 3, 'entering the tomb advances to the upper tombstone')
+    WORLD.x, WORLD.z = 1, -101
+    local tombstone = R.recommend(sandoria_second_mission.steps[3], C.world())
+    eq(tombstone.mode, 'here', 'the upper tombstone has a local arrow')
+    ok(tombstone.distance < 0.1, 'the tombstone arrow matches the mission-script position')
+    P.advance()
+    eq(P.index, 3, 'the tombstone interaction remains a manual confirmation')
+    P.check()
+    P.advance()
+    eq(P.index, 4, 'confirming the tombstone advances to the scale objective')
+    WORLD.x, WORLD.z = -10, -89
+    local bats = R.recommend(sandoria_second_mission.steps[4], C.world())
+    eq(bats.mode, 'here', 'the Ding Bat group has a local drop arrow')
+    ok(bats.distance < 0.1, 'the Ding Bat arrow matches the local SQL spawn point')
+    WORLD.items[1112] = 1
+    P.advance()
+    eq(P.index, 5, 'Orcish Mail Scales advance to the return route')
+    WORLD.zone = 230
+    P.advance()
+    eq(P.index, 6, 'returning to Southern San d’Oria advances to turn-in')
+    story.on_packet(0x056, packet_0056(0x00D0, { 0, 1 }), 48)
+    P.advance()
+    ok(P.complete(), 'mission completion finishes the San d’Oria M1-2 route')
+    story.reset()
+    P.set_guide(nil)
+    WORLD.items[1112] = nil
+end
+
+local sandoria_third_mission = G.get("San d'Oria - Save the Children")
+ok(sandoria_third_mission ~= nil, 'the San d’Oria M1-3 walkthrough ships')
+if sandoria_third_mission ~= nil then
+    eq(#sandoria_third_mission.errors, 0, 'the San d’Oria M1-3 walkthrough parses cleanly')
+    eq(#sandoria_third_mission.steps, 8, 'the San d’Oria M1-3 route covers all eight mission checkpoints')
+    eq(sandoria_third_mission.steps[1].mission_accept.id, 2, 'Save the Children waits for mission 2 acceptance')
+    eq(sandoria_third_mission.steps[2].fixed, true, 'Arnau briefing requires player confirmation')
+    eq(sandoria_third_mission.steps[4].fixed, true, 'the battlefield remains a manual victory checkpoint')
+    eq(sandoria_third_mission.steps[5].key_item, 157, 'the post-battle step waits for Orcish Hut Key')
+    eq(sandoria_third_mission.steps[6].fixed, true, 'opening Hut Door requires player confirmation')
+    eq(sandoria_third_mission.steps[8].mission.id, 2, 'the turn-in waits for mission 2 completion')
+    eq(sandoria_third_mission.steps[1].pos.x, 93.42, 'M1-3 start arrow uses Ambrotien local x')
+    eq(sandoria_third_mission.steps[1].pos.z, -57.35, 'M1-3 start arrow uses Ambrotien local z')
+    eq(sandoria_third_mission.steps[2].pos.x, 149.89, 'M1-3 briefing arrow uses Arnau local x')
+    eq(sandoria_third_mission.steps[2].pos.z, 141.87, 'M1-3 briefing arrow uses Arnau local z')
+    eq(sandoria_third_mission.steps[4].pos.x, -165.36, 'M1-3 battlefield arrow uses Hut Door local x')
+    eq(sandoria_third_mission.steps[4].pos.z, 77.77, 'M1-3 battlefield arrow uses Hut Door local z')
+
+    WORLD.zone, WORLD.x, WORLD.z = 230, 93.42, -57.35
+    local ambrotien = R.recommend(sandoria_third_mission.steps[1], C.world())
+    eq(ambrotien.mode, 'here', 'Ambrotien has a local M1-3 acceptance arrow')
+    ok(ambrotien.distance < 0.1, 'the M1-3 start arrow reaches Ambrotien')
+    story.reset()
+    P.set_guide(sandoria_third_mission)
+    P.advance()
+    eq(P.index, 1, 'the M1-3 guide waits for server-side mission acceptance')
+    story.on_packet(0x056, nation_mission_packet(0, 2), 48)
+    P.advance()
+    eq(P.index, 2, 'mission acceptance routes to Arnau’s briefing')
+    WORLD.zone, WORLD.x, WORLD.z = 231, 149.89, 141.87
+    local arnau = R.recommend(sandoria_third_mission.steps[2], C.world())
+    eq(arnau.mode, 'here', 'Arnau has a local briefing arrow')
+    ok(arnau.distance < 0.1, 'the Arnau arrow reaches the local SQL NPC position')
+    P.check()
+    P.advance()
+    eq(P.index, 3, 'manual confirmation of Arnau’s mission briefing advances the route')
+    WORLD.zone = 140
+    P.advance()
+    eq(P.index, 4, 'entering Ghelsba Outpost points to the battlefield door')
+    WORLD.x, WORLD.z = -165.36, 77.77
+    local hut = R.recommend(sandoria_third_mission.steps[4], C.world())
+    eq(hut.mode, 'here', 'the Save the Children battlefield has a local arrow')
+    ok(hut.distance < 0.1, 'the battlefield arrow reaches Hut Door')
+    P.check()
+    P.advance()
+    eq(P.index, 5, 'the manual battlefield checkpoint advances only after victory')
+    P.advance()
+    eq(P.index, 5, 'the guide waits for the server-awarded Orcish Hut Key')
+    WORLD.key_items[157] = true
+    P.advance()
+    eq(P.index, 6, 'the Orcish Hut Key advances to the required door event')
+    P.check()
+    P.advance()
+    eq(P.index, 7, 'confirming the Hut Door event routes back to San d’Oria')
+    WORLD.zone = 230
+    P.advance()
+    eq(P.index, 8, 'returning to San d’Oria routes to Ambrotien turn-in')
+    story.on_packet(0x056, packet_0056(0x00D0, { 0, 1, 2 }), 48)
+    P.advance()
+    ok(P.complete(), 'mission completion finishes the Save the Children route')
+    story.reset()
+    P.set_guide(nil)
+    WORLD.key_items[157] = nil
+end
+
+local sandoria_fourth_mission = G.get("San d'Oria - The Rescue Drill")
+ok(sandoria_fourth_mission ~= nil, 'the San d’Oria M2-1 walkthrough ships')
+if sandoria_fourth_mission ~= nil then
+    eq(#sandoria_fourth_mission.errors, 0, 'the San d’Oria M2-1 walkthrough parses cleanly')
+    eq(#sandoria_fourth_mission.steps, 19, 'the Rescue Drill covers acceptance through turn-in')
+    eq(sandoria_fourth_mission.steps[1].mission_accept.id, 3, 'the Rescue Drill waits for mission 3 acceptance')
+    eq(sandoria_fourth_mission.steps[3].fixed, true, 'the drill start dialogue is a manual checkpoint')
+    eq(sandoria_fourth_mission.steps[12].fixed, true, 'Ruillont’s instructions remain a manual checkpoint')
+    eq(sandoria_fourth_mission.steps[15].fixed, true, 'the sword handoff to Ruillont remains manual')
+    eq(sandoria_fourth_mission.steps[17].key_item, 65, 'the certificate step waits for key item 65')
+    eq(sandoria_fourth_mission.steps[19].mission.id, 3, 'the turn-in waits for mission 3 completion')
+    local expected_waypoints = {
+        { 1, 93.42, -57.35 }, { 3, -481.20, 220.55 }, { 4, -286.48, 287.82 },
+        { 5, -307.02, 341.55 }, { 6, -344.96, 265.02 }, { 7, -291.76, 141.19 },
+        { 8, -261.94, 127.61 }, { 9, -315.84, 184.48 }, { 10, -363.42, 267.72 },
+        { 12, -69.85, 610.81 }, { 17, -344.96, 265.02 }, { 19, 93.42, -57.35 },
+    }
+    for _, target in ipairs(expected_waypoints) do
+        local step = sandoria_fourth_mission.steps[target[1]]
+        eq(step.pos.x, target[2], ('Rescue Drill step %d uses its local SQL x coordinate'):format(target[1]))
+        eq(step.pos.z, target[3], ('Rescue Drill step %d uses its local SQL z coordinate'):format(target[1]))
+    end
+    WORLD.zone, WORLD.x, WORLD.z = 230, 93.42, -57.35
+    local ambrotien = R.recommend(sandoria_fourth_mission.steps[1], C.world())
+    eq(ambrotien.mode, 'here', 'Rescue Drill acceptance points to Ambrotien')
+    ok(ambrotien.distance < 0.1, 'Rescue Drill start arrow reaches Ambrotien')
+    story.reset()
+    P.set_guide(sandoria_fourth_mission)
+    P.advance()
+    eq(P.index, 1, 'Rescue Drill waits for server-side mission acceptance')
+    story.on_packet(0x056, nation_mission_packet(0, 3), 48)
+    P.advance()
+    eq(P.index, 2, 'mission acceptance routes to La Theine Plateau')
+    WORLD.zone = 102
+    P.advance()
+    eq(P.index, 3, 'entering La Theine routes to the drill starting guard')
+    for index = 3, 10 do
+        local step = sandoria_fourth_mission.steps[index]
+        WORLD.zone, WORLD.x, WORLD.z = step.zone, step.pos.x, step.pos.z
+        local arrow = R.recommend(step, C.world())
+        eq(arrow.mode, 'here', ('Rescue Drill step %d resolves to an exact local NPC arrow'):format(index))
+        ok(arrow.distance < 0.1, ('Rescue Drill step %d reaches its NPC marker'):format(index))
+        P.check()
+        P.advance()
+    end
+    eq(P.index, 11, 'the La Theine drill checkpoints lead to the Ordelles travel step')
+    WORLD.zone = 193
+    P.advance()
+    eq(P.index, 12, 'entering Ordelles Caves routes to Ruillont')
+    WORLD.zone, WORLD.x, WORLD.z = 193, -69.85, 610.81
+    P.advance()
+    eq(P.index, 12, 'the Ruillont cutscene requires manual confirmation')
+    P.check(); P.advance()
+    eq(P.index, 13, 'Ruillont instructions route to the La Theine return trip')
+    P.advance()
+    eq(P.index, 13, 'the return trip waits until the player leaves the caves')
+    WORLD.zone = 102
+    P.advance()
+    eq(P.index, 14, 'returning to La Theine routes to the conditional rescue guard')
+    P.check(); P.advance()
+    eq(P.index, 15, 'the selected guard checkpoint leads to the sword trade')
+    WORLD.zone, WORLD.x, WORLD.z = 193, -69.85, 610.81
+    P.check(); P.advance()
+    eq(P.index, 16, 'the sword trade checkpoint leads back to La Theine')
+    WORLD.zone = 102
+    P.advance()
+    eq(P.index, 17, 'returning to La Theine routes to the certificate checkpoint')
+    WORLD.x, WORLD.z = -344.96, 265.02
+    WORLD.key_items[65] = true
+    P.advance()
+    eq(P.index, 17, 'the certificate checkpoint still requires manual confirmation')
+    P.check(); P.advance()
+    eq(P.index, 18, 'manual certificate confirmation routes back to San d’Oria')
+    WORLD.zone = 230
+    P.advance()
+    eq(P.index, 19, 'returning to San d’Oria routes to mission turn-in')
+    story.on_packet(0x056, packet_0056(0x00D0, { 0, 1, 2, 3 }), 48)
+    P.advance()
+    ok(P.complete(), 'mission completion finishes The Rescue Drill route')
+    story.reset()
+    P.set_guide(nil)
+    WORLD.key_items[65] = nil
+end
+
+local bastok_second_mission = G.get('Bastok - A Geological Survey')
+ok(bastok_second_mission ~= nil, 'the second Bastok mission walkthrough ships')
+if bastok_second_mission ~= nil then
+    eq(#bastok_second_mission.errors, 0, 'the Bastok M1-2 walkthrough parses cleanly')
+    eq(bastok_second_mission.steps[1].mission_accept.id, 1, 'Bastok M1-2 acceptance waits for mission 1')
+    eq(bastok_second_mission.steps[1].pos.x, -361.9, 'Bastok M1-2 arrow uses Cleades local x')
+    eq(bastok_second_mission.steps[1].pos.z, -169.13, 'Bastok M1-2 arrow uses Cleades local z')
+    eq(bastok_second_mission.steps[2].key_item, 3, "Cid's test starts when Blue Acidity Tester key item 3 arrives")
+    eq(bastok_second_mission.steps[2].pos.x, -12.6, 'Bastok M1-2 Cid arrow uses local x')
+    eq(bastok_second_mission.steps[2].pos.z, 2.43, 'Bastok M1-2 Cid arrow uses local z')
+    for index = 4, 6 do
+        eq(bastok_second_mission.steps[index].key_item, 4, ('Dangruf geyser %d waits for Red Acidity Tester key item 4'):format(index - 3))
+        eq(bastok_second_mission.steps[index].zone, 191, ('Dangruf geyser %d is in Dangruf Wadi'):format(index - 3))
+    end
+    eq(bastok_second_mission.steps[8].mission.id, 1, 'Bastok M1-2 turn-in waits for mission 1 completion')
+    WORLD.zone, WORLD.x, WORLD.z = 235, -361.9, -169.13
+    eq(R.recommend(bastok_second_mission.steps[1], C.world()).mode, 'here', 'Cleades has a local M1-2 acceptance arrow')
+    story.reset()
+    P.set_guide(bastok_second_mission)
+    local packet = nation_mission_packet(1, 1)
+    story.on_packet(0x056, packet, #packet)
+    P.advance()
+    eq(P.index, 2, 'Bastok M1-2 acceptance advances to Cid')
+    WORLD.zone, WORLD.x, WORLD.z = 237, -12.6, 2.43
+    WORLD.key_items[3] = true
+    P.advance()
+    eq(P.index, 3, 'the blue tester advances to travel to Dangruf Wadi')
+    WORLD.zone = 191
+    P.advance()
+    eq(P.index, 4, 'entering Dangruf Wadi points at the first geyser')
+    P.skip()
+    P.advance()
+    eq(P.index, 5, 'a failed first geyser attempt advances to the next one')
+    WORLD.key_items[4] = true
+    P.advance()
+    eq(P.index, 7, 'one successful geyser satisfies the remaining alternatives')
+    WORLD.zone = 237
+    P.advance()
+    eq(P.index, 8, 'returning to Metalworks advances to Cid turn-in')
+    story.on_packet(0x056, packet_0056(0x00D0, { 0, 1 }), 48)
+    P.advance()
+    ok(P.complete(), 'mission completion finishes the Bastok M1-2 route')
+    story.reset()
+    P.set_guide(nil)
+    WORLD.key_items[3], WORLD.key_items[4] = nil, nil
+end
+
+local bastok_first_mission = G.get('Bastok - The Zeruhn Report')
+ok(bastok_first_mission ~= nil, 'the first Bastok mission walkthrough ships')
+if bastok_first_mission ~= nil then
+    eq(#bastok_first_mission.errors, 0, 'the Bastok M1-1 walkthrough parses cleanly')
+    eq(bastok_first_mission.steps[1].mission_accept.area, 'bastok', 'Bastok acceptance uses its nation mission flag')
+    eq(bastok_first_mission.steps[3].key_item, 1, 'the Zeruhn Report objective waits for key item 1')
+    eq(bastok_first_mission.steps[3].pos.x, -60.92, 'Makarim arrow uses the local NPC x coordinate')
+    eq(bastok_first_mission.steps[3].pos.z, -333.29, 'Makarim arrow uses the local NPC z coordinate')
+    eq(bastok_first_mission.steps[5].mission.area, 'bastok', 'Bastok turn-in waits for its mission completion flag')
+    eq(bastok_first_mission.steps[5].pos.x, 66.9, 'Naji arrow uses the local NPC x coordinate')
+    eq(bastok_first_mission.steps[5].pos.z, -4.6, 'Naji arrow uses the local NPC z coordinate')
+    eq(bastok_first_mission.steps[1].pos.x, -361.9, 'Bastok M1-1 arrow uses Cleades local x')
+    eq(bastok_first_mission.steps[1].pos.z, -169.13, 'Bastok M1-1 arrow uses Cleades local z')
+    WORLD.zone, WORLD.x, WORLD.z = 235, -361.9, -169.13
+    eq(R.recommend(bastok_first_mission.steps[1], C.world()).mode, 'here', 'Cleades has a local mission-start arrow')
+    story.reset()
+    P.set_guide(bastok_first_mission)
+    P.advance()
+    eq(P.index, 1, 'the Bastok mission route waits for server-side acceptance')
+    local packet = nation_mission_packet(1, 0)
+    story.on_packet(0x056, packet, #packet)
+    P.advance()
+    eq(P.index, 2, 'Bastok mission acceptance advances to Zeruhn Mines')
+    WORLD.zone = 172
+    P.advance()
+    eq(P.index, 3, 'entering Zeruhn Mines advances to the report objective')
+    WORLD.zone, WORLD.x, WORLD.z = 172, -60.92, -333.29
+    local makarim = R.recommend(bastok_first_mission.steps[3], C.world())
+    eq(makarim.mode, 'here', 'the Zeruhn Report arrow reaches Makarim')
+    ok(makarim.distance < 0.1, 'the Makarim arrow reaches the local SQL NPC position')
+    ok(not P.complete(), 'the Zeruhn Report key item is required before returning')
+    WORLD.key_items[1] = true
+    P.advance()
+    eq(P.index, 4, 'the Zeruhn Report advances to the return route')
+    WORLD.zone = 237
+    P.advance()
+    eq(P.index, 5, 'returning to Metalworks advances to Naji turn-in')
+    WORLD.zone, WORLD.x, WORLD.z = 237, 66.9, -4.6
+    local naji = R.recommend(bastok_first_mission.steps[5], C.world())
+    eq(naji.mode, 'here', 'the Bastok return arrow reaches Naji')
+    ok(naji.distance < 0.1, 'the Naji arrow reaches the local SQL NPC position')
+    story.on_packet(0x056, packet_0056(0x00D0, { 0 }), 48)
+    P.advance()
+    ok(P.complete(), 'mission completion finishes the Bastok M1-1 route')
+    story.reset()
+    P.set_guide(nil)
+    WORLD.key_items[1] = nil
+end
+
+local bastok_third_mission = G.get('Bastok - Fetichism')
+ok(bastok_third_mission ~= nil, 'the third Bastok mission walkthrough ships')
+if bastok_third_mission ~= nil then
+    eq(#bastok_third_mission.errors, 0, 'the Bastok M1-3 walkthrough parses cleanly')
+    eq(bastok_third_mission.steps[1].mission_accept.id, 2, 'Bastok M1-3 acceptance waits for mission 2')
+    eq(bastok_third_mission.steps[1].pos.x, -361.9, 'Bastok M1-3 arrow uses Cleades local x')
+    eq(bastok_third_mission.steps[1].pos.z, -169.13, 'Bastok M1-3 arrow uses Cleades local z')
+    for index, item in ipairs({ 606, 607, 608, 609 }) do
+        eq(bastok_third_mission.steps[index + 1].item.id, item, ('fetich objective %d waits for item %d'):format(index, item))
+        eq(bastok_third_mission.steps[index + 1].zone, 143, ('fetich objective %d is in Palborough Mines'):format(index))
+        eq(bastok_third_mission.steps[index + 1].pos.x, 52, ('fetich objective %d uses the local spawn x coordinate'):format(index))
+        eq(bastok_third_mission.steps[index + 1].pos.z, 60, ('fetich objective %d uses the local spawn z coordinate'):format(index))
+    end
+    eq(bastok_third_mission.steps[7].mission.id, 2, 'Bastok M1-3 turn-in waits for mission 2 completion')
+    WORLD.zone, WORLD.x, WORLD.z = 235, -361.9, -169.13
+    eq(R.recommend(bastok_third_mission.steps[1], C.world()).mode, 'here', 'Cleades has a local M1-3 acceptance arrow')
+    story.reset()
+    P.set_guide(bastok_third_mission)
+    local packet = nation_mission_packet(1, 2)
+    story.on_packet(0x056, packet, #packet)
+    P.advance()
+    eq(P.index, 2, 'Bastok M1-3 acceptance advances to the first fetich objective')
+    WORLD.zone, WORLD.x, WORLD.z = 143, 52, 60
+    local fetich = R.recommend(bastok_third_mission.steps[2], C.world())
+    eq(fetich.mode, 'here', 'the Fetich route arrow reaches the nearby Amber Quadav spawn')
+    ok(fetich.distance < 0.1, 'the Fetich arrow reaches the rounded local SQL spawn point')
+    P.advance()
+    eq(P.index, 2, 'Palborough Mines provides a local spawn arrow')
+    for index, item in ipairs({ 606, 607, 608, 609 }) do
+        WORLD.items[item] = 1
+        P.advance()
+        eq(P.index, index + 2, ('fetich piece %d advances the checklist'):format(index))
+    end
+    eq(P.index, 6, 'all four pieces advance to the return route')
+    WORLD.zone = 235
+    P.advance()
+    eq(P.index, 7, 'returning to Bastok Markets advances to the trade-in')
+    story.on_packet(0x056, packet_0056(0x00D0, { 0, 1, 2 }), 48)
+    P.advance()
+    ok(P.complete(), 'mission completion finishes the Bastok M1-3 route')
+    story.reset()
+    P.set_guide(nil)
+    for _, item in ipairs({ 606, 607, 608, 609 }) do WORLD.items[item] = nil end
+end
+
+local windurst_first_mission = G.get('Windurst - The Horutoto Ruins Experiment')
+ok(windurst_first_mission ~= nil, 'the first Windurst mission walkthrough ships')
+if windurst_first_mission ~= nil then
+    eq(#windurst_first_mission.errors, 0, 'the Windurst M1-1 walkthrough parses cleanly')
+    eq(windurst_first_mission.steps[1].mission_accept.area, 'windurst', 'Windurst acceptance uses its nation mission flag')
+    eq(windurst_first_mission.steps[5].key_item, 28, 'the first gizmo checkpoint waits for Cracked Mana Orb key item 28')
+    eq(windurst_first_mission.steps[1].pos.x, -230.63, 'Windurst M1-1 arrow uses Janshura local x')
+    eq(windurst_first_mission.steps[1].pos.z, 184.05, 'Windurst M1-1 arrow uses Janshura local z')
+    eq(windurst_first_mission.steps[2].pos.x, -111.14, 'Windurst M1-1 arrow uses Hakkuru local x')
+    eq(windurst_first_mission.steps[2].pos.z, 102.06, 'Windurst M1-1 arrow uses Hakkuru local z')
+    for index = 5, 10 do
+        eq(windurst_first_mission.steps[index].key_item, 28, ('Windurst gizmo checkpoint %d shares the server item condition'):format(index - 4))
+        eq(windurst_first_mission.steps[index].zone, 192, ('Windurst gizmo checkpoint %d is in Inner Horutoto Ruins'):format(index - 4))
+    end
+    eq(windurst_first_mission.steps[12].mission.area, 'windurst', 'Windurst turn-in waits for its mission completion flag')
+    WORLD.zone, WORLD.x, WORLD.z = 240, -230.63, 184.05
+    eq(R.recommend(windurst_first_mission.steps[1], C.world()).mode, 'here', 'Janshura-Rashura has a local mission-start arrow')
+    story.reset()
+    P.set_guide(windurst_first_mission)
+    local packet = nation_mission_packet(2, 0)
+    story.on_packet(0x056, packet, #packet)
+    P.advance()
+    eq(P.index, 2, 'Windurst mission acceptance advances to Hakkuru-Rinkuru')
+    WORLD.zone, WORLD.x, WORLD.z = 240, -111.14, 102.06
+    local hakkuru = R.recommend(windurst_first_mission.steps[2], C.world())
+    eq(hakkuru.mode, 'here', 'Hakkuru has a Port Windurst arrow')
+    ok(hakkuru.distance < 0.1, 'the Hakkuru arrow reaches the local SQL NPC position')
+    WORLD.zone, WORLD.x, WORLD.z = 240, -230.63, 184.05
+    P.advance()
+    eq(P.index, 2, 'the guide waits for the player to finish Hakkuru-Rinkuru dialogue')
+    P.check()
+    P.advance()
+    eq(P.index, 3, 'checking the dialogue step advances to Inner Horutoto Ruins')
+    WORLD.zone = 192
+    P.advance()
+    eq(P.index, 4, 'entering the ruins advances to the gate objective')
+    P.check()
+    P.advance()
+    eq(P.index, 5, 'checking the gate advances to randomized gizmo searches')
+    P.skip()
+    P.advance()
+    eq(P.index, 6, 'a wrong gizmo can be skipped to the next marked location')
+    WORLD.key_items[28] = true
+    P.advance()
+    eq(P.index, 11, 'the orb satisfies all remaining randomized gizmo checkpoints')
+    WORLD.zone = 240
+    P.advance()
+    eq(P.index, 12, 'returning to Port Windurst advances to mission turn-in')
+    story.on_packet(0x056, packet_0056(0x00D0, { 0 }), 48)
+    P.advance()
+    ok(P.complete(), 'mission completion finishes the Windurst M1-1 route')
+    story.reset()
+    P.set_guide(nil)
+    WORLD.key_items[28] = nil
+end
+
+local windurst_second_mission = G.get('Windurst - The Heart of the Matter')
+ok(windurst_second_mission ~= nil, 'the second Windurst mission walkthrough ships')
+if windurst_second_mission ~= nil then
+    eq(#windurst_second_mission.errors, 0, 'the Windurst M1-2 walkthrough parses cleanly')
+    eq(windurst_second_mission.steps[1].mission_accept.id, 1, 'Windurst M1-2 acceptance waits for mission 1')
+    eq(windurst_second_mission.steps[1].pos.x, -230.63, 'Windurst M1-2 arrow uses Janshura local x')
+    eq(windurst_second_mission.steps[1].pos.z, 184.05, 'Windurst M1-2 arrow uses Janshura local z')
+    eq(windurst_second_mission.steps[2].key_item, 37, 'Apururu objective waits for the first Dark Mana Orb')
+    eq(windurst_second_mission.steps[2].pos.x, -12.09, 'Apururu arrow uses local NPC x')
+    eq(windurst_second_mission.steps[2].pos.z, 15.94, 'Apururu arrow uses local NPC z')
+    eq(windurst_second_mission.steps[3].key_item, 112, 'Pore-Ohre objective waits for the Southeastern Star Charm')
+    eq(windurst_second_mission.steps[3].pos.x, 262.27, 'Pore-Ohre arrow uses local NPC x')
+    eq(windurst_second_mission.steps[3].pos.z, -459.61, 'Pore-Ohre arrow uses local NPC z')
+    eq(windurst_second_mission.steps[4].zone, 194, 'the ruin route enters Outer Horutoto Ruins')
+    ok(windurst_second_mission.steps[5].fixed, 'placing six orbs is a deliberate manual checkpoint')
+    ok(windurst_second_mission.steps[6].fixed, 'the gate interaction is a deliberate manual checkpoint')
+    local gizmo_positions = {
+        { 542, -618 }, { 500, -573 }, { 458, -618 },
+        { 458, -702 }, { 500, -747 }, { 542, -702 },
+    }
+    for index, position in ipairs(gizmo_positions) do
+        local step = windurst_second_mission.steps[index + 6]
+        eq(step.key_item, 58 + index, ('glowing Mana Orb objective %d waits for key item %d'):format(index, 58 + index))
+        eq(step.zone, 194, ('glowing Mana Orb objective %d is in Outer Horutoto Ruins'):format(index))
+        eq(step.pos.x, position[1], ('glowing Mana Orb gizmo %d uses its local SQL X coordinate'):format(index))
+        eq(step.pos.z, position[2], ('glowing Mana Orb gizmo %d uses its local SQL Z coordinate'):format(index))
+    end
+    eq(windurst_second_mission.steps[13].zone, 116, 'the expected Cardian scene triggers in East Sarutabaruta')
+    eq(windurst_second_mission.steps[14].mission.id, 1, 'Windurst M1-2 turn-in waits for mission 1 completion')
+
+    WORLD.zone, WORLD.x, WORLD.z = 240, -230.63, 184.05
+    eq(R.recommend(windurst_second_mission.steps[1], C.world()).mode, 'here', 'Janshura-Rashura has a local M1-2 mission-start arrow')
+    story.reset()
+    P.set_guide(windurst_second_mission)
+    local packet = nation_mission_packet(2, 1)
+    story.on_packet(0x056, packet, #packet)
+    P.advance()
+    eq(P.index, 2, 'Windurst M1-2 acceptance advances to Apururu')
+    WORLD.zone, WORLD.x, WORLD.z = 241, -12.09, 15.94
+    eq(R.recommend(windurst_second_mission.steps[2], C.world()).mode, 'here', 'Apururu has a local mission arrow')
+    WORLD.key_items[37] = true
+    P.advance()
+    eq(P.index, 3, 'the Dark Mana Orb advances the guide to Pore-Ohre')
+    WORLD.zone, WORLD.x, WORLD.z = 116, 262.27, -459.61
+    WORLD.key_items[112] = true
+    P.advance()
+    eq(P.index, 4, 'the Star Charm advances the guide to Outer Horutoto Ruins')
+    WORLD.zone = 194
+    P.advance()
+    P.check()
+    P.advance()
+    eq(P.index, 5, 'entering Outer Horutoto Ruins advances to orb placement')
+    P.advance()
+    eq(P.index, 5, 'orb placement remains manual until confirmed')
+    P.check()
+    P.advance()
+    eq(P.index, 6, 'confirmed orb placement advances to the gate')
+    P.check()
+    P.advance()
+    eq(P.index, 7, 'confirmed gate event advances to the first glowing orb')
+    for index = 1, 6 do
+        WORLD.key_items[58 + index] = true
+        P.advance()
+        eq(P.index, index + 7, ('glowing Mana Orb %d advances sequentially'):format(index))
+    end
+    eq(P.index, 13, 'six glowing orbs advance to the Cardian scene')
+    WORLD.zone = 116
+    P.advance()
+    eq(P.index, 14, 'East Sarutabaruta advances to the Apururu turn-in')
+    WORLD.zone = 241
+    story.on_packet(0x056, packet_0056(0x00D0, { 0, 1 }), 48)
+    P.advance()
+    ok(P.complete(), 'mission completion finishes the Windurst M1-2 route')
+    story.reset()
+    P.set_guide(nil)
+    WORLD.key_items[37], WORLD.key_items[112] = nil, nil
+    for key_item = 59, 64 do WORLD.key_items[key_item] = nil end
+end
+
+local squire = G.get("San d'Oria - A Squire's Test II")
+ok(squire ~= nil, 'the source-verified quest walkthrough ships')
+if squire ~= nil then
+    eq(#squire.errors, 0, 'the Squire quest walkthrough parses cleanly')
+    eq(squire.steps[3].quest_accept.area, 'sandoria', 'the acceptance step uses San d’Oria quest flags')
+    eq(squire.steps[3].quest_accept.id, 19, 'the acceptance step checks quest id 19')
+    eq(squire.steps[4].kind, 'travel', 'the guide routes into Ordelles Caves')
+    eq(squire.steps[4].zone, 193, 'the cave route uses the Ordelles zone')
+    WORLD.zone, WORLD.x, WORLD.z = 230, -138.33, 65.76
+    local route = R.recommend(squire.steps[4], C.world())
+    eq(route.mode, 'travel', 'the Squire guide routes from Southern San d’Oria')
+    ok(route.hops >= 1, 'the cave route has at least one zone transition')
+    WORLD.zone, WORLD.x, WORLD.z = 193, -94, 273
+    local first_marker = R.recommend(squire.steps[5], C.world())
+    eq(first_marker.mode, 'here', 'the first cave marker uses the local arrow')
+    eq(first_marker.distance, 0, 'the first marker arrow reaches zero distance on location')
+    ok(squire.steps[6].fixed, 'the first marker interaction is a fixed manual checkpoint')
+    eq(R.recommend(squire.steps[6], C.world()).distance, 0,
+       'the first marker interaction remains targeted at the marker')
+    local second_marker = R.recommend(squire.steps[7], C.world())
+    eq(second_marker.mode, 'here', 'the second cave marker uses the local arrow')
+    eq(math.floor(second_marker.distance + 0.5), 46, 'the second marker distance is measured')
+    WORLD.x, WORLD.z = -139, 264
+    local return_route = R.recommend(squire.steps[9], C.world())
+    eq(return_route.mode, 'travel', 'the guide routes back out of Ordelles')
+    ok(return_route.hops >= 1, 'the return route has at least one zone transition')
+    eq(squire.steps[8].key_item, 141, 'the objective waits for Stalactite Dew')
+    eq(squire.steps[10].quest.id, 19, 'the turn-in waits for server quest completion')
+    story.reset()
+    story.on_packet(0x056, packet_0056(0x0050, { 19 }), 48)
+    ok(C.done(squire.steps[3], C.world()), 'the acceptance step observes the active quest flag')
+    WORLD.key_items[141] = true
+    ok(C.done(squire.steps[8], C.world()), 'the cave objective observes the awarded key item')
+    story.on_packet(0x056, packet_0056(0x0090, { 19 }), 48)
+    ok(C.done(squire.steps[10], C.world()), 'turn-in completes from the server quest flag')
+
+    story.reset()
+    WORLD.key_items[141] = nil
+    WORLD.main_job_level = 9
+    WORLD.zone, WORLD.x, WORLD.z = 230, -138.33, 65.76
+    P.set_guide(squire)
+    P.advance()
+    eq(P.index, 1, 'the quest route waits until level 10')
+    WORLD.main_job_level = 10
+    P.advance()
+    eq(P.index, 2, 'the route then waits for the prerequisite quest')
+    story.on_packet(0x056, packet_0056(0x0090, { 10 }), 48)
+    P.advance()
+    eq(P.index, 3, 'the completed prerequisite unlocks the acceptance step')
+    story.on_packet(0x056, packet_0056(0x0050, { 19 }), 48)
+    P.advance()
+    eq(P.index, 4, 'the accepted quest advances to travel')
+    WORLD.zone = 193
+    P.advance()
+    eq(P.index, 5, 'entering Ordelles completes the zone-only travel step')
+    WORLD.x, WORLD.z = -94, 273
+    P.advance()
+    eq(P.index, 6, 'reaching the first marker completes its waypoint')
+    P.advance()
+    eq(P.index, 6, 'arrival does not skip the first marker interaction')
+    P.check()
+    P.advance()
+    eq(P.index, 7, 'the first marker interaction advances manually')
+    WORLD.x, WORLD.z = -139, 264
+    P.advance()
+    eq(P.index, 8, 'reaching the second marker completes its waypoint')
+    P.back()
+    eq(P.index, 6, 'back after timer expiry restores the first-marker checkpoint')
+    eq(P.advance(), 0, 'the restored marker checkpoint remains manual')
+    WORLD.x, WORLD.z = -94, 273
+    eq(R.recommend(P.step(), C.world()).distance, 0, 'retry arrow points back to the first marker')
+    P.advance()
+    eq(P.index, 6, 'returning to the first marker still waits for interaction')
+    P.check()
+    P.advance()
+    eq(P.index, 7, 'manual retry confirmation returns to the second-marker step')
+    WORLD.x, WORLD.z = -139, 264
+    P.advance()
+    eq(P.index, 8, 'retry reaches the second marker again')
+    ok(not P.complete(), 'the guide still waits for Stalactite Dew')
+    WORLD.key_items[141] = true
+    P.advance()
+    eq(P.index, 9, 'the key item advances the guide to the return route')
+    WORLD.zone = 230
+    P.advance()
+    eq(P.index, 10, 'returning to San d’Oria advances to turn-in')
+    story.on_packet(0x056, packet_0056(0x0090, { 10, 19 }), 48)
+    P.advance()
+    ok(P.complete(), 'server completion finishes the entire quest route')
+
+    story.reset()
+    P.set_guide(nil)
+    WORLD.key_items[141] = nil
+end
+
+local knight = G.get("San d'Oria - A Knight's Test")
+ok(knight ~= nil, 'the source-derived Paladin quest walkthrough ships')
+if knight ~= nil then
+    eq(#knight.errors, 0, 'the Knight quest walkthrough parses cleanly')
+    eq(knight.steps[1].level, 30, 'the local LSB advanced-job level gates acceptance')
+    eq(knight.steps[2].quest.id, 19, 'the previous Squire quest gates the new guide')
+    eq(knight.steps[3].quest_accept.id, 29, 'the quest acceptance checks the correct flag')
+    eq(knight.steps[4].key_item, 143, 'acceptance reward waits for the Book of Tasks')
+    eq(knight.steps[6].key_item, 145, 'Baunise step waits for the Book of the West')
+    eq(knight.steps[8].key_item, 144, 'Cahaurme step waits for the Book of the East')
+    eq(knight.steps[10].key_item, 146, 'Davoi step waits for the Knight’s Soul')
+    eq(knight.steps[12].quest.id, 29, 'turn-in waits for the server quest flag')
+
+    WORLD.zone, WORLD.x, WORLD.z = 230, -138.33, 65.76
+    eq(R.recommend(knight.steps[4], C.world()).mode, 'here', 'the acceptance reward stays at Balasiel')
+    eq(R.recommend(knight.steps[5], C.world()).mode, 'here', 'the first NPC has a local arrow')
+    eq(R.recommend(knight.steps[7], C.world()).mode, 'here', 'the second NPC has a local arrow')
+    eq(R.recommend(knight.steps[9], C.world()).mode, 'travel', 'the route continues to Davoi')
+    WORLD.zone = 149
+    local well = R.recommend(knight.steps[10], C.world())
+    eq(well.mode, 'here', 'the well marker has a local arrow in Davoi')
+    eq(math.floor(well.distance + 0.5), 368, 'the Davoi well marker distance is measured')
+    eq(R.recommend(knight.steps[11], C.world()).mode, 'travel', 'the guide routes back to San d’Oria')
+
+    story.reset()
+    WORLD.main_job_level = 29
+    WORLD.key_items[143], WORLD.key_items[144], WORLD.key_items[145], WORLD.key_items[146] = nil, nil, nil, nil
+    WORLD.zone, WORLD.x, WORLD.z = 230, -138.33, 65.76
+    P.set_guide(knight)
+    P.advance()
+    eq(P.index, 1, 'the Paladin guide waits until level 30')
+    WORLD.main_job_level = 30
+    P.advance()
+    eq(P.index, 2, 'the level gate advances to the Squire prerequisite')
+    story.on_packet(0x056, packet_0056(0x0090, { 19 }), 48)
+    P.advance()
+    eq(P.index, 3, 'the completed Squire quest unlocks acceptance')
+    story.on_packet(0x056, packet_0056(0x0050, { 29 }), 48)
+    P.advance()
+    eq(P.index, 4, 'the accepted quest advances to its reward checkpoint')
+    P.advance()
+    eq(P.index, 4, 'the guide waits for the Book of Tasks from the acceptance event')
+    WORLD.key_items[143] = true
+    P.advance()
+    eq(P.index, 5, 'the Book of Tasks advances to Baunise')
+    P.check()
+    P.advance()
+    eq(P.index, 6, 'speaking with Baunise advances to the West book objective')
+    WORLD.key_items[145] = true
+    P.advance()
+    eq(P.index, 7, 'the West book advances to Cahaurme')
+    P.check()
+    P.advance()
+    eq(P.index, 8, 'speaking with Cahaurme advances to the East book objective')
+    WORLD.key_items[144] = true
+    P.advance()
+    eq(P.index, 9, 'the East book advances the guide toward Davoi')
+    WORLD.zone = 149
+    P.advance()
+    eq(P.index, 10, 'entering Davoi advances to the Disused Well')
+    WORLD.key_items[146] = true
+    P.advance()
+    eq(P.index, 11, 'the Knight’s Soul advances to the return route')
+    WORLD.zone = 230
+    P.advance()
+    eq(P.index, 12, 'returning to San d’Oria advances to turn-in')
+    story.on_packet(0x056, packet_0056(0x0090, { 19, 29 }), 48)
+    P.advance()
+    ok(P.complete(), 'the quest completion flag finishes the full Knight route')
+    story.reset()
+    P.set_guide(nil)
+    WORLD.key_items[143], WORLD.key_items[144], WORLD.key_items[145], WORLD.key_items[146] = nil, nil, nil, nil
+end
 
 -- ---- a whole guide, played through ---------------------------------------------
 -- Walk the "Starting out" guide the way a player would and check it ends.
@@ -293,6 +1121,45 @@ do
         end
     end
     eq(violations, 0, 'a quest never comes before the quest it requires')
+
+    local QuestData = require('data.quests')
+    eq(QuestData.canonical_area('aht_urhgan'), 'ahturhgan', 'Aht Urhgan log aliases normalize')
+    eq(QuestData.canonical_area('other_areas'), 'other', 'Other Areas log aliases normalize')
+    eq(QuestData.canonical_area('crystal_war'), 'wotg', 'Crystal War log aliases normalize')
+    ok(QuestData.get('aht_urhgan', 29) ~= nil, 'Aht Urhgan quest ids resolve through the alias')
+    ok(QuestData.get('crystal_war', 12) ~= nil, 'Crystal War prerequisite ids resolve')
+
+    local function quest_positions(guide)
+        local positions = {}
+        for i, step in ipairs(guide.steps) do
+            if step.quest then positions[step.quest.area .. ':' .. step.quest.id] = i end
+        end
+        return positions
+    end
+
+    local aht = quest_positions(G.get('Aht Urhgan - every quest'))
+    ok(aht['ahturhgan:21'] < aht['ahturhgan:22']
+        and aht['ahturhgan:22'] < aht['ahturhgan:23'],
+        'Aht Urhgan quest chains follow their prerequisites')
+    local aht_guide = G.get('Aht Urhgan - every quest')
+    local missing_parent_note
+    for i, step in ipairs(aht_guide.steps) do
+        if step.kind == 'note' and step.text:find('ahturhgan/28', 1, true) then
+            missing_parent_note = i
+            break
+        end
+    end
+    ok(missing_parent_note ~= nil and missing_parent_note < aht['ahturhgan:29'],
+        'a missing same-area prerequisite is surfaced before its quest')
+    local crystal = quest_positions(G.get('Crystal War - every quest'))
+    ok(crystal['wotg:12'] < crystal['wotg:13'],
+        'Crystal War quest chains follow their aliased prerequisites')
+
+    local outlands = quest_positions(G.get('Outlands - every quest'))
+    ok(outlands['bastok:45'] ~= nil and outlands['bastok:45'] < outlands['outlands:195'],
+        'Outlands guides surface an external Bastok prerequisite first')
+    ok(outlands['windurst:7'] ~= nil and outlands['windurst:7'] < outlands['outlands:3'],
+        'Outlands guides surface an external Windurst prerequisite first')
 end
 
 -- ---- the generated mission database ---------------------------------------------

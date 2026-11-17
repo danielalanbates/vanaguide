@@ -10,16 +10,23 @@
 # Steps further away than WALK_MAX yalms of route (default 900) are teleported, so a run
 # does not spend ten minutes crossing Ronfaure; say so in RESULTS.md.
 #
-# Never run this against a hosted server. It sends GM commands and injects packets.
+# Never run this against a hosted server. The guard requires exactly one horizon-loader.exe
+# with --server 127.0.0.1 and a ready local LSB service set before any command is written.
+# This sends GM commands and injects packets; bypassing that check risks a hosted account.
 #
 # Copyright (c) 2026 Bates LLC.  All rights reserved.
 set -u
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 GAME="${VG_GAME:-/Volumes/x10/Video Games/Mac/FFXI/siku.app/Contents/SharedSupport/prefix10/drive_c/HorizonXI}"
+source "$SCRIPT_DIR/require_local_client.sh"
+require_local_client "$GAME" || exit 2
 A="$GAME/addons"; CMD="$A/cmdpipe/cmd.txt"; CHAT="$A/cmdpipe/chat.txt"
 NARR=/tmp/vanavoice/dialogue.jsonl
-GUIDE="${1:?guide number}"; STEPS="${2:-5}"; OUT="${3:-$(cd "$(dirname "$0")/.." && pwd)/results/guided-$(date +%Y%m%d-%H%M)}"
+GUIDE="${1:?guide number}"; STEPS="${2:-5}"
+source "$SCRIPT_DIR/results_path.sh"
+OUT="$(vanaguide_results_dir "${3:-}")" || exit 2
 mkdir -p "$OUT"; MD="$OUT/RESULTS.md"
-say(){ print -r -- "$1" >> "$CMD"; }
+say(){ safe_local_command "$GAME" "$CMD" "$1" || exit 2; }
 last(){ /usr/bin/grep -a "$1" "$CHAT" | tail -1 | sed 's/^\[[0-9]*\] \[Vanaguide\] //'; }
 field(){ print -r -- "$1" | sed -n "s/.*[[:space:]]$2=\([^[:space:]]*\).*/\1/p"; }
 wid(){ python3 -c "

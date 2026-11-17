@@ -48,7 +48,7 @@ local function ordered(area)
         -- left alone: reordering another area's guide from this one would be worse than a
         -- step that waits.
         local pre = entry.quest.prereq
-        if pre ~= nil and pre[1] == area then emit(by_id[pre[2]]) end
+        if pre ~= nil and Q.canonical_area(pre[1]) == area then emit(by_id[pre[2]]) end
         out[#out + 1] = entry
     end
 
@@ -56,27 +56,69 @@ local function ordered(area)
     return out
 end
 
+local function quest_step(area, id, q, label, note)
+    local line = { 'C ' .. label, ('|Q|%s,%d|'):format(Q.canonical_area(area), id) }
+    local notes = {}
+    if q.zone ~= nil then
+        line[#line + 1] = ('|Z|%d|'):format(q.zone)
+        if q.x ~= nil then line[#line + 1] = ('|POS|%.1f,%.1f,8|'):format(q.x, q.z) end
+    end
+    if q.level ~= nil then
+        notes[#notes + 1] = ('Level %d. Ask %s.'):format(q.level, q.npc or 'the quest giver')
+    elseif q.npc ~= nil then
+        notes[#notes + 1] = ('Ask %s.'):format(q.npc)
+    else
+        notes[#notes + 1] = 'No location recorded for this one yet.'
+    end
+    if note ~= nil then notes[#notes + 1] = note end
+    line[#line + 1] = ('|N|%s|'):format(table.concat(notes, ' '):gsub('|', '/'))
+    return table.concat(line)
+end
+
+local function add_external_prerequisites(area, entry, steps, added, visiting)
+    local pre = entry.quest.prereq
+    if pre == nil then return end
+    local pre_area = Q.canonical_area(pre[1])
+    local key = ('%s:%d'):format(pre_area, pre[2])
+    if added[key] or visiting[key] then return end
+    local parent = Q.get(pre_area, pre[2])
+
+    if pre_area == area then
+        if parent == nil then
+            steps[#steps + 1] = ('N This quest references missing prerequisite data %s/%d; verify the server quest source.|')
+                :format(pre_area, pre[2])
+            added[key] = true
+        end
+        return
+    end
+
+    visiting[key] = true
+    if parent ~= nil then
+        add_external_prerequisites(area, { area = pre_area, id = pre[2], quest = parent },
+                                   steps, added, visiting)
+        local title = AREA_TITLE[pre_area] or pre_area
+        steps[#steps + 1] = quest_step(pre_area, pre[2], parent,
+            'Prerequisite: ' .. parent.name,
+            ('Complete this quest in %s first; load "%s - every quest" for its guide steps.')
+                :format(title, title))
+    else
+        steps[#steps + 1] = ('N This quest requires missing prerequisite data %s/%d; verify the server quest source.|')
+            :format(pre_area, pre[2])
+    end
+
+    visiting[key] = nil
+    added[key] = true
+end
+
 local function build(area)
     local entries = ordered(area)
     if #entries == 0 then return nil end
 
     local steps = {}
+    local added, visiting = {}, {}
     for _, entry in ipairs(entries) do
-        local q = entry.quest
-        local line = { 'C ' .. q.name }
-        line[#line + 1] = ('|Q|%s,%d|'):format(area, entry.id)
-        if q.zone ~= nil then
-            line[#line + 1] = ('|Z|%d|'):format(q.zone)
-            if q.x ~= nil then line[#line + 1] = ('|POS|%.1f,%.1f,8|'):format(q.x, q.z) end
-        end
-        if q.level ~= nil then
-            line[#line + 1] = ('|N|Level %d. Ask %s.|'):format(q.level, q.npc or 'the quest giver')
-        elseif q.npc ~= nil then
-            line[#line + 1] = ('|N|Ask %s.|'):format(q.npc)
-        else
-            line[#line + 1] = '|N|No location recorded for this one yet.|'
-        end
-        steps[#steps + 1] = table.concat(line)
+        add_external_prerequisites(area, entry, steps, added, visiting)
+        steps[#steps + 1] = quest_step(area, entry.id, entry.quest, entry.quest.name)
     end
 
     return G.register({
