@@ -2,12 +2,15 @@
 
 `/vg walk` puts the character on the line and moves it to the current step's target at run
 speed; `/vg walk auto` keeps going through travel legs, zone lines and city gates until it
-stands beside the NPC. **Local LandSandBoat world only** — it is gated behind `/vg walk allow`,
-and moving a character this way on anybody else's server is a bannable offence.
+stands beside the NPC. **Use only on the user's local LandSandBoat world.** `/vg walk allow` is
+only a manual opt-in; it does not inspect or verify the connected server address. Walking uses
+GM `!walkto` commands, so it is not a player-driven demonstration and must never be used on a
+hosted server.
 
-It exists so the guide can be tested the way it is meant to be used: a character accepting
-quests, listening to the narrator, and following the arrow from one quest to the next.
-`tools/guided_walk.sh <guide> <steps>` does exactly that and writes `results/…/RESULTS.md`.
+It exists for local routing and addon regression. `tools/guided_walk.sh <guide> <steps>` uses
+server-side movement, can teleport long legs, and completes quests through GM commands. It does
+not prove that a player can naturally accept, follow, and complete sequential quests. A separate
+player-driven run is still required.
 
 ## What was measured before this was written (2026-08-28)
 
