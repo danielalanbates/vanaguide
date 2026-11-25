@@ -15,7 +15,8 @@
 -- Copyright (c) 2026 Bates LLC.  All rights reserved.
 
 local U      = require('core.util')
-local quests = require('data.quests')
+local quests   = require('data.quests')
+local missions = require('data.missions')
 
 local V = {}
 
@@ -47,9 +48,13 @@ function V.nearby(px, pz)
     local mm = AshitaCore:GetMemoryManager()
     local ents = mm:GetEntity()
     local out = {}
+    -- The player is always the nearest entity, at 0.0 yalms. Counting it made every marker
+    -- quest "pass" on its own character.
+    local okself, me = pcall(function() return mm:GetParty():GetMemberTargetIndex(0) end)
+    if not okself then me = -1 end
     for i = 0, MAX_ENTITY do
         local ok, name = pcall(function() return ents:GetName(i) end)
-        if ok and name ~= nil and name ~= '' then
+        if i ~= me and ok and name ~= nil and name ~= '' then
             local x = ents:GetLocalPositionX(i)
             local z = ents:GetLocalPositionY(i)     -- Ashita's Y is the second horizontal axis
             if x ~= nil and (x ~= 0 or z ~= 0) then
@@ -66,8 +71,11 @@ end
 
 --- Check one quest against the world the player is standing in.
 --- Returns a result table; `ok` is true when the quest's own NPC is loaded nearby.
-function V.quest(area, id)
-    local q = quests.get(area, id)
+function V.quest(area, id) return V.entry('quest', area, id) end
+
+--- Same check for any guide target kind: 'quest' (data.quests) or 'mission' (data.missions).
+function V.entry(kind, area, id)
+    local q = (kind == 'mission' and missions or quests).get(area, id)
     local px, pz = U.position()
     local zone = U.zone()
     local r = {
@@ -78,7 +86,7 @@ function V.quest(area, id)
         ok = false, why = '', dist = nil, nearest = '',
     }
 
-    if q == nil then r.why = 'no such quest in the database'; return r end
+    if q == nil then r.why = ('no such %s in the database'):format(kind); return r end
     if q.zone == nil then r.why = 'the database has no location for it'; return r end
     if zone == nil or px == nil then r.why = 'not in the world'; return r end
     if zone ~= q.zone then
@@ -95,6 +103,11 @@ function V.quest(area, id)
     local want = normalize(q.npc)
     local list = V.nearby(px, pz)
     r.nearest = (#list > 0) and list[1].name or ''
+    if #list == 0 then
+        -- Nothing but the player: the zone's entities have not streamed in yet. Not a data error.
+        r.why = 'nothing loaded yet (zone still streaming) - recheck'
+        return r
+    end
     if want == '' or marker then
         -- Within ten yalms is the same "you are in the right place" the arrow uses.
         local near = list[1]
@@ -130,6 +143,84 @@ function V.row(r)
         tostring(r.want_zone or ''), n(r.want_x), n(r.want_z),
         tostring(r.zone or ''), n(r.x), n(r.z), n(r.dist),
         '"' .. tostring(r.why):gsub('"', "'") .. '"',
+    }, ',')
+end
+
+--- Is `npc` loaded near (px, pz)?  Returns ok, dist, nearest, why.
+--- Markers ("???", qm*, _xyz doors) match anything within 10 yalms, as V.entry does.
+function V.presence(npc, px, pz, want_index)
+    local list = V.nearby(px, pz)
+    -- Why the index did not match: never in this client's entity table, or standing elsewhere.
+    local idx_why = nil
+    if want_index ~= nil then
+        -- Straight from the entity table: V.nearby skips unnamed entries, and an NPC this
+        -- client's DAT has no name for is exactly the case the index is here to cover.
+        local ok, ents = pcall(function() return AshitaCore:GetMemoryManager():GetEntity() end)
+        if ok and ents ~= nil then
+            local okx, x = pcall(function() return ents:GetLocalPositionX(want_index) end)
+            local okz, z = pcall(function() return ents:GetLocalPositionY(want_index) end)
+            if okx and okz and x ~= nil and z ~= nil and (x ~= 0 or z ~= 0) and px ~= nil then
+                local d = U.dist(px, pz, x, z)
+                if d <= 10 then
+                    local okn, name = pcall(function() return ents:GetName(want_index) end)
+                    return true, d, ('%s#%d'):format(okn and name or '', want_index),
+                           ('found by index #%d'):format(want_index)
+                end
+                idx_why = ('index #%d is %.0f yalms from the marker'):format(want_index, d)
+            elseif okx and okz and px ~= nil then
+                idx_why = ('index #%d is not in the entity table'):format(want_index)
+            end
+        end
+    end
+    -- With its target index: the client names an NPC from its own DAT by index, and where
+    -- that DAT is older than the server's npc_list the name belongs to another NPC
+    -- (tools/client_names.py). The index can be checked against npc_list; the name cannot.
+    local nearest = (#list > 0) and ('%s#%d'):format(list[1].name, list[1].index) or ''
+    if #list == 0 then return false, nil, '', 'nothing loaded yet' end
+    npc = npc or ''
+    local marker = npc:match('^qm') ~= nil or npc:match('^_') ~= nil or npc:find('%?%?%?') ~= nil
+    if npc == '' or marker then
+        local near = list[1]
+        local ok = near ~= nil and (near.dist or 1e9) <= 10
+        return ok, near and near.dist, nearest, marker and 'marker' or 'no npc named'
+    end
+    local want = normalize(npc)
+    local far = nil
+    for _, e in ipairs(list) do
+        if normalize(e.name) == want then
+            -- Everything within ~50 yalms of the player is loaded, so a name match only says
+            -- something about the marker within the same ten yalms the marker check uses.
+            if (e.dist or 1e9) <= 10 then return true, e.dist, nearest, ('found #%d'):format(e.index) end
+            far = far or e
+        end
+    end
+    -- Entity status 4 is an event (cutscene).  Diagnostic only: the call and the value are not
+    -- verified on this client, and pcall drops the suffix if the API differs.
+    local okme, st = pcall(function()
+        local mm = AshitaCore:GetMemoryManager()
+        return mm:GetEntity():GetStatus(mm:GetParty():GetMemberTargetIndex(0))
+    end)
+    local ev = (okme and st == 4) and '; in an event' or ''
+    if idx_why ~= nil then
+        -- With the server's index in hand a far name match is only this client's DAT naming
+        -- another NPC (#N is server N's entity), not the step's NPC standing elsewhere.
+        return false, nil, nearest, idx_why .. (far and (' (the client names #%d %s)'):format(far.index, npc) or '') .. ev
+    end
+    if far ~= nil then
+        return false, far.dist, nearest, ('found %.0f yalms from the marker (#%d)'):format(far.dist or -1, far.index) .. ev
+    end
+    return false, nil, nearest, ('not loaded (%d entities)'):format(#list) .. ev
+end
+
+--- One row of the step audit (tools/audit_steps.py).
+function V.audit_row(t)
+    local function n(v) return v == nil and '' or ('%.1f'):format(v) end
+    local function q(v) return '"' .. tostring(v or ''):gsub('"', "'") .. '"' end
+    return table.concat({
+        tostring(t.guide), tostring(t.step), t.phase, t.kind, tostring(t.want_zone or ''),
+        tostring(t.zone or ''), t.mode or '', n(t.dist), tostring(t.radius or ''),
+        t.inside and 'inside' or 'outside', q(t.npc), t.present and 'present' or 'absent',
+        n(t.npc_dist), q(t.nearest), t.done and 'done' or 'open', q(t.path), q(t.why),
     }, ',')
 end
 

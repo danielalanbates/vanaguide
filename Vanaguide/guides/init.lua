@@ -6,8 +6,25 @@
 
 require('guides.starting_out')
 require('guides.subjob')
+require('guides.squire_intro')
+require('guides.squire_trial')
+require('guides.knight_trial')
+require('guides.sandoria_mission_1_1')
+require('guides.sandoria_mission_1_2')
+require('guides.sandoria_mission_1_3')
+require('guides.sandoria_mission_2_1')
+require('guides.bastok_mission_1_1')
+require('guides.bastok_mission_1_2')
+require('guides.bastok_mission_1_3')
+require('guides.windurst_mission_1_1')
+require('guides.windurst_mission_1_2')
 
 -- Every quest the server implements, one guide per area, built from data/quests.lua.
 require('guides.generated')
+
+-- One guide per RetroAchievements set, from data/achievements.lua.  Last on purpose: guides
+-- are numbered in registration order, and saved progress and the audit tools key on those
+-- numbers, so new guides only ever go on the end.
+require('guides.achievements')
 
 return true

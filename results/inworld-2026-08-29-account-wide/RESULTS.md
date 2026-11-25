@@ -1,5 +1,8 @@
 # In-game verification — 2026-08-29, account-wide graph + narrator + quest accept
 
+Screenshots are not on master (runs keep screenshots out of the source tree, see
+docs/DRIVING_THE_CLIENT.md); they remain in commit fbeec44 on the `account-wide-learned-graph` branch.
+
 Live local LandSandBoat world (127.0.0.1), character **Test** (Elvaan) in Southern San d'Oria
 (zone 230). Vanaguide reloaded with the account-wide-learned-graph code; VanaVoice 1.5 running
 the single generic narrator voice `en_US-ryan-high`.

@@ -28,7 +28,8 @@ end
 
 --- True when the step has a condition the game can answer for us.
 function C.is_automatic(step)
-    return step.mission ~= nil or step.quest ~= nil or step.quest_accept ~= nil
+    return step.mission ~= nil or step.mission_accept ~= nil
+        or step.quest ~= nil or step.quest_accept ~= nil
         or step.key_item ~= nil or step.item ~= nil or step.level ~= nil
         or step.job ~= nil or step.rank ~= nil or step.spell ~= nil
 end
@@ -48,6 +49,9 @@ function C.done(step, w)
     if step.mission ~= nil then
         return w.story.mission_done(step.mission.area, step.mission.id)
     end
+    if step.mission_accept ~= nil then
+        return w.story.mission_active(step.mission_accept.area, step.mission_accept.id)
+    end
     if step.quest ~= nil then
         return w.story.quest_done(step.quest.area, step.quest.id)
     end
@@ -66,6 +70,7 @@ function C.done(step, w)
     -- for the player to tick it off, because guessing would march the guide past a step
     -- the player has not actually done.
     if step.kind == 'run' or step.kind == 'travel' then
+        if step.zone ~= nil and step.zone == w.zone and step.pos == nil then return true end
         local d = C.distance(step, w)
         return d ~= nil and d <= (step.pos and step.pos.r or 10)
     end
