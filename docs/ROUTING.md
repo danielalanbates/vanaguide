@@ -62,13 +62,19 @@ to Norg once Rhapsodies of Vana'diel reaches Flames of Prayer (Tonasav, Pacomart
 ## Why the graph still learns
 
 Every time your zone id changes, `ZoneGraph.learn(previous, current)` records the pair and
-saves it with your character's settings, so a custom server or anything the tables miss
+saves it to the account-wide `addons/Vanaguide/learned.lua` (`core/learned.lua`), so a custom server or anything the tables miss
 fills in from play. A change between two Home Point zones that do not touch is taken for a
 warp and not learned.
 
 Consequences worth knowing:
 
-* Learned edges are per character. Sharing them is listed in [PATHWAYS.md](PATHWAYS.md).
+* A fresh character routes badly in areas it has never walked. This is expected and it
+  fixes itself.
+* Learned edges are account-wide (`core/learned.lua`): every crossing is written to one
+  shared `addons/Vanaguide/learned.lua`, merged in for whoever logs in, so a second
+  character starts with every road the first already walked. A per-character `learned` set
+  saved before this is migrated into the shared file on first load. A community-wide graph
+  is the next step up and is still listed in [PATHWAYS.md](PATHWAYS.md).
 * A learned edge has no direction restriction, which is wrong for one-way drops. The cost
   of that error is a route that suggests walking up a cliff you fell down; it is on the
   known-wrong list.
