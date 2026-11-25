@@ -41,6 +41,10 @@ local function minutes(seconds)
     return ('%dm'):format(math.floor(seconds / 60 + 0.5))
 end
 
+-- Steps whose work is a conversation with an NPC, and how close that needs you to be.
+local TALK_KINDS = { accept = true, turnin = true, talk = true, buy = true }
+local TALK_RANGE = 5
+
 --- Fill in bearing, distance and arrival for a target in the zone the player is in.
 local function aim(rec, w, tx, tz, radius)
     if w.x == nil or tx == nil then return rec end
@@ -72,7 +76,12 @@ function R.recommend(step, w)
             return { mode = 'here', text = 'In ' .. U.zone_name(zone), distance = nil }
         end
         local rec = { mode = 'here', target = { x = step.pos.x, z = step.pos.z, y = step.pos.y } }
-        aim(rec, w, step.pos.x, step.pos.z, step.pos.r)
+        -- A step spent speaking to someone is not done arriving until you can talk to
+        -- them.  The POS radius is often wide (generated steps use ~60y to mean "the
+        -- right part of town"), which left the walker stopping far outside talk range.
+        local radius = step.pos.r
+        if TALK_KINDS[step.kind] then radius = math.min(radius or TALK_RANGE, TALK_RANGE) end
+        aim(rec, w, step.pos.x, step.pos.z, radius)
         rec.text = ('%.0f yalms'):format(rec.distance or 0)
         return rec
     end
