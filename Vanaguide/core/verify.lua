@@ -22,6 +22,15 @@ local V = {}
 
 local MAX_ENTITY = 2303
 
+-- How close counts as having arrived. Ten yalms, the same "you are in the right place" the
+-- arrow uses, and for the same reason: the entity table streams in a radius around the
+-- player, so ten yalms one way or the other does not change what is loaded. It is not float
+-- noise this is guarding against -- the rows it catches were fifty-five to two hundred and
+-- twelve yalms out, which is a different place entirely. A tighter number would start
+-- rejecting stops where the server puts the character on the nearest walkable ground rather
+-- than exactly on the coordinate, and those checks are perfectly good.
+local ARRIVED = 10.0
+
 local function normalize(s)
     return (tostring(s or ''):lower():gsub('[^%a%d]', ''))
 end
@@ -79,11 +88,12 @@ function V.entry(kind, area, id)
     local px, pz = U.position()
     local zone = U.zone()
     local r = {
+        kind = kind or 'quest',
         area = area, id = id, name = q and q.name or '?',
         npc = q and q.npc or '', want_zone = q and q.zone or nil,
         want_x = q and q.x or nil, want_z = q and q.z or nil,
         zone = zone, x = px, z = pz,
-        ok = false, why = '', dist = nil, nearest = '',
+        ok = false, why = '', dist = nil, nearest = '', entities = nil,
     }
 
     if q == nil then r.why = ('no such %s in the database'):format(kind); return r end
@@ -91,6 +101,24 @@ function V.entry(kind, area, id)
     if zone == nil or px == nil then r.why = 'not in the world'; return r end
     if zone ~= q.zone then
         r.why = ('standing in %d, quest is in %d'):format(zone, q.zone)
+        return r
+    end
+    -- A mission that begins by walking into a place has a zone and no spot in it. Being in
+    -- the right zone is the whole of what can be checked, and it has just been checked.
+    if q.x == nil or q.z == nil then
+        r.ok = true
+        r.why = 'the zone is right, and the script names no spot in it'
+        return r
+    end
+
+    -- In the right zone and in the wrong place. A `!pos` issued while the character is still
+    -- zoning is dropped without a word, and the check that follows reads the entity table
+    -- from the zone entrance and calls the NPC absent. Seven rows in the ledger were written
+    -- that way -- all in Northern San d'Oria, up to 212 yalms off -- and every one of them
+    -- reads like a real miss. Say so instead: this is the harness failing, not evidence.
+    local off = U.dist(px, pz, q.x, q.z)
+    if off > ARRIVED then
+        r.why = ('standing %.1f yalms from the spot'):format(off)
         return r
     end
 
@@ -102,6 +130,7 @@ function V.entry(kind, area, id)
                                      or q.npc:find('%?%?%?') ~= nil)
     local want = normalize(q.npc)
     local list = V.nearby(px, pz)
+    r.entities = #list
     r.nearest = (#list > 0) and list[1].name or ''
     if #list == 0 then
         -- Nothing but the player: the zone's entities have not streamed in yet. Not a data error.
@@ -143,6 +172,13 @@ function V.row(r)
         tostring(r.want_zone or ''), n(r.want_x), n(r.want_z),
         tostring(r.zone or ''), n(r.x), n(r.z), n(r.dist),
         '"' .. tostring(r.why):gsub('"', "'") .. '"',
+        -- Fourteenth column, which tools/ledger.py reads: `sandoria` is both a quest area and
+        -- a mission storyline with overlapping ids, so the kind travels with every row.
+        r.kind or 'quest',
+        -- Fifteenth column. Written on every row, not only on misses: "the NPC was not here"
+        -- and "nothing at all was here yet" are different findings and the count is what
+        -- tells them apart.
+        r.entities == nil and '' or tostring(r.entities),
     }, ',')
 end
 

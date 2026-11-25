@@ -487,6 +487,33 @@ do -- `/vg tee` copies every printed line to a file a script can read
     eq(text, '[Vanaguide] tee check one\n[Vanaguide] tee check two\n', 'U.print appends to the tee file')
 end
 
+do -- /vg verify judges only from the spot, and its CSV row carries kind and entity count
+    local V = require('core.verify')
+    local Qs = require('data.quests')
+    local saved_zone, saved_x, saved_z = WORLD.zone, WORLD.x, WORLD.z
+    local q = Qs.get('sandoria', 60)
+    WORLD.zone, WORLD.x, WORLD.z = q.zone, q.x + 50, q.z
+    local r = V.entry('quest', 'sandoria', 60)
+    ok(not r.ok, 'verify does not judge from 50 yalms away')
+    eq(r.why, 'standing 50.0 yalms from the spot', 'verify says it is in the wrong place')
+    ok(V.row(r):match(',quest,$') ~= nil, 'verify row ends with kind and an empty entity count')
+    local Ms = require('data.missions')
+    local area, id, m
+    for a, list in pairs(Ms.missions or {}) do
+        for i, e in pairs(list) do
+            if type(e) == 'table' and e.zone ~= nil and e.x == nil and m == nil then area, id, m = a, i, e end
+        end
+    end
+    ok(m ~= nil, 'the mission data has a zone-only entry to check')
+    if m ~= nil then
+        WORLD.zone, WORLD.x, WORLD.z = m.zone, 0, 0
+        local rm = V.entry('mission', area, id)
+        ok(rm.ok, 'a zone-only mission passes in its zone')
+        ok(V.row(rm):match(',mission,$') ~= nil, 'mission rows say mission')
+    end
+    WORLD.zone, WORLD.x, WORLD.z = saved_zone, saved_x, saved_z
+end
+
 -- ---- shipped guides -----------------------------------------------------------
 require('guides.init')
 local shipped = 0
