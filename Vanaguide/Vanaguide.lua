@@ -18,6 +18,7 @@
 *   /vg arrow flip             flip the arrow's rotation if it points the wrong way
 *   /vg arrow nudge <degrees>  rotate the arrow by a fixed offset
 *   /vg reset                  start the current guide again
+*   /vg ra [reload]            RetroAchievements progress: what the launcher's snapshot says
 *
 * Copyright (c) 2026 Bates LLC.  All rights reserved.
 * https://batesai.org  ·  help@batesai.org
@@ -78,6 +79,9 @@ local Project = require('ui.project');
 -- line stays straight.  See docs/NAVMESH.md -- the grids are generated, never shipped.
 local Nav    = require('routing.navgrid');
 local Walk   = require('core.walk');
+-- RetroAchievements progress, read from the file the launcher writes. Never the network.
+local RA     = require('core.ra');
+local RAG    = require('guides.achievements');
 
 require('guides.init');
 
@@ -176,6 +180,7 @@ end
 ashita.events.register('load', 'vg_load', function ()
     Nav.install(Path);
     apply_settings(nil);
+    pcall(RA.refresh);
     U.print(('v%s loaded. /vg for the window, /vg guides to pick one.'):format(addon.version));
 end);
 
@@ -429,6 +434,28 @@ ashita.events.register('command', 'vg_command', function (e)
         return;
     end
 
+    -- RetroAchievements: what the launcher's snapshot says, and which guides list the sets.
+    -- Progress is earned on HorizonXI and only shown here; it never completes a step.
+    if (sub == 'ra' or sub == 'achievements') then
+        if ((args[3] or ''):lower() == 'reload') then pcall(RA.refresh); end
+        for _, line in ipairs(RA.summary()) do U.print(line); end
+        local listed = 0;
+        for i, g in ipairs(G.list()) do
+            if (RAG.is_achievement_guide(g)) then
+                listed = listed + 1;
+                local earned = 0;
+                for _, st in ipairs(g.steps) do
+                    if (st.ra ~= nil and RA.earned(st.ra)) then earned = earned + 1; end
+                end
+                U.print(('  guide %d. %s  (%d/%d earned)'):format(i, g.name, earned, #g.steps));
+            end
+        end
+        if (listed == 0) then
+            U.print('  no achievement guides: data/achievements.lua has no sets yet (docs/RETROACHIEVEMENTS.md)');
+        end
+        return;
+    end
+
     if (sub == 'next' or sub == 'done') then P.check(); P.advance(); save_progress(); return; end
     if (sub == 'skip') then P.skip(); P.advance(); save_progress(); return; end
     if (sub == 'back') then P.back(); save_progress(); return; end
@@ -533,7 +560,7 @@ ashita.events.register('command', 'vg_command', function (e)
             local ok, Qd = pcall(require, 'data.quests');
             if (ok and Qd.quests and Qd.quests[key.area]) then q = Qd.quests[key.area][key.id]; end
         end
-        local npc = (q and q.npc) or (step.note or ''):match('Ask ([^.]+)%.') or (step.note or ''):match('Starts with ([^.]+)%.') or '';
+        local npc = G.npc_of(step, q) or '';
         U.print(('target: step=%d zone=%s x=%s y=%s z=%s npc=%s key=%s,%s name=%s')
             :format(P.index, tostring(step.zone or (q and q.zone) or ''),
                     q and q.x or (step.pos and step.pos.x) or '', q and q.y or '',
@@ -622,6 +649,63 @@ ashita.events.register('command', 'vg_command', function (e)
         return;
     end
 
+    -- `/vg audit <guide#> <step#> [jump|done]`: jump to any step of any guide and write one
+    -- row to addons/Vanaguide/audit.csv: what the arrow says from here, whether the step's
+    -- NPC is loaded, whether its condition reads as done, and what the path is built from.
+    -- tools/audit_steps.py drives it over every step of every guide on the local world.
+    if (sub == 'audit' and #args > 3) then
+        local gi, si = tonumber(args[3]), tonumber(args[4]);
+        local mode = (#args > 4) and args[5]:lower() or 'pre';
+        -- Optional 6th word: the server's target index for the step's NPC (npc_list), which the
+        -- harness looks up. Matching by index sidesteps a client whose NPC-name DAT is older
+        -- than the server's list (tools/client_names.py).
+        local want_index = (#args > 5) and tonumber(args[6]) or nil;
+        local g = gi and G.list()[gi] or nil;
+        if (g == nil or si == nil or g.steps[si] == nil) then
+            U.print(('audit: no step %s of guide %s'):format(tostring(args[4]), tostring(args[3])));
+            return;
+        end
+        if (P.guide ~= g) then P.set_guide(g, nil); end
+        P.index = si;
+        R.forget();
+        if (mode == 'jump') then U.print(('audit: on %d/%d'):format(gi, si)); return; end
+        local step = P.step();
+        local w = C.world(); w.yaw = U.heading();
+        local rec = R.recommend(step, w);
+        local d = C.distance(step, w);
+        local key = step.quest or step.quest_accept or step.mission or step.mission_accept;
+        local q = nil;
+        if (step.quest or step.quest_accept) then
+            local ok, Qd = pcall(require, 'data.quests');
+            if (ok and Qd.quests and Qd.quests[key.area]) then q = Qd.quests[key.area][key.id]; end
+        elseif (step.mission or step.mission_accept) then
+            local ok, Md = pcall(require, 'data.missions');
+            if (ok and Md.get) then q = Md.get(key.area, key.id); end
+        end
+        local npc = G.npc_of(step, q) or '';
+        local present, ndist, nearest, why = false, nil, '', 'not in the step zone';
+        if (step.zone ~= nil and step.zone == w.zone and step.pos ~= nil) then
+            present, ndist, nearest, why = Verify.presence(npc, step.pos.x, step.pos.z, want_index);
+        elseif (step.zone == nil) then
+            why = 'step has no location';
+        elseif (step.pos == nil and step.zone == w.zone) then
+            why = 'in the step zone (zone-only step, no marker)';
+        end
+        local r = step.pos and step.pos.r or nil;
+        local row = {
+            guide = gi, step = si, phase = mode, kind = step.kind, want_zone = step.zone,
+            zone = w.zone, mode = rec.mode, dist = rec.distance or d, radius = r,
+            inside = (d ~= nil and r ~= nil and d <= r) or (step.pos == nil and step.zone ~= nil and step.zone == w.zone),
+            npc = npc, present = present,
+            npc_dist = ndist, nearest = nearest, done = C.done(step, w),
+            path = Line.status():gsub(',', ';'), why = why .. ' | ' .. (rec.text or ''),
+        };
+        Verify.log('audit.csv', Verify.audit_row(row));
+        U.print(('audit %d/%d %s: %s %s npc=%s done=%s'):format(gi, si, mode, rec.mode,
+            row.inside and 'inside' or 'outside', present and 'present' or 'absent', tostring(row.done)));
+        return;
+    end
+
     -- What is loaded around me right now: the raw material the check above works from.
     if (sub == 'nearby') then
         local x, z = U.position();
@@ -670,14 +754,16 @@ ashita.events.register('command', 'vg_command', function (e)
             local a, b = tonumber(args[3]), tonumber(args[4]);
             local key = ('%d-%d'):format(math.min(a, b), math.max(a, b));
             local set = graph.save_learned() or {};
+            -- routing/zonegraph.lua keys a learned crossing 'a:b' (and 'b:a'); this used to
+            -- look for 'a-b' and so answered "no" for every pair it had ever learned.
             U.print(('graph: %s learned = %s'):format(key,
-                (set[key] or set[('%d-%d'):format(a, b)] or set[('%d-%d'):format(b, a)])
+                (set[('%d:%d'):format(a, b)] or set[('%d:%d'):format(b, a)])
                 and 'yes' or 'no'));
             return;
         end
         -- `/vg graph suspect` lists the hand-written pairs the server's own zone line table
-        -- contradicts. They still route, at three times the cost, so a way round wins when
-        -- there is one -- see docs/ROUTING.md.
+        -- contradicts. They are left out of routing -- the server will not move a player
+        -- across them -- see docs/ROUTING.md.
         if (#args > 2 and args[3]:lower() == 'suspect') then
             local sus = graph.suspect or {};
             U.print(('%d seed pairs the server table contradicts:'):format(#sus));
@@ -706,7 +792,8 @@ ashita.events.register('command', 'vg_command', function (e)
             return;
         end
         U.print(('%s -> %s: %d legs, about %dm')
-            :format(U.zone_name(here), U.zone_name(step.zone), #legs, math.floor((cost or 0) / 60 + 0.5)));
+            :format(U.zone_name(here), U.zone_name(step.zone), #legs,
+                    math.floor((graph.eta(legs) or cost or 0) / 60 + 0.5)));
         -- One line per leg, and each says whether the router can point at it. A leg with no
         -- recorded coordinate still gets you there; it just cannot aim the arrow, and saying
         -- so is the difference between a gap and a bug.
@@ -1107,7 +1194,7 @@ ashita.events.register('command', 'vg_command', function (e)
     end
 
     U.print('commands: guides, load <n>, next, back, skip, reset, route, goto <zone>, mark,');
-    U.print('          arrow, line, nav');
+    U.print('          arrow, line, nav, ra');
     U.print('lookups:  find <item>, gear <slot>, nm [name], track <n>');
 end);
 
@@ -1144,6 +1231,9 @@ end
 
 ashita.events.register('d3d_present', 'vg_present', function ()
     pump_commands();
+    -- The RetroAchievements snapshot: a file read at most once a minute, parsed only when it
+    -- changed, and never allowed to throw into the frame.
+    pcall(RA.tick, os.time());
     -- The 0x05B cannot be sent from inside the packet handler: Ashita is mid-dispatch and the
     -- outgoing queue is not reentrant. One frame later is soon enough.
     if (event.pending) then

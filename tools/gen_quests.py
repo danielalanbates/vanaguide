@@ -23,17 +23,23 @@ import re
 import sys
 from collections import defaultdict
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import lsbdata  # noqa: E402
+
 AREA_LOG = {
     'sandoria': 'sandoria', 'bastok': 'bastok', 'windurst': 'windurst',
     'jeuno': 'jeuno', 'otherAreas': 'other', 'outlands': 'outlands',
     'ahtUrhgan': 'ahturhgan', 'crystalWar': 'wotg', 'abyssea': 'abyssea',
     'adoulin': 'adoulin', 'coalition': 'coalition',
 }
+# A prerequisite names its log the server's way (CRYSTAL_WAR); the guides key it the client's
+# way (wotg). data/quests.lua carries the same table as Q.canonical_area.
 AREA_ALIASES = {
     'other_areas': 'other', 'otherareas': 'other',
     'aht_urhgan': 'ahturhgan',
     'crystal_war': 'wotg', 'crystalwar': 'wotg',
 }
+
 
 def canonical_area(area):
     value = str(area).lower()
@@ -43,8 +49,7 @@ def canonical_area(area):
 def parse_ids(root):
     """scripts/globals/quests.lua -> {lsb area: {CONST: id}}"""
     path = os.path.join(root, 'scripts/globals/quests.lua')
-    with open(path, encoding='utf-8') as source:
-        text = source.read()
+    text = open(path, encoding='utf-8').read()
     out, area = defaultdict(dict), None
     for line in text.splitlines():
         m = re.search(r"\[xi\.quest\.area\[xi\.questLog\.(\w+)\]\]", line)
@@ -60,11 +65,10 @@ def parse_ids(root):
 def parse_key_items(root):
     path = os.path.join(root, 'scripts/enum/key_item.lua')
     out = {}
-    with open(path, encoding='utf-8') as source:
-        for line in source:
-            m = re.match(r"\s*([A-Z][A-Z0-9_]+)\s*=\s*(\d+)", line)
-            if m:
-                out[m.group(1)] = int(m.group(2))
+    for line in open(path, encoding='utf-8'):
+        m = re.match(r"\s*([A-Z][A-Z0-9_]+)\s*=\s*(\d+)", line)
+        if m:
+            out[m.group(1)] = int(m.group(2))
     return out
 
 
@@ -75,17 +79,53 @@ def parse_items(root):
     path = os.path.join(root, 'scripts/enum/item.lua')
     if not os.path.exists(path):
         return out
-    with open(path, encoding='utf-8', errors='replace') as source:
-        for line in source:
-            m = re.match(r"\s*([A-Z][A-Z0-9_]*)\s*=\s*(\d+)", line)
-            if m:
-                out[m.group(1)] = int(m.group(2))
+    for line in open(path, encoding='utf-8', errors='replace'):
+        m = re.match(r"\s*([A-Z][A-Z0-9_]*)\s*=\s*(\d+)", line)
+        if m:
+            out[m.group(1)] = int(m.group(2))
     return out
 
 
-def parse_quest(path, ids, key_items, item_ids):
-    with open(path, encoding='utf-8', errors='replace') as source:
-        text = source.read()
+def quest_start(text, lines, title, server):
+    """Who gives the quest and where: {'zone', 'x', 'y', 'z', 'npc', 'place', 'from'} or None.
+
+    A quest header lists everyone involved -- the giver first, then where it is turned in, a
+    door on the way, the objective. Each line is read through lsbdata.header_places, so a
+    door's internal name, a misspelt name or a mistyped coordinate resolves to the entity the
+    server actually spawns. In order:
+
+    1. The header's first positioned line, when the server has something standing there.
+    2. The script's own "quest available" section: whoever it lets start the quest. This is
+       what a first line the server cannot place gives way to -- "Datta : !pos -43.9 -10 -2.4
+       237" puts Rabao's Datta in the Metalworks, and the section says Rabao.
+    3. The first line as a place: "Region !pos -389 13 -445 68" is the trigger region What
+       Friends Are For starts in (the script's trigger area 2, which the zone never registers).
+    4. A later header line the server can place.
+    5. A header naming the NPC without a coordinate ("Dominion Sergeant (Nanaa Mihgo's Camp)").
+    6. A "!zone" header.
+    """
+    places = lsbdata.header_places(text, lines, server)
+    if places and places[0]['hit'] is not None:
+        return lsbdata.start_from_header(places[0])
+    found = lsbdata.script_start(text, server, 'quest')
+    if found is not None:
+        return lsbdata.start_from_script(found)
+    if places and places[0]['zone'] is not None:
+        return lsbdata.start_from_header(places[0])
+    later = next((p for p in places if p['hit'] is not None), None)
+    if later is not None:
+        return lsbdata.start_from_header(later)
+    named = lsbdata.header_named(text, lines, title, server)
+    if named is not None:
+        return named
+    zone = lsbdata.header_zone(lines)
+    if zone is not None:
+        return {'zone': zone, 'x': None, 'y': None, 'z': None, 'npc': None, 'place': None}
+    return None
+
+
+def parse_quest(path, ids, key_items, item_ids, server=None):
+    text = open(path, encoding='utf-8', errors='replace').read()
 
     m = re.search(r"Quest:new\(\s*xi\.questLog\.(\w+)\s*,\s*xi\.quest\.id\.(\w+)\.([A-Z0-9_]+)", text)
     if not m:
@@ -105,21 +145,18 @@ def parse_quest(path, ids, key_items, item_ids):
     title = lines[1].lstrip('- ').strip() if len(lines) > 1 else const.title()
 
     # Header comments: "-- Balasiel : !pos -136 -11 64 230". Preserve every marker as
-    # reference data, but use only the first named marker for the quest-giver waypoint. Some
-    # markers identify objectives or key items and are not necessarily safe interaction targets.
-    npc = None
+    # reference data, as the comment states it. The quest-giver waypoint is quest_start()'s:
+    # the same header read against the server.
     locations = []
     for line in lines[:40]:
         m = re.match(r"--\s*(.+?)\s*:\s*!pos\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(\d+)", line)
         if m:
-            location = {
+            locations.append({
                 'name': m.group(1).strip(),
                 'x': float(m.group(2)), 'y': float(m.group(3)), 'z': float(m.group(4)),
                 'zone': int(m.group(5)),
-            }
-            locations.append(location)
-            if npc is None:
-                npc = location
+            })
+    npc = quest_start(text, lines, title, server) if server is not None else (locations[0] if locations else None)
 
     reward_ki = None
     m = re.search(r"keyItem\s*=\s*xi\.ki\.([A-Z0-9_]+)", text)
@@ -179,21 +216,26 @@ def main():
     ids = parse_ids(args.root)
     key_items = parse_key_items(args.root)
     item_ids = parse_items(args.root)
+    server = lsbdata.Server(args.root)
 
     quests, skipped = defaultdict(dict), 0
     qdir = os.path.join(args.root, 'scripts/quests')
-    for dirpath, _, files in os.walk(qdir):
+    for dirpath, dirnames, files in os.walk(qdir):
+        dirnames.sort()
         for f in sorted(files):
             if not f.endswith('.lua'):
                 continue
-            q = parse_quest(os.path.join(dirpath, f), ids, key_items, item_ids)
+            q = parse_quest(os.path.join(dirpath, f), ids, key_items, item_ids, server)
             if q is None:
                 skipped += 1
                 continue
             quests[q['area']][q['id']] = q
 
     total = sum(len(v) for v in quests.values())
-    with_pos = sum(1 for a in quests.values() for q in a.values() if q['npc'])
+    with_pos = sum(1 for a in quests.values() for q in a.values()
+                   if q['npc'] and q['npc'].get('x') is not None)
+    zoned = sum(1 for a in quests.values() for q in a.values()
+                if q['npc'] and q['npc'].get('x') is None)
 
     with open(args.out, 'w', encoding='utf-8') as fh:
         fh.write("""-- Vanaguide :: data/quests.lua
@@ -203,8 +245,11 @@ def main():
 -- so `Q|area,id|` in a guide and this table are the same numbers.  Fields:
 --
 --   name    the quest's name
---   zone    where it is taken, and x/z/y there (nil when the script states no position)
---   npc     first header marker (the usual quest giver)
+--   zone    where it is taken, and x/z/y there (x/z/y nil when taking it means entering the
+--           zone; all nil when the script states no position)
+--   npc     who gives it, by the name the client shows: the first header marker the server
+--           has an NPC for, else the script's own "quest available" section
+--   place   what the header calls the spot, when nobody stands there to talk to
 --   locations  every parsed header !pos marker for reference; may include objectives, not just NPCs
 --   ki      the key item it awards, when it awards one
 --   level   the level the script checks for, when it checks one
@@ -226,10 +271,17 @@ local Q = {}
                 if q['npc']:
                     n = q['npc']
                     bits.append('zone = %d' % n['zone'])
-                    bits.append('x = %.1f' % n['x'])
-                    bits.append('z = %.1f' % n['z'])
-                    bits.append('y = %.1f' % n['y'])
-                    bits.append('npc = %s' % lua_str(n['name']))
+                    if n.get('x') is not None:
+                        bits.append('x = %.1f' % n['x'])
+                        bits.append('z = %.1f' % n['z'])
+                        if n.get('y') is not None:
+                            bits.append('y = %.1f' % n['y'])
+                    if n.get('npc'):
+                        bits.append('npc = %s' % lua_str(n['npc']))
+                    if n.get('place'):
+                        bits.append('place = %s' % lua_str(n['place']))
+                    if n.get('from'):
+                        bits.append('from = %d' % n['from'])
                 if q['locations']:
                     locations = []
                     for location in q['locations']:
@@ -292,8 +344,8 @@ return Q
 """)
 
     rewarded = sum(1 for a in quests.values() for q in a.values() if q['items'])
-    print('%d quests in %d areas (%d with coordinates, %d awarding an item); %d files skipped'
-          % (total, len(quests), with_pos, rewarded, skipped))
+    print('%d quests in %d areas (%d with coordinates, %d with a zone only, %d awarding an item); '
+          '%d files skipped' % (total, len(quests), with_pos, zoned, rewarded, skipped))
 
 
 if __name__ == '__main__':

@@ -11,6 +11,9 @@
 -- returns the nearest to where the player is standing, which is right whenever the player is
 -- anywhere near either, and no worse than a coin toss when they are not.
 --
+-- The same goes for the things you talk to rather than walk through: a boat's dock, a
+-- Cavernous Maw or a door (`board`), and the waypoint and Home Point networks (`net`).
+--
 -- Copyright (c) 2026 Bates LLC.  All rights reserved.
 
 local U = require('core.util')
@@ -58,13 +61,46 @@ function Z.dock(from, to)
     return { x = r[1], z = r[2], y = r[3], via = r[4] }
 end
 
+-- The nearest of a list of { x, z, y } spots to (x, z); the first when there is no position.
+local function nearest(spots, x, z)
+    if spots == nil or #spots == 0 then return nil end
+    if x == nil or z == nil then return spots[1] end
+    local best, best_d
+    for _, s in ipairs(spots) do
+        local d = U.dist2(x, z, s[1], s[2])
+        if best_d == nil or d < best_d then best, best_d = s, d end
+    end
+    return best
+end
+
+--- Where to stand for an NPC crossing -- a Cavernous Maw, a door, a transporter -- or for a
+--- network leg (`net` is 'waypoint' or 'homepoint'): the nearest such NPC in `from`.
+--- Returns { x, z, y } or nil.
+function Z.npc_spot(from, to, net, x, z)
+    if data == nil or from == nil then return nil end
+    local spots
+    if net ~= nil then
+        spots = data.net and data.net[net] and data.net[net][from]
+    else
+        spots = data.board and data.board[from] and data.board[from][to]
+    end
+    local s = nearest(spots, x, z)
+    if s == nil then return nil end
+    return { x = s[1], z = s[2], y = s[3] }
+end
+
 --- The point to walk to for the first leg of a route, whatever kind of leg it is.
 --- Returns a point and a verb ('walk' or 'board'), or nil when the data has no answer.
 function Z.leg_target(leg, x, z)
     if leg == nil then return nil end
     if leg.kind == 'transit' then
-        local d = Z.dock(leg.from, leg.to)
+        local d = (leg.net == nil) and Z.dock(leg.from, leg.to) or nil
         if d ~= nil then return d, 'board' end
+        d = Z.npc_spot(leg.from, leg.to, leg.net, x, z)
+        if d ~= nil then
+            d.via = leg.via
+            return d, 'board'
+        end
         return nil
     end
     local e = Z.nearest_exit(leg.from, leg.to, x, z)

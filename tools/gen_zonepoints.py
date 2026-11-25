@@ -21,6 +21,10 @@ are all kept, and the router picks whichever is nearest the player rather than g
 `sql/transport.sql` does the same for the things you board: `dock_x/y/z` is where you stand
 to wait, in the zone the route departs from.
 
+The NPC crossings tools/lsbtravel.py reads -- Cavernous Maws, doors, transporters -- are
+somewhere to stand as well: the NPC's own row in `sql/npc_list.sql`.  Those go in `Z.board`,
+and the two networks (waypoints, Home Points) in `Z.net`, one list of NPCs per zone.
+
 Both files ship with LandSandBoat, which is GPL-3.0, so this reads a checkout the user
 already has rather than vendoring anything: the same shape as tools/gen_zonelines.py.
 
@@ -32,6 +36,8 @@ import argparse
 import os
 import re
 import sys
+
+import lsbtravel
 
 # zonelineid, from_zone, from x/y/z, to_zone, to x/y/z -- the first nine columns of a row.
 ROW = re.compile(
@@ -249,11 +255,44 @@ def main():
             x, z, y, via = by_from[a][b]
             out.append('        [%d] = {%.1f,%.1f,%.1f,%s},' % (b, x, z, y, lua_str(via)))
         out.append('    },')
+    out += ['}', '']
+
+    def spots_line(indent, key, spots):
+        return '%s[%d] = {%s},' % (indent, key, ','.join('{%.1f,%.1f,%.1f}' % s for s in spots))
+
+    travel = lsbtravel.collect(args.root)
+    board = {}
+    for e in travel['edges']:
+        if e['net'] is None and e['spots']:
+            board.setdefault(e['from'], {})[e['to']] = e['spots']
+    out += [
+        '-- Z.board[from][to] = { { x, z, y }, ... }  -- the NPC that moves you from `from` to',
+        '-- `to` (a Cavernous Maw, a door, a transporter): every copy of it, nearest wins.  The',
+        '-- words to show come from the route leg, which read them from data/zonelines.lua.',
+        'Z.board = {',
+    ]
+    nboard = 0
+    for a in sorted(board):
+        out.append('    [%d] = {' % a)
+        for b in sorted(board[a]):
+            out.append(spots_line('        ', b, board[a][b]))
+            nboard += 1
+        out.append('    },')
+    out += ['}', '',
+            '-- Z.net[name][zone] = { { x, z, y }, ... }  -- every waypoint or Home Point in the',
+            '-- zone; a leg that uses the network walks you to the nearest.',
+            'Z.net = {']
+    for name in sorted(travel['nets']):
+        out.append('    %s = {' % name)
+        for zone in sorted(travel['nets'][name]):
+            if travel['nets'][name][zone]:
+                out.append(spots_line('        ', zone, travel['nets'][name][zone]))
+        out.append('    },')
     out += ['}', '', 'return Z', '']
 
     open(args.out, 'w', encoding='utf-8').write('\n'.join(out))
-    print('%d exits across %d zones (%d of them doors), %d docks -> %s'
-          % (total, len(exits), ndoors, len(docks), args.out))
+    print('%d exits across %d zones (%d of them doors), %d docks, %d NPC crossings -> %s'
+          % (total, len(exits), ndoors, len(docks), nboard, args.out))
 
 
 if __name__ == '__main__':
