@@ -2,19 +2,23 @@
 
 For whoever picks it up — human or AI. Ordered by value, with what is already in place.
 
-## 1. Verify it in the game -- DONE 2026-08-28, keep it that way
+## 1. Verify it in the game -- regression only; player test still open
 
-`tools/guided_run.sh <guide> <steps>` drives a character through a guide on the local
-LandSandBoat world and writes `results/guided-<date>/RESULTS.md` with a screenshot per
-phase. Read [DRIVING_THE_CLIENT.md](DRIVING_THE_CLIENT.md) first: three client facts that
-cost days are written there (injected packets wait for a client-originated one; the release
-needs the event id; 0x034 is not 0x032). Run it after any change to `Vanaguide.lua`,
-`core/story.lua` or `core/progress.lua`. Never point it at a hosted server.
+`tools/guided_run.sh` and `tools/guided_walk.sh` are local-LSB regression harnesses, not a
+player-driven walkthrough. They use GM commands; the walk runner also issues server-side
+movement and may teleport long legs. Both require exactly one active `horizon-loader.exe` with
+`--server 127.0.0.1`, the configured local game directory, and a ready local LSB service set
+before writing commands. Read
+[DRIVING_THE_CLIENT.md](DRIVING_THE_CLIENT.md) first, and never run either on a hosted server.
+The main addon's `/vg walk allow` command is a manual opt-in, not a host check. Current machine
+GUI/client authorization is required before any live test.
 
-What it proves: the arrow and distance point at the step's NPC, the talk opens the event,
-the narrator receives the line, the quest goes ACCEPTED on the server, the step ticks. What
-it does not prove: that a player could finish the quest (it uses `!completequest`), or that
-walking there works (it teleports).
+Previous run artifacts can demonstrate that a test command caused a logged state transition.
+They do not prove natural quest acceptance/completion, physically following the arrow, or
+audible narration. For that, use a player character on the local LSB world: accept a supported
+quest normally, follow the displayed direction, complete the objective normally, and confirm
+the next step advances. Listen to a cutscene with modest volume and record observed audio.
+Keep hosted-server testing forbidden.
 
 ## 2. A shared travel graph
 
@@ -30,8 +34,9 @@ The graph learns zone lines from play and saves them per character
 
 ## 3. Guide content
 
-Three seed guides is a demo, not a library. The content problem is the real one, and there
-are two honest sources:
+Authored guides now include all three nations' first missions plus the seed quest routes; broad
+coverage still needs source-derived content and natural local-server verification. There are two
+honest sources:
 
 * **Write it from play** with `/vg mark` (see [GUIDE_FORMAT.md](GUIDE_FORMAT.md)).
 * **Adapt** an openly-licensed dataset. `SmithReact/VanaCompass` (GPL-3.0) has quest starts,
@@ -42,8 +47,10 @@ are two honest sources:
 
 ## 4. Better completion signals
 
-`0x056` gives accepted / completed and nothing in between ([PACKETS.md](PACKETS.md)). Two
-additions would cover most of the gap:
+Quest pages in `0x056` report current and completed flags; nation storylines also report their
+current mission id. The new `MA` tag uses that id to advance as soon as a mission is accepted,
+while `M` waits for its server-confirmed completion ([PACKETS.md](PACKETS.md)). Quest objective
+progress between those flags still needs richer evidence. Two additions would cover much of the gap:
 
 * **Key items** already work (`KI`); most mid-quest progress in FFXI is a key item.
 * **Dialogue** — packet `0x02A`/`0x00B` message ids identify which NPC line you just saw.
@@ -66,7 +73,8 @@ zone" is most of the win.
 
 ## Things deliberately not done
 
-* **No automation.** No movement, no targeting, no packet sending. It is the line between
-  an addon a server might approve and one that gets you banned ([SERVERS.md](SERVERS.md)).
+* **No unattended automation in the release flow.** Experimental movement exists in the
+  development addon, but relies on GM-only local-server commands; the addon does not verify the
+  connected host itself. Keep that path out of public-server use and manually verify local LSB.
 * **No coordinates written from memory.** A wrong `POS` is worse than none: it points the
   arrow confidently at the wrong place. Hence `/vg mark`.

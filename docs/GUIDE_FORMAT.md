@@ -47,6 +47,7 @@ Add the file's name to `guides/init.lua`.
 | `Z` | zone: an id (`230`) or a name (`Southern San d'Oria`, `Port_Jeuno`) |
 | `POS` | `x,z[,radius]` inside that zone; radius defaults to 10 yalms |
 | `M` | `area,id` — done when that mission is finished |
+| `MA` | `area,id` — done when that mission is active or finished |
 | `Q` | `area,id` — done when that quest is completed |
 | `QA` | `area,id` — done when that quest is *accepted* |
 | `KI` | key item id |
@@ -56,13 +57,15 @@ Add the file's name to `guides/init.lua`.
 | `RANK` | nation rank |
 | `SP` | spell id |
 | `N` | note, shown under the step |
-| `FIXED` | never auto-complete; always wait for the player |
+| `FIXED` | never auto-complete from game state; wait for `/vg next` or the Done control |
 
 `area` is a quest-log page name: `sandoria bastok windurst jeuno other outlands wotg
 abyssea adoulin coalition`, and for missions also `zilart cop acp mkd asa adoulin rov`.
 
 A step with **no** completion tag waits for the player to click Done — except `R` and `F`
-steps, which complete when the player reaches the `POS`.
+steps. With `POS`, they complete when the player reaches that spot; with only `Z`, they
+complete on entering that zone. Add `FIXED||` when a step must stay active even after its
+waypoint is reached, such as when the player must interact there before continuing.
 
 ## Coordinates
 

@@ -13,6 +13,39 @@ local P = {
     checked = {},       -- [step index] = true, ticked by hand
 }
 
+local function fingerprint(guide)
+    local hash = 5381
+    local function atom(value) return tostring(value or '') end
+    for _, step in ipairs(guide.steps or {}) do
+        local text = table.concat({
+            atom(step.kind), atom(step.text), atom(step.zone),
+            atom(step.pos and step.pos.x), atom(step.pos and step.pos.z), atom(step.pos and step.pos.r),
+            atom(step.mission and step.mission.area), atom(step.mission and step.mission.id),
+            atom(step.quest and step.quest.area), atom(step.quest and step.quest.id),
+            atom(step.quest_accept and step.quest_accept.area), atom(step.quest_accept and step.quest_accept.id),
+            atom(step.key_item), atom(step.item and step.item.id), atom(step.item and step.item.count),
+            atom(step.level), atom(step.job and step.job.id), atom(step.job and step.job.level),
+            atom(step.rank), atom(step.spell), atom(step.fixed),
+        }, '\31') .. '\n'
+        for i = 1, #text do
+            hash = (hash * 33 + text:byte(i)) % 2147483647
+        end
+    end
+    return ('%d:%d'):format(#(guide.steps or {}), hash)
+end
+
+local function saved_marks(marks, count)
+    local clean = {}
+    if type(marks) ~= 'table' then return clean end
+    for index, marked in pairs(marks) do
+        if type(index) == 'number' and index >= 1 and index <= count
+            and index == math.floor(index) and marked == true then
+            clean[index] = true
+        end
+    end
+    return clean
+end
+
 --- Start (or resume) a guide.  Resuming keeps whatever was already recorded for it.
 function P.set_guide(guide, saved, requested_name)
     if saved and guide.legacy_steps and saved.revision ~= guide.revision then
@@ -31,14 +64,22 @@ function P.set_guide(guide, saved, requested_name)
         end
         saved = { index = route[saved.index or 1] or (#guide.steps + 1),
                   checked = flags(saved.checked), skipped = flags(saved.skipped),
-                  starting_location = location, revision = guide.revision }
+                  starting_location = location, revision = guide.revision,
+                  fingerprint = fingerprint(guide) }
     end
     P.guide = guide
-    P.index = (saved and saved.index) or 1
-    P.skipped = (saved and saved.skipped) or {}
-    P.checked = (saved and saved.checked) or {}
-    P.starting_location = saved and saved.starting_location or nil
-    if not P.starting_location then
+    local signature = guide and fingerprint(guide) or nil
+    local count = guide and #guide.steps or 0
+    local compatible = type(saved) == 'table' and signature ~= nil
+        and saved.fingerprint == signature
+    local saved_index = compatible and tonumber(saved.index) or 1
+    if saved_index == nil or saved_index ~= saved_index then saved_index = 1 end
+    P.index = compatible and math.max(1, math.min(math.floor(saved_index), count + 1)) or 1
+    P.skipped = compatible and saved_marks(saved.skipped, count) or {}
+    P.checked = compatible and saved_marks(saved.checked, count) or {}
+    P.fingerprint = signature
+    P.starting_location = type(saved) == 'table' and saved.starting_location or nil
+    if not P.starting_location and guide then
         for _, step in ipairs(guide.steps) do
             if step.starting_location then P.starting_location = step.starting_location; break end
         end
@@ -134,7 +175,9 @@ function P.complete()
 end
 
 function P.save_state()
-    return { index = P.index, skipped = P.skipped, checked = P.checked, starting_location = P.starting_location, revision = P.guide and P.guide.revision }
+    return { index = P.index, skipped = P.skipped, checked = P.checked,
+             fingerprint = P.fingerprint, starting_location = P.starting_location,
+             revision = P.guide and P.guide.revision }
 end
 
 return P

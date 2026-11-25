@@ -33,3 +33,8 @@ results/guided-*/
 # Local credential stores are never source artifacts.
 **/CREDENTIALS.md
 **/secrets.json
+# Additional Drive workspace exclusions
+# Runtime command/chat captures can contain player text and test actions.
+Vanaguide/*.txt
+# Python test and generator bytecode
+*.py[cod]
