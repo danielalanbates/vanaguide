@@ -15,7 +15,8 @@
 -- Copyright (c) 2026 Bates LLC.  All rights reserved.
 
 local U      = require('core.util')
-local quests = require('data.quests')
+local quests   = require('data.quests')
+local missions = require('data.missions')
 
 local V = {}
 
@@ -47,9 +48,13 @@ function V.nearby(px, pz)
     local mm = AshitaCore:GetMemoryManager()
     local ents = mm:GetEntity()
     local out = {}
+    -- The player is always the nearest entity, at 0.0 yalms. Counting it made every marker
+    -- quest "pass" on its own character.
+    local okself, me = pcall(function() return mm:GetParty():GetMemberTargetIndex(0) end)
+    if not okself then me = -1 end
     for i = 0, MAX_ENTITY do
         local ok, name = pcall(function() return ents:GetName(i) end)
-        if ok and name ~= nil and name ~= '' then
+        if i ~= me and ok and name ~= nil and name ~= '' then
             local x = ents:GetLocalPositionX(i)
             local z = ents:GetLocalPositionY(i)     -- Ashita's Y is the second horizontal axis
             if x ~= nil and (x ~= 0 or z ~= 0) then
@@ -66,8 +71,11 @@ end
 
 --- Check one quest against the world the player is standing in.
 --- Returns a result table; `ok` is true when the quest's own NPC is loaded nearby.
-function V.quest(area, id)
-    local q = quests.get(area, id)
+function V.quest(area, id) return V.entry('quest', area, id) end
+
+--- Same check for any guide target kind: 'quest' (data.quests) or 'mission' (data.missions).
+function V.entry(kind, area, id)
+    local q = (kind == 'mission' and missions or quests).get(area, id)
     local px, pz = U.position()
     local zone = U.zone()
     local r = {
@@ -78,7 +86,7 @@ function V.quest(area, id)
         ok = false, why = '', dist = nil, nearest = '',
     }
 
-    if q == nil then r.why = 'no such quest in the database'; return r end
+    if q == nil then r.why = ('no such %s in the database'):format(kind); return r end
     if q.zone == nil then r.why = 'the database has no location for it'; return r end
     if zone == nil or px == nil then r.why = 'not in the world'; return r end
     if zone ~= q.zone then
@@ -95,6 +103,11 @@ function V.quest(area, id)
     local want = normalize(q.npc)
     local list = V.nearby(px, pz)
     r.nearest = (#list > 0) and list[1].name or ''
+    if #list == 0 then
+        -- Nothing but the player: the zone's entities have not streamed in yet. Not a data error.
+        r.why = 'nothing loaded yet (zone still streaming) - recheck'
+        return r
+    end
     if want == '' or marker then
         -- Within ten yalms is the same "you are in the right place" the arrow uses.
         local near = list[1]
