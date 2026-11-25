@@ -109,6 +109,15 @@ ok(C.done(steps[5], C.world()), 'level step')
 local zone_only_travel = G.parse_line('F Travel to Ordelles Caves|Z|193|')
 ok(not C.done(zone_only_travel, { zone = 230 }), 'zone-only travel waits outside destination')
 ok(C.done(zone_only_travel, { zone = 193 }), 'zone-only travel completes on zone arrival')
+do -- POS takes an optional fourth number, the height, which /vg mark writes
+    local marked = G.parse_line('R Stand here|Z|230|POS|-140.5,120.0,10,-2.5|')
+    eq(marked.pos.y, -2.5, 'POS fourth number is the height')
+    eq(marked.pos.r, 10, 'POS third number is still the radius')
+    local flat = G.parse_line('R Stand here|Z|230|POS|-140.5,120.0|')
+    eq(flat.pos.y, nil, 'POS without a height leaves it unset')
+    eq(R.recommend(marked, { zone = 230, x = -140, z = 120, y = 0 }).target.y, -2.5,
+       'the router passes the height to the line')
+end
 local fixed_checkpoint = G.parse_line('t Examine marker|Z|193|POS|10,20|FIXED||')
 ok(fixed_checkpoint.fixed, 'FIXED checkpoint tag parses')
 fixed_checkpoint.index = 1
@@ -457,6 +466,62 @@ WORLD.zone = 246
 rec = R.recommend(steps[1], C.world())
 eq(rec.mode, 'travel', 'step elsewhere recommends travel')
 ok(rec.hops >= 1, 'travel has at least one leg')
+
+do -- a talk step is not "arrived" until the NPC is in talk range
+    local talk = { kind = 'accept', zone = 230, pos = { x = 0, z = 0, r = 60 } }
+    WORLD.zone, WORLD.x, WORLD.z = 230, 40, 0
+    ok(not R.recommend(talk, C.world()).arrived, 'wide radius does not stop a talk step at 40y')
+    WORLD.x = 4
+    ok(R.recommend(talk, C.world()).arrived, 'talk step arrives within talk range')
+    local walk = { kind = 'run', zone = 230, pos = { x = 0, z = 0, r = 60 } }
+    WORLD.x = 40
+    ok(R.recommend(walk, C.world()).arrived, 'a run step keeps its own radius')
+end
+
+do -- `/vg tee` copies every printed line to a file a script can read
+    local path = os.tmpname()
+    os.remove(path)
+    local saved_print = _G.print
+    _G.print = function() end
+    U.tee = path
+    U.print('tee check one')
+    U.print('tee check two')
+    U.tee = nil
+    U.print('not copied')
+    _G.print = saved_print
+    local f = io.open(path, 'rb')
+    local text = f and f:read('*a') or ''
+    if f then f:close() end
+    os.remove(path)
+    eq(text, '[Vanaguide] tee check one\n[Vanaguide] tee check two\n', 'U.print appends to the tee file')
+end
+
+do -- /vg verify judges only from the spot, and its CSV row carries kind and entity count
+    local V = require('core.verify')
+    local Qs = require('data.quests')
+    local saved_zone, saved_x, saved_z = WORLD.zone, WORLD.x, WORLD.z
+    local q = Qs.get('sandoria', 60)
+    WORLD.zone, WORLD.x, WORLD.z = q.zone, q.x + 50, q.z
+    local r = V.entry('quest', 'sandoria', 60)
+    ok(not r.ok, 'verify does not judge from 50 yalms away')
+    eq(r.why, 'standing 50.0 yalms from the spot', 'verify says it is in the wrong place')
+    ok(V.row(r):match(',quest,$') ~= nil, 'verify row ends with kind and an empty entity count')
+    local Ms = require('data.missions')
+    local area, id, m
+    for a, list in pairs(Ms.missions or {}) do
+        for i, e in pairs(list) do
+            if type(e) == 'table' and e.zone ~= nil and e.x == nil and m == nil then area, id, m = a, i, e end
+        end
+    end
+    ok(m ~= nil, 'the mission data has a zone-only entry to check')
+    if m ~= nil then
+        WORLD.zone, WORLD.x, WORLD.z = m.zone, 0, 0
+        local rm = V.entry('mission', area, id)
+        ok(rm.ok, 'a zone-only mission passes in its zone')
+        ok(V.row(rm):match(',mission,$') ~= nil, 'mission rows say mission')
+    end
+    WORLD.zone, WORLD.x, WORLD.z = saved_zone, saved_x, saved_z
+end
 
 -- ---- shipped guides -----------------------------------------------------------
 require('guides.init')
@@ -1708,6 +1773,59 @@ do
     local oldCount = 0
     for _ in oldText:gmatch('|Q|') do oldCount = oldCount + 1 end
     eq(oldCount, 61, 'superseded quest-only route remains archived with every quest target')
+end
+
+-- ---- the window follows /vg goto and summarises a route --------------------------
+do
+    local shown = {}
+    local saved_imgui = _G.imgui
+    _G.imgui = {
+        Begin = function() return true end, End = function() end,
+        Text = function(t) shown[#shown + 1] = t end,
+        TextWrapped = function(t) shown[#shown + 1] = t end,
+        TextColored = function(_, t) shown[#shown + 1] = t end,
+        PushTextWrapPos = function() end, PopTextWrapPos = function() end,
+        Separator = function() end, SameLine = function() end,
+        Button = function() return false end,
+        BeginCombo = function() return false end, EndCombo = function() end,
+        Selectable = function() return false end,
+        SetNextWindowSize = function() end, SetNextWindowPos = function() end,
+    }
+    _G.ImGuiCond_FirstUseEver, _G.ImGuiCond_Always = _G.ImGuiCond_FirstUseEver or 4, _G.ImGuiCond_Always or 1
+    local function has(needle)
+        for _, t in ipairs(shown) do if tostring(t):find(needle, 1, true) then return true end end
+        return false
+    end
+    local function has_match(pattern)
+        for _, t in ipairs(shown) do if tostring(t):match(pattern) then return true end end
+        return false
+    end
+    local Win = require('ui.window')
+    Win.open[1] = true
+    Win.set_viewport(1920, 1080)
+    local saved_zone, saved_x, saved_z = WORLD.zone, WORLD.x, WORLD.z
+    local saved_guide, saved_index = P.guide, P.index
+    WORLD.zone, WORLD.x, WORLD.z = 230, 0, 0
+
+    Win.destination = { kind = 'run', text = 'Go to West Ronfaure', zone = 100 }
+    Win.draw(C.world(), nil)
+    ok(has('Going to ' .. U.zone_name(100)), 'the window names the /vg goto destination')
+    ok(has_match('^%d+ zones? to ') and has(' to ' .. U.zone_name(100)), 'with the route summary under it')
+    Win.destination = nil
+    shown = {}
+    Win.draw(C.world(), nil)
+    ok(not has('Going to '), 'and drops it once the goto is cleared')
+
+    local travel = G.parse_line('R Walk to West Ronfaure|Z|100|POS|0,0|')
+    P.set_guide(G.register({ name = 'Window route summary fixture', steps = { travel } }))
+    shown = {}
+    Win.draw(C.world(), nil)
+    ok(has_match('^%d+ zones? to '), 'a travel step shows its route summary')
+
+    P.set_guide(saved_guide)
+    P.index = saved_index
+    WORLD.zone, WORLD.x, WORLD.z = saved_zone, saved_x, saved_z
+    _G.imgui = saved_imgui
 end
 
 print(('\n%d passed, %d failed'):format(pass, fail))
