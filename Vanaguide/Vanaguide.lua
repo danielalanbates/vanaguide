@@ -18,6 +18,7 @@
 *   /vg arrow flip             flip the arrow's rotation if it points the wrong way
 *   /vg arrow nudge <degrees>  rotate the arrow by a fixed offset
 *   /vg reset                  start the current guide again
+*   /vg ra [reload]            RetroAchievements progress: what the launcher's snapshot says
 *
 * Copyright (c) 2026 Bates LLC.  All rights reserved.
 * https://batesai.org  ·  help@batesai.org
@@ -78,6 +79,9 @@ local Project = require('ui.project');
 -- line stays straight.  See docs/NAVMESH.md -- the grids are generated, never shipped.
 local Nav    = require('routing.navgrid');
 local Walk   = require('core.walk');
+-- RetroAchievements progress, read from the file the launcher writes. Never the network.
+local RA     = require('core.ra');
+local RAG    = require('guides.achievements');
 
 require('guides.init');
 
@@ -176,6 +180,7 @@ end
 ashita.events.register('load', 'vg_load', function ()
     Nav.install(Path);
     apply_settings(nil);
+    pcall(RA.refresh);
     U.print(('v%s loaded. /vg for the window, /vg guides to pick one.'):format(addon.version));
 end);
 
@@ -425,6 +430,28 @@ ashita.events.register('command', 'vg_command', function (e)
             end
         else
             load_guide(wanted);
+        end
+        return;
+    end
+
+    -- RetroAchievements: what the launcher's snapshot says, and which guides list the sets.
+    -- Progress is earned on HorizonXI and only shown here; it never completes a step.
+    if (sub == 'ra' or sub == 'achievements') then
+        if ((args[3] or ''):lower() == 'reload') then pcall(RA.refresh); end
+        for _, line in ipairs(RA.summary()) do U.print(line); end
+        local listed = 0;
+        for i, g in ipairs(G.list()) do
+            if (RAG.is_achievement_guide(g)) then
+                listed = listed + 1;
+                local earned = 0;
+                for _, st in ipairs(g.steps) do
+                    if (st.ra ~= nil and RA.earned(st.ra)) then earned = earned + 1; end
+                end
+                U.print(('  guide %d. %s  (%d/%d earned)'):format(i, g.name, earned, #g.steps));
+            end
+        end
+        if (listed == 0) then
+            U.print('  no achievement guides: data/achievements.lua has no sets yet (docs/RETROACHIEVEMENTS.md)');
         end
         return;
     end
@@ -1167,7 +1194,7 @@ ashita.events.register('command', 'vg_command', function (e)
     end
 
     U.print('commands: guides, load <n>, next, back, skip, reset, route, goto <zone>, mark,');
-    U.print('          arrow, line, nav');
+    U.print('          arrow, line, nav, ra');
     U.print('lookups:  find <item>, gear <slot>, nm [name], track <n>');
 end);
 
@@ -1204,6 +1231,9 @@ end
 
 ashita.events.register('d3d_present', 'vg_present', function ()
     pump_commands();
+    -- The RetroAchievements snapshot: a file read at most once a minute, parsed only when it
+    -- changed, and never allowed to throw into the frame.
+    pcall(RA.tick, os.time());
     -- The 0x05B cannot be sent from inside the packet handler: Ashita is mid-dispatch and the
     -- outgoing queue is not reentrant. One frame later is soon enough.
     if (event.pending) then

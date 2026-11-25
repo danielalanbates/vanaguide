@@ -17,3 +17,5 @@ accounts.json
 .dbpass
 *.dbpass
 *.personal.json
+# Python bytecode from running the tools.
+__pycache__/
