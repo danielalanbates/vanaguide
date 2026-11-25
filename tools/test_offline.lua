@@ -109,6 +109,15 @@ ok(C.done(steps[5], C.world()), 'level step')
 local zone_only_travel = G.parse_line('F Travel to Ordelles Caves|Z|193|')
 ok(not C.done(zone_only_travel, { zone = 230 }), 'zone-only travel waits outside destination')
 ok(C.done(zone_only_travel, { zone = 193 }), 'zone-only travel completes on zone arrival')
+do -- POS takes an optional fourth number, the height, which /vg mark writes
+    local marked = G.parse_line('R Stand here|Z|230|POS|-140.5,120.0,10,-2.5|')
+    eq(marked.pos.y, -2.5, 'POS fourth number is the height')
+    eq(marked.pos.r, 10, 'POS third number is still the radius')
+    local flat = G.parse_line('R Stand here|Z|230|POS|-140.5,120.0|')
+    eq(flat.pos.y, nil, 'POS without a height leaves it unset')
+    eq(R.recommend(marked, { zone = 230, x = -140, z = 120, y = 0 }).target.y, -2.5,
+       'the router passes the height to the line')
+end
 local fixed_checkpoint = G.parse_line('t Examine marker|Z|193|POS|10,20|FIXED||')
 ok(fixed_checkpoint.fixed, 'FIXED checkpoint tag parses')
 fixed_checkpoint.index = 1
