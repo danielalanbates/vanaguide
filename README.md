@@ -87,11 +87,19 @@ docs/         format, routing, packets, arrow calibration, verification, pathway
 
 ```sh
 luajit tools/test_offline.lua      # source-derived guide routes; no game required
+python3 -B tools/test_local_client_guard.py
+python3 -B tools/test_client.py
 ```
 
 The harness fakes Ashita's globals (`tools/stubs.lua`), so the parser, the completion
 conditions, the packet reader, the progress cursor and the router are all exercised without
 launching anything.
+
+The local gameplay harnesses now require one verified loopback client and refuse hosted or
+ambiguous sessions before commands or captures. Their offline fixtures also check safe
+shutdown/recovery failures. See [docs/LOCAL-TEST-GUARD.md](docs/LOCAL-TEST-GUARD.md).
+The authored Selbina and Mhaura support-job routes, source checkpoint and live-test limits
+are described in [docs/SUPPORT-JOBS.md](docs/SUPPORT-JOBS.md).
 
 ## Documentation
 
@@ -124,3 +132,12 @@ endorsed by Square Enix, or by any private server.
 PolyForm Noncommercial 1.0.0 with a commercial-use rider — see [LICENSE](LICENSE).
 Copyright © 2026 Daniel Bates / Bates LLC. All rights reserved.
 Questions: help@batesai.org · <https://batesai.org>
+
+## VanaGuide (Beta) downloads
+
+Public beta packages are on [GitHub Releases](https://github.com/danielalanbates/vanaguide/releases).
+The macOS DMG contains the external Server-Safe companion (Apple Silicon, macOS 14+).
+The Windows ZIP contains the existing **Ashita v4 addon**, requiring an existing Ashita/FFXI
+installation and server approval. It is not a Windows standalone companion and is not
+approved on HorizonXI. Windows gameplay has not been revalidated for this beta.
+See [NM data coverage](docs/NM-DETAILS.md) for source limitations.

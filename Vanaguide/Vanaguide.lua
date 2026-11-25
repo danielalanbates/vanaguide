@@ -115,7 +115,7 @@ local vg = {
 local function save_progress()
     if (P.guide == nil) then return; end
     vg.settings.guide = P.guide.name;
-    vg.settings.progress[P.guide.name] = P.save_state();
+    vg.settings.progress[P.guide.progress_id or P.guide.name] = P.save_state();
     vg.settings.learned = graph.save_learned();
     settings.save();
 end
@@ -126,7 +126,7 @@ local function load_guide(name)
         U.print('no guide named "' .. tostring(name) .. '"');
         return false;
     end
-    P.set_guide(guide, vg.settings.progress[name]);
+    P.set_guide(guide, vg.settings.progress[name] or vg.settings.progress[guide.progress_id or guide.name], name);
     save_progress();
     U.print(('loaded "%s" (%d steps, on step %d)'):format(guide.name, P.count(), P.index));
     return true;
@@ -197,6 +197,7 @@ ashita.events.register('load', 'vg_load', function ()
 end);
 
 ashita.events.register('unload', 'vg_unload', function ()
+    Walk.stop('unloaded');
     save_progress();
     settings.save();
 end);
@@ -473,7 +474,7 @@ ashita.events.register('command', 'vg_command', function (e)
     if (sub == 'back') then P.back(); save_progress(); return; end
     if (sub == 'reset') then
         if (P.guide ~= nil) then
-            vg.settings.progress[P.guide.name] = nil;
+            vg.settings.progress[P.guide.progress_id or P.guide.name] = nil;
             P.set_guide(P.guide, nil);
             save_progress();
             U.print('progress reset');
@@ -573,8 +574,8 @@ ashita.events.register('command', 'vg_command', function (e)
             if (ok and Qd.quests and Qd.quests[key.area]) then q = Qd.quests[key.area][key.id]; end
         end
         local npc = G.npc_of(step, q) or '';
-        U.print(('target: step=%d zone=%s x=%s y=%s z=%s npc=%s key=%s,%s name=%s')
-            :format(P.index, tostring(step.zone or (q and q.zone) or ''),
+        U.print(('target: step=%d accept=%s zone=%s x=%s y=%s z=%s npc=%s key=%s,%s name=%s')
+            :format(P.index, tostring(step.quest_accept ~= nil), tostring(step.zone or (q and q.zone) or ''),
                     q and q.x or (step.pos and step.pos.x) or '', q and q.y or '',
                     q and q.z or (step.pos and step.pos.z) or '', npc,
                     key and key.area or '', key and key.id or '', step.text or ''));
@@ -918,11 +919,20 @@ ashita.events.register('command', 'vg_command', function (e)
     if (sub == 'walk') then
         local what = (#args > 2) and args[3]:lower() or '';
         if (what == 'stop' or what == 'off') then
-            Walk.stop('stopped');
+            Walk.cancel(vg, event);
             U.print(Walk.status());
             return;
         end
-        if (what == 'status') then U.print(Walk.status()); return; end
+        if (what == 'status') then U.print(Walk.status()); U.print(Walk.diagnostics()); return; end
+        if (what == 'nudges' and #args > 3) then
+            local setting = args[4]:lower();
+            if (setting ~= 'on' and setting ~= 'off') then
+                U.print('walk nudges: use on or off'); return;
+            end
+            Walk.server_nudges = (setting == 'on');
+            U.print('walk server nudges ' .. setting);
+            return;
+        end
         if (what == 'mode' and #args > 3) then
             Walk.mode = args[4]:lower();
             U.print('walk mode ' .. Walk.mode);
@@ -953,6 +963,9 @@ ashita.events.register('command', 'vg_command', function (e)
         local rec = R.recommend(step, w);
         if (rec.target == nil) then U.print('walk: the step has no place to walk to (' .. tostring(rec.text) .. ')'); return; end
         local label = (rec.mode == 'travel') and U.zone_name(rec.leg and rec.leg.to) or step.text;
+        -- Restarting must end old crossing retries and restore the original event setting
+        -- before borrowing it again. Saving an already-forced true loses the player's false.
+        Walk.cancel(vg, event);
         Walk.start(rec.target, label);
         vg.walk_auto = (what == 'auto');
         -- Auto-walking ends every event it runs into: a city gate is a gatekeeper event whose
@@ -1340,6 +1353,10 @@ ashita.events.register('d3d_present', 'vg_present', function ()
     end
 
     Window.draw(w, function (name) load_guide(name); end);
+
+    -- A final automatic condition can consume the last step between frames. There is then
+    -- no recommendation branch below to stop the old runner or restore its event override.
+    if (vg.goto_step == nil and P.step() == nil) then Walk.cancel(vg, event); end
 
     if (P.guide ~= nil or vg.goto_step ~= nil) then
         -- A destination asked for by name outranks the guide's own step: the player said

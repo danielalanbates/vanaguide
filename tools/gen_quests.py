@@ -86,6 +86,12 @@ def parse_items(root):
     return out
 
 
+# Upstream script headers with a copy-pasted title (checked against scripts/globals/quests.lua).
+TITLE_FIXES = {
+    ('sandoria', 60): "The General's Secret",   # The_Generals_Secret.lua says "A Sentry's Peril"
+}
+
+
 def quest_start(text, lines, title, server):
     """Who gives the quest and where: {'zone', 'x', 'y', 'z', 'npc', 'place', 'from'} or None.
 
@@ -193,7 +199,7 @@ def parse_quest(path, ids, key_items, item_ids, server=None):
     return {
         'area': canonical_area(AREA_LOG.get(id_area, id_area)),
         'id': qid,
-        'name': title,
+        'name': TITLE_FIXES.get((AREA_LOG.get(id_area, id_area.lower()), qid), title),
         'npc': npc,
         'locations': locations,
         'key_item': reward_ki,

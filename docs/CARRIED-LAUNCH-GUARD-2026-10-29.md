@@ -1,0 +1,5 @@
+# Guard native carried launches
+
+Observed the running launcher using x87sidecar-coop as a native carrier while no separately named Windows loader was visible. The guard ignored that executable, so an inventory with a local map server could incorrectly authorize idle/start or database preparation. Recognize cooperative x87 carriers and commands containing Windows executables as ambiguous, refusing command delivery and idle/start authorization. Standalone help/probe invocations remain ignored. A verified loopback loader plus an active carrier also refuses; this is intentionally conservative until process ancestry/endpoint binding is implemented. Use the existing direct-Wine isolated harness for local testing.
+
+Inventory reconciliation now refuses carriers appearing/disappearing between snapshots. Sixteen guard tests and nine shell fixtures pass; the original guard fails the added refusal regressions. Tests use synthetic process inventories only. No hosted game command, capture, local server start or app installation occurred. This source-only harness change requires no playable app replacement.

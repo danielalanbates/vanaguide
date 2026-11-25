@@ -66,6 +66,7 @@ local W = {
     -- and what every walking bot on that side is built on.  Tried after 'server' shipped;
     -- measured below in docs/WALK.md.
     mode = 'follow',
+    server_nudges = true, -- local test recovery; disable for an unassisted walking check
     tick = 0.25,        -- seconds between server steps in 'server' mode
     last_tick = nil,
 }
@@ -87,6 +88,8 @@ function W.start(target, label)
     W.last, W.walked, W.reason = nil, 0, nil
     W.stuck_since, W.stuck_pos, W.nudge = nil, nil, 0
     W.last_wp, W.last_tick, W.aim, W.nudges, W.best_remaining = nil, nil, nil, 0, nil
+    W.progress_path, W.progress_target = nil, nil
+    W.observed, W.observed_pos, W.aim = 0, nil, nil
     return true
 end
 
@@ -100,6 +103,16 @@ function W.stop(reason)
         end
     end
     W.active, W.last, W.last_wp, W.last_tick = false, nil, nil, nil
+end
+
+--- Explicit cancellation also ends pending automatic crossings and their event override.
+function W.cancel(state, event)
+    W.stop('stopped')
+    state.walk_auto, state.walk_wait, state.walk_back = false, nil, false
+    if state.walk_event_auto_was ~= nil then
+        event.auto = state.walk_event_auto_was
+        state.walk_event_auto_was = nil
+    end
 end
 
 --- Point the client's auto-run at a direction (a displacement in addon axes), or stop it.
@@ -126,12 +139,18 @@ function W.update(w)
         -- Zoning: no position for a while.  Nothing here is stuck; forget the progress
         -- check so the load time is not counted against the walk.
         W.last, W.stuck_pos, W.stuck_since = nil, nil, nil
+        W.observed_pos = nil
         return false
     end
     if W.zone_seen ~= w.zone then
         W.zone_seen = w.zone
         W.stuck_pos, W.stuck_since, W.last_wp, W.last_tick = nil, nil, nil, nil
     end
+    local prior = W.observed_pos
+    if prior and prior.zone == w.zone then
+        W.observed = (W.observed or 0) + U.dist(w.x, w.z, prior.x, prior.z)
+    end
+    W.observed_pos = {x=w.x,z=w.z,zone=w.zone}
     local idx = player_index()
     if idx == nil then W.last = nil; return false end
 
@@ -140,16 +159,30 @@ function W.update(w)
     W.last = now
     if dt <= 0 or dt > 0.5 then return false end     -- a hitch or a zone: skip, do not leap
 
-    -- Progress check: has the entity actually gone anywhere since we last looked?
-    -- Progress means the target got nearer, not that the position changed: a runner
-    -- pressed against a wall bounces half a yalm either way all day (measured 2026-08-29).
     local t = W.target
     local remaining = U.dist(w.x, w.z, t.x, t.z)
+    local points, source
+    if remaining > 4 then points, source = Path.to(w, t) end
+    -- A valid detour can run away from the destination for many seconds. Compare distance
+    -- left along its navmesh path, not the straight line through the obstacle. Stationary
+    -- wall bounce still cannot improve the best remaining distance by half a yalm.
+    local progress, segment = remaining, nil
+    if source == 'navmesh' and Path.remaining then
+        progress, segment = Path.remaining(points, w.x, w.z, w.y)
+    end
+    local progress_path = (source == 'navmesh') and points or nil
+    local prior_target = W.progress_target
+    if W.progress_path ~= progress_path or prior_target == nil
+        or prior_target.x ~= t.x or prior_target.z ~= t.z or prior_target.y ~= t.y then
+        W.stuck_pos, W.stuck_since, W.best_remaining = nil, nil, nil
+        W.progress_path, W.progress_target = progress_path, {x=t.x,z=t.z,y=t.y}
+    end
     if W.stuck_pos == nil or (W.mode ~= 'follow' and U.dist(w.x, w.z, W.stuck_pos.x, W.stuck_pos.z) > 0.3)
-       or (W.mode == 'follow' and remaining < (W.best_remaining or math.huge) - 0.5) then
+       or (W.mode == 'follow' and progress < (W.best_remaining or math.huge) - 0.5) then
+        local moved = W.stuck_pos and U.dist(w.x, w.z, W.stuck_pos.x, W.stuck_pos.z) or 0
         W.stuck_pos, W.stuck_since = { x = w.x, z = w.z }, now
-        W.best_remaining = remaining
-        if W.nudge ~= 0 and U.dist(w.x, w.z, W.stuck_pos.x, W.stuck_pos.z) > 3 then W.nudge = 0 end
+        W.best_remaining = progress
+        if W.nudge ~= 0 and moved > 3 then W.nudge = 0 end
     elseif now - W.stuck_since > W.stuck_limit then
         W.stop(('stuck at (%.1f, %.1f)'):format(w.x, w.z))
         return false
@@ -171,14 +204,17 @@ function W.update(w)
     -- Follow the drawn path when there is one; otherwise straight at the target.  The last
     -- few yalms go to the target itself, height included: a gate's trigger area is a box
     -- a couple of yalms tall, and arriving at the grid's idea of the floor can miss it.
-    local points = (remaining > 4) and Path.to(w, t) or nil
     local nx, nz, ny = t.x, t.z, t.y
     if points ~= nil and #points >= 2 then
-        local i = Path.nearest_index(points, w.x, w.z, w.y)
-        -- Aim past the nearest point so a point already reached does not pin us in place.
+        -- The closest vertex can be behind us halfway along a segment. Aim at that
+        -- segment's forward end instead; proximity alone must not skip a mesh corner.
+        local i = segment and math.min(#points, segment + 1)
+            or Path.nearest_index(points, w.x, w.z, w.y)
         local j = i
-        while j < #points and U.dist(w.x, w.z, points[j].x, points[j].z) < 1.5 do j = j + 1 end
-        if stuck then j = math.min(#points, j + math.abs(W.nudge)) end
+        local reached = (source == 'navmesh') and 0.2 or 1.5
+        while j < #points and U.dist(w.x, w.z, points[j].x, points[j].z) < reached do j = j + 1 end
+        -- Keep mesh corners intact: unvalidated skips can cut through a wall.
+        if stuck and source ~= 'navmesh' then j = math.min(#points, j + math.abs(W.nudge)) end
         if W.mode == 'server' or W.mode == 'follow' then
             -- Aim at the far end of the straight stretch ahead, not the next sample: the
             -- server walks a straight line anyway, and one command per corner is quieter
@@ -198,7 +234,9 @@ function W.update(w)
                 for m = j, k do
                     local px, pz = points[m].x - w.x, points[m].z - w.z
                     local off = math.abs(px * vz - pz * vx) / vl
-                    if off > 1.0 then straight = false; break end
+                    -- A one-yalm approximation erases half-yalm mesh corners.
+                    local tolerance = (source == 'navmesh') and 0.01 or 1.0
+                    if off > tolerance then straight = false; break end
                 end
                 if not straight then break end
                 k = k + 1
@@ -208,14 +246,18 @@ function W.update(w)
         nx, nz, ny = points[j].x, points[j].z, points[j].y
     end
 
+    W.aim = {x=nx,z=nz,y=ny,source=source or 'direct'}
     local dx, dz = nx - w.x, nz - w.z
-    if stuck and W.nudge ~= 0 then
+    -- A mesh path already encodes traversable space; arbitrary lateral recovery
+    -- has no collision clearance. Retain the normal blocked timeout instead.
+    if stuck and W.nudge ~= 0 and source ~= 'navmesh' then
         -- Sidestep: a perpendicular shove of a couple of yalms, side chosen by the nudge sign.
         local d0 = math.sqrt(dx * dx + dz * dz)
         if d0 > 1e-3 then
             local side = (W.nudge > 0) and 1 or -1
-            dx = dx + (-dz / d0) * 2.5 * side
-            dz = dz + ( dx / d0) * 2.5 * side
+            local side_x, side_z = -dz / d0, dx / d0
+            dx = dx + side_x * 2.5 * side
+            dz = dz + side_z * 2.5 * side
         end
     end
     local d = math.sqrt(dx * dx + dz * dz)
@@ -266,7 +308,7 @@ function W.update(w)
         -- few yalms along the path (`!walkto`, as 'server' mode does for the whole way),
         -- and the runner takes over again.  Never fires on a hosted world: nothing there
         -- answers `!walkto`, and Walk.start is gated behind /vg walk allow anyway.
-        if stuck and (W.last_tick == nil or now - W.last_tick > 3) then
+        if W.server_nudges and stuck and (W.last_tick == nil or now - W.last_tick > 3) then
             local ax, az, ay = nx, nz, ny
             if points ~= nil and #points >= 2 then
                 local i = Path.nearest_index(points, w.x, w.z, w.y)
@@ -308,14 +350,22 @@ function W.update(w)
     return false
 end
 
+function W.diagnostics()
+    local a = W.aim
+    return ('walk diagnostics: mode=%s observed=%.1f commanded=%.1f%s')
+        :format(W.mode, W.observed or 0, W.walked or 0,
+          a and (' aim=(%.1f,%.1f) source=%s'):format(a.x,a.z,a.source) or '')
+end
+
 function W.status()
     if W.active then
         local t = W.target
-        return ('walk: to (%.1f, %.1f)%s, %.0f yalms walked%s')
-            :format(t.x, t.z, W.label and (' ' .. W.label) or '', W.walked,
+        return ('walk: to (%.1f, %.1f)%s, %.0f yalms observed%s')
+            :format(t.x, t.z, W.label and (' ' .. W.label) or '', W.observed or 0,
                     ((W.nudges or 0) > 0) and (', ' .. W.nudges .. ' server nudges') or '')
     end
     return 'walk: idle' .. (W.reason and (' (' .. W.reason .. ')') or '')
+        .. (((W.nudges or 0) > 0) and (', ' .. W.nudges .. ' server nudges') or '')
 end
 
 return W

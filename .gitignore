@@ -18,11 +18,25 @@ accounts.json
 *.dbpass
 *.personal.json
 
+# Local capture/test output, account settings and credentials.
+.env
+.env.*
+CREDENTIALS.md
+secrets.json
+retroachievements.json
+retroachievements-snapshots.json
+dialogue.jsonl
+__pycache__/
+*.pyc
+results/guided-*/
+
+# Local credential stores are never source artifacts.
+**/CREDENTIALS.md
+**/secrets.json
 # Additional Drive workspace exclusions
 # Runtime command/chat captures can contain player text and test actions.
 Vanaguide/*.txt
 # Python test and generator bytecode
-__pycache__/
 *.py[cod]
 # Local secrets: the RetroAchievements Web API key comes from the environment or the Keychain
 # (tools/ra_api.py), never a file in this tree.

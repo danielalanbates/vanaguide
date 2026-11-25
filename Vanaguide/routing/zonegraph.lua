@@ -14,7 +14,10 @@
 --                        because no table knows which ones this character has touched.
 --   data/zonepoints.lua  GENERATED too; besides the coordinates it carries the city doors
 --                        that are event trigger areas rather than zone lines (the Chateau,
---                        Heavens Tower).  Those are one-way in the data and linked one way.
+--                        Heavens Tower).  Its exits are directed: for a zone it covers, they
+--                        are the only walks out of that zone, so a one-way drop never gets a
+--                        return edge invented from a pair's mirror.  The pair list above is
+--                        the fallback for zones it does not cover.
 --   data/travel.lua      hand-written: the airships with their pass flag, and a seed walk
 --                        list from before the generated table existed.  A seed pair the
 --                        generated table covers both ends of and does not list is
@@ -23,7 +26,7 @@
 --                        `/vg graph suspect`.
 --   learned              every time the player crosses a zone line, `learn()` records the
 --                        pair, so the graph fills in from actual play -- custom servers and
---                        anything the tables miss.  Saved with the character's settings.
+--                        anything the tables miss.  Saved account-wide (core/learned.lua).
 --
 -- Copyright (c) 2026 Bates LLC.  All rights reserved.
 
@@ -87,26 +90,32 @@ end
 local function build()
     Z.adj, Z.suspect, seen = {}, {}, {}
 
-    -- 1. Zone lines, undirected: each side of a doorway is its own row in the server table,
-    --    and "these two zones touch" is what a route needs.
+    -- 1. Zone line pairs: the fallback for a zone the directed exit table does not cover.
+    --    A covered zone's walks come from step 2 only, so a known one-way exit does not
+    --    acquire an invented return edge from the pair's mirror.
     for _, pair in ipairs((lines and lines.walk) or {}) do
-        walk(pair[1], pair[2])
-        walk(pair[2], pair[1])
+        local a, b = pair[1], pair[2]
+        if not covered(a) then walk(a, b) end
+        if not covered(b) then walk(b, a) end
     end
 
-    -- 2. Doors that are event trigger areas, one way as the data has them.
+    -- 2. Directed exits: ordinary zone lines and the doors that are event trigger areas,
+    --    each in precisely the direction the data records.
     for from, rows in pairs((pdata and pdata.exit) or {}) do
         for _, r in ipairs(rows) do
             if r[1] ~= from then walk(from, r[1]) end
         end
     end
 
-    -- 3. The hand-written seed, minus what the server's table contradicts.
+    -- 3. The hand-written seed, minus what the server's table contradicts.  When both
+    --    zones are covered and not contradicted, step 2 already has the real crossing in its
+    --    real direction; the seed fills in only zones the generated data does not cover.
     for _, pair in ipairs(travel.walk) do
         local a, b = pair[1], pair[2]
         if covered(a) and covered(b) and not exits_to(a, b) and not exits_to(b, a) then
+            -- e.g. Port San d'Oria has a real Northern exit, not a West Ronfaure gate.
             Z.suspect[#Z.suspect + 1] = { a, b }
-        else
+        elseif not (covered(a) and covered(b)) then
             walk(a, b)
             walk(b, a)
         end

@@ -22,6 +22,10 @@ require('guides.windurst_mission_1_2')
 -- Every quest the server implements, one guide per area, built from data/quests.lua.
 require('guides.generated')
 
+-- The HorizonXI solo EXP and gil route.  After the generated guides so the numbers
+-- docs/GUIDE_AUDIT.md uses for them stay the same.
+require('guides.solo_horizon')
+
 -- One guide per RetroAchievements set, from data/achievements.lua.  Last on purpose: guides
 -- are numbered in registration order, and saved progress and the audit tools key on those
 -- numbers, so new guides only ever go on the end.

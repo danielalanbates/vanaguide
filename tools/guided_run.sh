@@ -11,31 +11,29 @@
 # arrow swings to the next one. That last part is regression, not play: it proves the guide
 # advances on the server's word, not that a player could finish the quest.
 #
-# Never run this against a hosted server. The guard requires exactly one horizon-loader.exe
-# with --server 127.0.0.1 and a ready local LSB service set before any command is written.
-# This sends GM commands and injects packets; bypassing that check risks a hosted account.
+# Never run this against a hosted server. It sends GM commands and injects packets.
 #
 # Copyright (c) 2026 Bates LLC.  All rights reserved.
 set -u
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 GAME="${VG_GAME:-/Volumes/x10/Video Games/Mac/FFXI/siku.app/Contents/SharedSupport/prefix10/drive_c/HorizonXI}"
-source "$SCRIPT_DIR/require_local_client.sh"
-require_local_client "$GAME" || exit 2
+GUARD="${0:A:h}/local_client_guard.py"
+guard(){ python3 "$GUARD" check "$GAME" || exit 1; }
+# Verify before creating results, clearing shared logs, taking screenshots or sending anything.
+guard
 A="$GAME/addons"; CMD="$A/cmdpipe/cmd.txt"; CHAT="$A/cmdpipe/chat.txt"
-NARR=/tmp/vanavoice/dialogue.jsonl
-GUIDE="${1:?guide number}"; STEPS="${2:-5}"
-source "$SCRIPT_DIR/results_path.sh"
-OUT="$(vanaguide_results_dir "${3:-}")" || exit 2
+NARR="${VG_NARR:-/tmp/vanavoice/dialogue.jsonl}"
+GUIDE="${1:?guide number}"; STEPS="${2:-5}"; OUT="${3:-$(cd "$(dirname "$0")/.." && pwd)/results/guided-$(date +%Y%m%d-%H%M)}"
 mkdir -p "$OUT"; MD="$OUT/RESULTS.md"
-say(){ safe_local_command "$GAME" "$CMD" "$1" || exit 2; }
+say(){ python3 "$GUARD" send "$GAME" "$CMD" "$1" || exit 1; }
+clear_logs(){ guard; local file; for file in "$@"; do : > "$file"; done; }
 last(){ /usr/bin/grep -a "$1" "$CHAT" | tail -1 | sed 's/^\[[0-9]*\] \[Vanaguide\] //'; }
 field(){ print -r -- "$1" | sed -n "s/.*[[:space:]]$2=\([^[:space:]]*\).*/\1/p"; }
-wid(){ python3 -c "
+wid(){ local client; client=$(python3 "$GUARD" pid "$GAME") || exit 1; python3 -c "
 import Quartz
 for w in Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionAll, Quartz.kCGNullWindowID):
-    if w.get('kCGWindowOwnerName','')=='wine' and w['kCGWindowBounds']['Width']>600 and w['kCGWindowBounds']['Height']>300:
+    if w.get('kCGWindowOwnerPID')==int('$client') and w['kCGWindowBounds']['Width']>600 and w['kCGWindowBounds']['Height']>300:
         print(w['kCGWindowNumber']); break"; }
-shot(){ local w; w=$(wid); [[ -n "$w" ]] && screencapture -x -l "$w" "$OUT/$1.png" 2>/dev/null; }
+shot(){ guard; local w; w=$(wid) || exit 1; [[ -n "$w" ]] && screencapture -x -l "$w" "$OUT/$1.png" 2>/dev/null; }
 
 print -r -- "# Guided run -- guide $GUIDE, $STEPS steps, $(date '+%Y-%m-%d %H:%M')" > "$MD"
 print -r -- "" >> "$MD"
@@ -44,7 +42,8 @@ say "/vg load $GUIDE"; sleep 3
 print -r -- "Loaded: $(last 'loaded "')" >> "$MD"; print -r -- "" >> "$MD"
 
 for ((i = 1; i <= STEPS; i++)); do
-  : > "$CHAT"; : > "$NARR"
+  guard
+  clear_logs "$CHAT"; clear_logs "$NARR"
   say '/vg target'; sleep 3
   T=$(last 'target:'); zone=$(field "$T" zone); x=$(field "$T" x); y=$(field "$T" y); z=$(field "$T" z)
   npc=$(print -r -- "$T" | sed -n 's/.* npc=\(.*\) key=.*/\1/p'); key=$(field "$T" key); name=$(print -r -- "$T" | sed -n 's/.* name=//p')
@@ -56,22 +55,23 @@ for ((i = 1; i <= STEPS; i++)); do
     say '/vg skip'; sleep 2; continue
   fi
   # arrow before: what the guide points at from here
-  : > "$CHAT"; say '/vg status'; sleep 3
+  clear_logs "$CHAT"; say '/vg status'; sleep 3
   print -r -- "- before: $(last 'step="' | sed 's/^step=.*mode=/mode=/')" >> "$MD"
   shot "step$step-a-before"
   area=${key%%,*}; qid=${key##*,}
   # a clean slate for this quest, so the NPC offers it rather than remembering an earlier run
-  [[ -n "$area" && "$area" != "$qid" ]] && say "!delquest $area $qid"
+  # Two chat commands in one instant: the client sends only the first, so space them out.
+  [[ -n "$area" && "$area" != "$qid" ]] && { say "!delquest $area $qid"; sleep 2; }
   say "!pos $x ${y:-0} $z $zone"; sleep 22
-  : > "$CHAT"; say '/vg status'; sleep 3
+  clear_logs "$CHAT"; say '/vg status'; sleep 3
   print -r -- "- after teleport: $(last 'step="' | sed 's/^step=.*mode=/mode=/')" >> "$MD"
   shot "step$step-b-arrived"
-  : > "$CHAT"; : > "$NARR"
+  clear_logs "$CHAT"; clear_logs "$NARR"
   # After a zone change the client's entity table refills slowly; give the NPC time to appear.
   # ...and right after zoning the server can parse the talk and start nothing (the character
   # is still "disappearing" to it), so a talk that opened no event is tried again too.
   for try in 1 2 3 4; do
-    : > "$CHAT"; say "/vg talk $npc"; sleep 12
+    clear_logs "$CHAT"; say "/vg talk $npc"; sleep 12
     if ! /usr/bin/grep -a -q 'loaded here' "$CHAT" && /usr/bin/grep -a -q "^\[6[0-9]*\] " "$CHAT"; then break; fi
     sleep 10
   done
@@ -83,10 +83,10 @@ for ((i = 1; i <= STEPS; i++)); do
   say '/vg advance'; sleep 5
   print -r -- "- advance: $(last 'advance:')" >> "$MD"
   if [[ -n "$area" && -n "$qid" && "$area" != "$qid" ]]; then
-    : > "$CHAT"; say "!checkquest $area $qid"; sleep 3
+    clear_logs "$CHAT"; say "!checkquest $area $qid"; sleep 3
     print -r -- "- server after advance: $(/usr/bin/grep -a 'status for' "$CHAT" | tail -1)" >> "$MD"
     say "!completequest $area $qid"; sleep 6
-    : > "$CHAT"; say '/vg status'; sleep 3
+    clear_logs "$CHAT"; say '/vg status'; sleep 3
     print -r -- "- after !completequest: $(last 'guide=' )" >> "$MD"
   fi
   shot "step$step-d-after"

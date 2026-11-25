@@ -12,6 +12,36 @@ server-side movement, can teleport long legs, and completes quests through GM co
 not prove that a player can naturally accept, follow, and complete sequential quests. A separate
 player-driven run is still required.
 
+## Unassisted acceptance verification
+
+`WALK_STRICT=1` changes the harness into a bounded check of an authored guide's `QA` acceptance
+steps. It uses `follow` mode with `/vg walk nudges off`. It fails on an unknown location,
+walking timeout, missing dialogue/sink records, unconfirmed quest acceptance or missing next
+sequential step. It sends no teleport, quest deletion, skip or forced-completion commands.
+Prepare prerequisite-satisfied, unaccepted quests on a dedicated **local** fixture beforehand.
+The ordinary harness still performs assisted regression and must not be described as strict
+walking evidence. Set `VG_NARR` to the fixture's private narrator sink; do not truncate another
+session's sink. `VG_GAME` must name the isolated local game folder. The endpoint/process guard
+remains mandatory before commands or captures.
+
+`/vg target` now includes `accept=true` for QA steps. `/vg walk nudges on` restores the older
+assisted behavior. Idle walk status retains its server-nudge count so assistance cannot vanish
+from the evidence after arrival. `luajit tools/test_walk.lua` checks strict stuck/arrival/stop
+behavior without a game, and the standard offline suite covers the existing guide behavior.
+An explicit `/vg walk stop` also clears pending crossing retries and restores the prior event
+setting; it must not leave an automatic crossing able to restart movement after a timeout.
+
+The guide number, step count and `WALK_TIMEOUT` must be positive integers of at most nine
+digits. They and `WALK_STRICT` are checked before any runtime inspection, command delivery or
+evidence file is created. Previously zero, negative or overflowed step counts could skip the
+whole loop and still print `Done`. `python3 -m unittest tools/test_guided_walk.py` exercises the
+actual shell script with its Python guard and sleeps replaced by local shell functions. All
+11 invalid-input cases failed before this correction; the corrected script refuses them
+without touching the fake runtime and still accepts ordinary positive arguments.
+
+These source checks do not prove a live walk or speaker output. Active owner play takes
+priority: do not log out that session or launch a competing client to run this harness.
+
 ## What was measured before this was written (2026-08-28)
 
 Every cheaper route was tried first, on this client (Ashita 4.3 under Wine on Apple Silicon):

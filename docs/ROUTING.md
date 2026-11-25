@@ -3,6 +3,8 @@
 `routing/zonegraph.lua` is a Dijkstra over zones. Nodes are zone ids; edges are either a
 zone line you can walk across (cost: 90 seconds, the same for all of them) or a transit
 link with its own cost — an airship is 420 seconds because you wait for it.
+The current generated-data wiring and local walkthrough defect are recorded in
+[GENERATED-ROUTES-2026-10-29.md](GENERATED-ROUTES-2026-10-29.md).
 
 `routing/router.lua` turns the result into one instruction:
 
@@ -35,6 +37,12 @@ where the generated table does not contradict them: 24 of its 76 pairs join zone
 server's table covers and does not connect, so the server will not move a player across them.
 They are left out and listed by `/vg graph suspect`.
 
+Generated exits keep their direction. For a zone `data/zonepoints.lua` covers, its exit rows
+are the only walks out of that zone; the pair list in `data/zonelines.lua` and the
+hand-written seed fill in only zones it does not cover. So a one-way drop does not get a
+return edge invented from a pair's mirror. Authored transit requirements and wait costs
+take precedence over generated transit duplicates.
+
 ## What a route cannot know
 
 The graph has no idea where the character is in any storyline, so a crossing with a
@@ -64,20 +72,22 @@ to Norg once Rhapsodies of Vana'diel reaches Flames of Prayer (Tonasav, Pacomart
 Every time your zone id changes, `ZoneGraph.learn(previous, current)` records the pair and
 saves it to the account-wide `addons/Vanaguide/learned.lua` (`core/learned.lua`), so a custom server or anything the tables miss
 fills in from play. A change between two Home Point zones that do not touch is taken for a
-warp and not learned.
+warp and not learned. Rebuilding increments the graph version, so the router invalidates
+cached routes.
 
 Consequences worth knowing:
 
-* A fresh character routes badly in areas it has never walked. This is expected and it
-  fixes itself.
+* Fresh characters use generated crossings immediately. Custom passages missing from those
+  tables still need observations or authored data.
 * Learned edges are account-wide (`core/learned.lua`): every crossing is written to one
   shared `addons/Vanaguide/learned.lua`, merged in for whoever logs in, so a second
   character starts with every road the first already walked. A per-character `learned` set
   saved before this is migrated into the shared file on first load. A community-wide graph
   is the next step up and is still listed in [PATHWAYS.md](PATHWAYS.md).
-* A learned edge has no direction restriction, which is wrong for one-way drops. The cost
-  of that error is a route that suggests walking up a cliff you fell down; it is on the
-  known-wrong list.
+* Generated exits retain their direction, but a learned edge does not: observation-based
+  learning still mirrors a crossing, so a one-way drop can produce a learned return route
+  that cannot be walked (a route that suggests walking up a cliff you fell down). It is on
+  the known-wrong list.
 * Teleports other than Home Points (warp spells, Survival Guides) are still learned as if
   they were zone lines.
 

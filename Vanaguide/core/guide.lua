@@ -49,7 +49,7 @@ local VERBS = {
 local TAGS = {
     Z = true, POS = true, M = true, MA = true, Q = true, QA = true, KI = true,
     IT = true, LV = true, JOB = true, RANK = true, SP = true, N = true, NPC = true,
-    FIXED = true, RA = true,
+    FIXED = true, RA = true, EXP = true, GIL = true, HOME = true, SRC = true, START = true,
 }
 
 local function trim(s) return (s:gsub('^%s+', ''):gsub('%s+$', '')) end
@@ -133,6 +133,16 @@ function G.parse_line(line, lineno)
             if step.spell == nil or step.spell < 0 then
                 return nil, ('line %d: SP needs a spell id'):format(lineno or 0)
             end
+        elseif tag == 'EXP' then
+            step.exp_goal = value
+        elseif tag == 'GIL' then
+            step.gil_goal = value
+        elseif tag == 'HOME' then
+            step.home = value
+        elseif tag == 'SRC' then
+            step.source = value
+        elseif tag == 'START' then
+            step.starting_location = value
         elseif tag == 'N' then
             step.note = value
         elseif tag == 'NPC' then
@@ -182,6 +192,14 @@ function G.register(def)
         name = def.name,
         author = def.author or 'unknown',
         nation = def.nation,
+        server = def.server,
+        progress_id = def.progress_id,
+        legacy_progress_id = def.legacy_progress_id,
+        legacy_start = def.legacy_start,
+        legacy_steps = def.legacy_steps,
+        default_start = def.default_start,
+        revision = def.revision,
+        start_label = def.start_label,
         levels = def.levels,
         desc = def.desc,
         steps = steps,
@@ -210,7 +228,13 @@ function G.npc_of(step, entry)
     return note:match('Ask ([^.]+)%.') or note:match('Starts with ([^.]+)%.')
 end
 
-function G.get(name) return G.guides[name] end
+function G.get(name)
+    if name == nil then return nil end
+    if G.guides[name] then return G.guides[name] end
+    for _, guide in pairs(G.guides) do
+        if name == guide.progress_id or name == guide.legacy_progress_id then return guide end
+    end
+end
 
 function G.list()
     local out = {}
