@@ -38,3 +38,8 @@ results/guided-*/
 Vanaguide/*.txt
 # Python test and generator bytecode
 *.py[cod]
+# Local secrets: the RetroAchievements Web API key comes from the environment or the Keychain
+# (tools/ra_api.py), never a file in this tree.
+.env
+.env.*
+*api-key*.txt

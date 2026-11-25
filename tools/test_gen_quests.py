@@ -52,7 +52,8 @@ local quest = Quest:new(xi.questLog.sandoria, xi.quest.id.sandoria.FIXTURE_QUEST
             subprocess.run([sys.executable, os.path.join(os.path.dirname(__file__), "gen_quests.py"),
                             root, "-o", out], check=True, capture_output=True, text=True)
             generated = pathlib.Path(out).read_text(encoding="utf-8")
-        self.assertIn("npc = 'Source NPC'", generated)
+        # With no server NPC data in the fixture, the first header marker is a place, not an NPC.
+        self.assertIn("place = 'Source NPC'", generated)
         self.assertIn("locations = { { name = 'Source NPC'", generated)
         self.assertIn("{ name = 'Objective marker', zone = 231", generated)
 

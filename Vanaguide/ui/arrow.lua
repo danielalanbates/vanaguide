@@ -97,9 +97,12 @@ function A.draw(bearing, distance, label, sub)
 
         -- Only place it ourselves the first time. After that ImGui remembers, and forcing the
         -- position every frame would undo the drag on the very next one.
+        -- `/vg arrow move` and `reset` set force_pos: the saved imgui.ini position would
+        -- otherwise win forever and the command would change nothing on screen.
         imgui.SetNextWindowPos(
             { (A.pos_x or (A.screen.w / 2)) - W / 2, (A.pos_y or (A.screen.h * A.rel_y)) - H / 2 },
-            ImGuiCond_FirstUseEver);
+            A.force_pos and ImGuiCond_Always or ImGuiCond_FirstUseEver);
+        A.force_pos = false;
         imgui.SetNextWindowSize({ W, H }, ImGuiCond_FirstUseEver);
 
         if (not imgui.Begin('Vanaguide Arrow', true, flags)) then imgui.End(); return; end
@@ -179,6 +182,7 @@ function A.move(x, y)
     if x ~= nil then A.rel_x = math.max(0.02, math.min(0.98, x)) end
     if y ~= nil then A.rel_y = math.max(0.02, math.min(0.98, y)) end
     A.set_viewport(A.screen.w, A.screen.h)
+    A.force_pos = true
     return A.rel_x or 0.5, A.rel_y or 0.12
 end
 

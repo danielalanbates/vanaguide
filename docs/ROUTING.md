@@ -13,32 +13,83 @@ The current generated-data wiring and local walkthrough defect are recorded in
   Plateau"* or *"Airship to San d'Oria (Port Jeuno counter)"*, whichever the first leg is.
 * **unknown** — no route. Said plainly rather than papered over.
 
-## Why the graph learns
+## Where the graph comes from
 
-LandSandBoat publishes zone-line endpoints in `sql/zonelines.sql`. The graph now uses
-generated directed exits in `data/zonepoints.lua`, including event doors, plus the generated
-pair fallback in `data/zonelines.lua` where coordinates are unavailable. The hand-written
-`data/travel.lua` fills uncovered custom zones; pairs contradicted by generated endpoints
-are excluded. Its authored transit requirements and wait costs take precedence over
-generated transit duplicates.
+Everything the server itself says, generated from a LandSandBoat checkout:
 
-**The addon also learns from play**: every time your zone id changes,
-`ZoneGraph.learn(previous, current)` records a new pair and saves it with your character's
-settings. Rebuilding increments the graph version so the router invalidates cached routes.
+| Source | Generator | What it adds |
+|---|---|---|
+| `sql/zonelines.sql` | `tools/gen_zonelines.py` | Every zone line: 230 zone pairs. |
+| `sql/transport.sql` | `tools/gen_zonelines.py` | Airships and ferries, including Whitegate–Mhaura and Whitegate–Nashmau. |
+| NPC scripts (`tools/lsbtravel.py`) | `tools/gen_zonelines.py` | Cavernous Maws to the [S] zones (`scripts/globals/maws.lua`) and to Abyssea (`scripts/globals/abyssea.lua`); the Adoulin waypoints, including Lower Jeuno's (`scripts/globals/waypoint.lua`); the crags' Shattered Telepoints; and a named list of doors and transporters (Cermet Gates, Radiant Aureoles, Dimensional Portals, the Celennia library door, the Liseran Doors, Ra'Kaznar's transit devices). |
+| Home Points (`scripts/globals/homepoint.lua`) | `tools/gen_zonelines.py` | A network: any Home Point zone to any other, through one hub node that `Z.route` folds out of the answer. |
+| Zone script trigger areas | `tools/gen_zonepoints.py` | City doors that are events rather than zone lines (the Chateau, Heavens Tower), one-way. |
+
+`data/zonepoints.lua` says where to stand for each of them: the zone line's trigger, the
+boat's dock, the NPC's row in `sql/npc_list.sql`. When a crossing has several copies (Home
+Points, waypoints, the two Liseran Doors out of Outer Ra'Kaznar), the arrow goes to the
+nearest. Al'Taieu's three Dimensional Portals share one script that picks the destination by
+NPC id, so those legs have no spot rather than a wrong one.
+
+`data/travel.lua` is the hand-written seed from before any of that existed. Its airships
+still win over the generated ones (they carry the pass flag). Its walk pairs are used only
+where the generated table does not contradict them: 24 of its 76 pairs join zones that the
+server's table covers and does not connect, so the server will not move a player across them.
+They are left out and listed by `/vg graph suspect`.
+
+Generated exits keep their direction. For a zone `data/zonepoints.lua` covers, its exit rows
+are the only walks out of that zone; the pair list in `data/zonelines.lua` and the
+hand-written seed fill in only zones it does not cover. So a one-way drop does not get a
+return edge invented from a pair's mirror. Authored transit requirements and wait costs
+take precedence over generated transit duplicates.
+
+## What a route cannot know
+
+The graph has no idea where the character is in any storyline, so a crossing with a
+condition is still an edge. Its text says the condition in brackets — *"Cavernous Maw in
+Batallia Downs to Batallia Downs [S] (Wings of the Goddess; the maw must be opened first)"*.
+Two kinds are priced as a last resort (1,800 seconds, the cost of twenty zones on foot) so
+they are offered only when nothing else gets there and never as a shortcut past a road:
+
+* **Home Points** — the only way back to Tavnazia, but only to a Home Point the character
+  has touched.
+* **Crossings that need a point in a storyline** — the Shattered Telepoints (Chains of
+  Promathia 1-2 and 1-3 only) and the Dimensional Portals into Al'Taieu (after 7-5). At
+  normal cost they cut through the Hall of Transference and Al'Taieu on routes that have
+  nothing to do with either.
+
+That price only chooses the route. Each leg also carries `time`, the seconds it really
+takes, and the "about 2m" under a step is the sum of those (`ZoneGraph.eta`), so a Home Point
+warp does not read as a half-hour trip.
+
+Not modelled: Survival Guides, warp spells and items, the Adoulin warp runes (one key item
+each), the mission teleports that happen once in a cutscene (the first trip to Lufaise
+Meadows at the end of Chains of Promathia 3), and the Mhaura and Selbina NPCs that take you
+to Norg once Rhapsodies of Vana'diel reaches Flames of Prayer (Tonasav, Pacomart).
+
+## Why the graph still learns
+
+Every time your zone id changes, `ZoneGraph.learn(previous, current)` records the pair and
+saves it to the account-wide `addons/Vanaguide/learned.lua` (`core/learned.lua`), so a custom server or anything the tables miss
+fills in from play. A change between two Home Point zones that do not touch is taken for a
+warp and not learned. Rebuilding increments the graph version, so the router invalidates
+cached routes.
 
 Consequences worth knowing:
 
 * Fresh characters use generated crossings immediately. Custom passages missing from those
   tables still need observations or authored data.
-* Learned edges are per character. Sharing them (an account-wide or community-wide graph)
-  is listed in [PATHWAYS.md](PATHWAYS.md) and is the single highest-value thing left to do.
-* Generated exits retain their direction. Observation-based learning still mirrors a
-  crossing, so a one-way drop can produce a learned return route that cannot be walked.
-  This remains a limitation of learned edges.
+* Learned edges are account-wide (`core/learned.lua`): every crossing is written to one
+  shared `addons/Vanaguide/learned.lua`, merged in for whoever logs in, so a second
+  character starts with every road the first already walked. A per-character `learned` set
+  saved before this is migrated into the shared file on first load. A community-wide graph
+  is the next step up and is still listed in [PATHWAYS.md](PATHWAYS.md).
+* Generated exits retain their direction, but a learned edge does not: observation-based
+  learning still mirrors a crossing, so a one-way drop can produce a learned return route
+  that cannot be walked (a route that suggests walking up a cliff you fell down). It is on
+  the known-wrong list.
+* Teleports other than Home Points (warp spells, Survival Guides) are still learned as if
+  they were zone lines.
 
-## What is not in the graph yet
-
-Teleports (`data/travel.lua` `T.teleport`) are listed but not wired in: using them means
-knowing whether the player can cast them, has the crystals, or intends to pay a taxi. Home
-Point warps, Survival Guides and the Kazham/Norg boat past the airship are all missing.
-Adding one is a table entry plus a condition, not new machinery.
+Teleport spells (`data/travel.lua` `T.teleport`) are listed but not wired in: using them
+means knowing whether the player can cast them, has the crystals, or intends to pay a taxi.

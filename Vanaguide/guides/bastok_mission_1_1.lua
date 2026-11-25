@@ -11,10 +11,10 @@ G.register({
     levels = '1+',
     desc = 'Accept Bastok mission 1-1, get the Zeruhn Report, and deliver it to Naji.',
     steps = [[
-A Accept The Zeruhn Report from a Bastok gate guard.|MA|bastok,0|Z|235|POS|-361.9,-169.13|N|Mission 0 is offered by Cleades in Bastok Markets, Rashid in Bastok Mines, Malduc in Metalworks, or Argus in Port Bastok. This guide routes to Cleades as the default.|
+A Accept The Zeruhn Report from a Bastok gate guard.|MA|bastok,0|Z|235|POS|-361.9,-169.13|NPC|Cleades|N|Mission 0 is offered by Cleades in Bastok Markets, Rashid in Bastok Mines, Malduc in Metalworks, or Argus in Port Bastok. This guide routes to Cleades as the default.|
 F Travel to Zeruhn Mines.|Z|172|
-C Speak with Makarim to receive the Zeruhn Report.|KI|1|Z|172|POS|-60.92,-333.29|N|Makarim's local LSB event 121 grants key item 1 directly. If it does not trigger, speak with Rasmus at x=-11.7, z=70.8, then return here and try Makarim again.|
+C Speak with Makarim to receive the Zeruhn Report.|KI|1|Z|172|POS|-60.92,-333.29|NPC|Makarim|N|Makarim's local LSB event 121 grants key item 1 directly. If it does not trigger, speak with Rasmus at x=-11.7, z=70.8, then return here and try Makarim again.|
 F Return to Metalworks.|Z|237|
-T Deliver the Zeruhn Report to Naji.|M|bastok,0|Z|237|POS|66.9,-4.6|N|Mission completion is server-confirmed and consumes the Zeruhn Report key item.|
+T Deliver the Zeruhn Report to Naji.|M|bastok,0|Z|237|POS|66.9,-4.6|NPC|Naji|N|Mission completion is server-confirmed and consumes the Zeruhn Report key item.|
 ]],
 })

@@ -4,15 +4,19 @@
 -- Two kinds of data live here.
 --
 --   walk[]      zone lines — two zones you can walk between.  Hand-authored for the base
---               world from common game knowledge, and DELIBERATELY incomplete: the client
---               keeps its zone-line geometry in the DATs, no server project publishes a
---               table of them, and guessing one is worse than not having it.  Whatever is
---               missing here the addon LEARNS: every time you zone, Routing/ZoneGraph
---               records the pair you just crossed and saves it (see docs/ROUTING.md).
+--               world from memory, before data/zonelines.lua was generated from the
+--               server's own table.  That table now comes first; a pair here that it
+--               covers both ends of and does not list is one the server will not move
+--               you across (24 of these 76 pairs), and routing/zonegraph.lua leaves it
+--               out -- `/vg graph suspect` lists them.  Whatever is missing everywhere
+--               the addon LEARNS: every time you zone, Routing/ZoneGraph records the
+--               pair you just crossed and saves it (see docs/ROUTING.md).
 --
---   transit[]   everything that is not a zone line — airships, ferries, the Kazham
---               shuttle, teleports.  These carry a `via` string, which is what the guide
---               window tells you to do, and a cost in seconds that reflects the real wait.
+--   transit[]   the airships and the Selbina ferry, hand-written for the pass flag and
+--               the wording.  Every other boat, maw, waypoint, door and Home Point is
+--               generated into data/zonelines.lua.  These carry a `via` string, which is
+--               what the guide window tells you to do, and a cost in seconds that
+--               reflects the real wait.
 --
 -- Costs are seconds of travel, honest order-of-magnitude, not measured.  Walking a zone is
 -- treated as 90s; the router only ever compares them against each other.
@@ -45,7 +49,9 @@ T.walk = {
     -- Jeuno and the middle lands
     { 243, 244 }, { 244, 245 }, { 245, 246 },
     { 105, 245 }, { 110, 245 }, { 120, 245 }, { 126, 246 },
-    { 126, 157 }, { 157, 158 }, { 157, 184 },
+    -- Qufim reaches the tower at its Lower floor (184) only: LSB zonelines rows 126<->184. The
+    -- Middle/Upper floors connect by stairs inside the tower, which the zonelines table does not list.
+    { 157, 158 }, { 157, 184 },
     { 120, 121 }, { 121, 122 }, { 105, 195 }, { 111, 112 }, { 111, 105 },
     { 112, 161 }, { 161, 162 }, { 162, 165 },
 
