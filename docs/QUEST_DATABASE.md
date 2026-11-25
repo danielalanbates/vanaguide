@@ -80,11 +80,17 @@ starts, and a turn-in in another town is about somebody else.
 
 `Vanaguide/guides/generated.lua` builds one guide per area at load time — *"San d'Oria —
 every quest"*, 59 steps; *"Bastok — every quest"*, 81; and so on. Ordering is a topological
-sort over prerequisites, then the level the script checks, then quest id.
+sort over prerequisites, then the level the script checks, then quest id. The log-area names
+used by quest-id namespaces are normalized to the client quest-log pages (`aht_urhgan` to
+`ahturhgan`, `other_areas` to `other`, and `crystal_war` to `wotg`) before looking up flags.
 
 Two quests in Bastok name each other as a prerequisite; the sort marks a node visited before
-recursing so that a cycle in the data cannot loop. Cross-area prerequisites are left alone —
-reordering another area's guide from this one would be worse than a step that waits.
+recursing so that a cycle in the data cannot loop. A real cross-area prerequisite becomes an
+explicit step before its dependent quest: it points to the prerequisite's NPC, waits for the
+server's completion flag, and tells the player which area guide contains detailed steps. If the
+source names a prerequisite absent from the database, the guide surfaces a note instead of
+silently hiding the dependency. The harness checks local ordering, external prerequisites, and
+the missing-parent warning.
 
 These give **completion**: nothing in an area is missed, and every entry ticks itself off the
 moment the server records it. They do not tell you how to do any one quest. Both kinds of
@@ -104,6 +110,8 @@ guide sit in the same list and use the same format.
   A Sea Dog's Summons, flagged by another quest; Achieving True Power, whose Shamarhaan
   stands in two places in Bastok Markets), and the 72 files the generator skipped (mostly
   `.todo` stubs and quests defined outside the `Quest:new` shape).
-* **Turn-in coordinates.** Only the *first* NPC in each header is recorded, which is where
-  the quest is taken. The rest of the header lists everyone else involved and is thrown
-  away; keeping it would let a guide point at the turn-in too.
+* **Turn-in guidance.** The primary `npc`/coordinate remains the first header marker (normally
+  the quest giver). Generated records now also preserve every parsed header `!pos` marker in a
+  separate `locations` list, including named NPCs and objective points such as ??? markers. These
+  are reference data only: the generator cannot infer which marker is a turn-in, so hand-authored
+  steps must still sequence the correct return target.

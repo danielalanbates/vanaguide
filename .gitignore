@@ -17,5 +17,10 @@ accounts.json
 .dbpass
 *.dbpass
 *.personal.json
-# Python bytecode from running the tools.
+
+# Additional Drive workspace exclusions
+# Runtime command/chat captures can contain player text and test actions.
+Vanaguide/*.txt
+# Python test and generator bytecode
 __pycache__/
+*.py[cod]

@@ -13,6 +13,10 @@ and writes a results file with screenshots; `results/guided-20260828-*/` has the
 Three rounds of talk/advance on Balasiel in a row, each one ACCEPTED on the server with no
 warnings, then the same on Rosel in the guide itself.
 
+New guided runs default to `$HOME/Downloads/vanaguide-results/`; a caller-supplied results path
+must also resolve inside Downloads. This keeps screenshots and run reports out of the source tree
+and rejects symlink escapes. The older `results/guided-20260828-*/` references above are historical.
+
 ## The three things that were actually wrong
 
 ### 1. Injected packets do not leave the client until it has something of its own to send
@@ -71,9 +75,20 @@ gave "event 0 on index 0" and the server rejected the 0x05B with `Event ID misma
 
 ## What is still open
 
-* **The harness teleports; it does not walk.** There is no movement automation and there
-  will not be (docs/SERVERS.md). "Following the arrow" is verified by `/vg status` (distance
-  and bearing to the target) and by the screenshots, not by a character walking there.
+* **The harness does not prove player-driven walking.** `guided_run.sh` teleports to targets;
+  `guided_walk.sh` moves through server-side GM `!walkto` commands and can teleport long legs.
+  Neither proves a player can follow the arrow, naturally accept a quest, or complete it.
+* **Both shell harnesses now fail closed on the active client target.** Before writing to the
+  command pipe, they require exactly one `horizon-loader.exe` process whose command line contains
+  `--server 127.0.0.1`, and require the sibling launcher repo's read-only LSB status to report
+  the database ready and all four services up. No loader, multiple loaders, unhealthy/missing
+  local server, or any other target aborts the run. They also resolve `VG_GAME` and require it
+  to match the configured local test-game directory, so the environment override cannot redirect
+  a guarded run to another install's command pipe.
+  Run `zsh tools/test_local_guard.sh` to exercise these guard branches with mocked process/server
+  status data; the fixture test never writes to the game command pipe.
+  `/vg walk allow` remains a manual addon opt-in, not a substitute for this process check. This
+  check reduces accidental hosted-server risk; do not weaken or bypass it.
 * **Most generated quest steps need prerequisites** (fame, an earlier quest, a level). On a
   fresh character the NPC gives its stock line and no event opens; the harness records
   exactly that and moves on with `!completequest`, which proves the guide advances on the

@@ -156,7 +156,7 @@ def parse_quest(path, ids, key_items, item_ids, server=None):
                 'x': float(m.group(2)), 'y': float(m.group(3)), 'z': float(m.group(4)),
                 'zone': int(m.group(5)),
             })
-    npc = quest_start(text, lines, title, server) if server is not None else None
+    npc = quest_start(text, lines, title, server) if server is not None else (locations[0] if locations else None)
 
     reward_ki = None
     m = re.search(r"keyItem\s*=\s*xi\.ki\.([A-Z0-9_]+)", text)
