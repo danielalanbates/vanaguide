@@ -469,6 +469,24 @@ do -- a talk step is not "arrived" until the NPC is in talk range
     ok(R.recommend(walk, C.world()).arrived, 'a run step keeps its own radius')
 end
 
+do -- `/vg tee` copies every printed line to a file a script can read
+    local path = os.tmpname()
+    os.remove(path)
+    local saved_print = _G.print
+    _G.print = function() end
+    U.tee = path
+    U.print('tee check one')
+    U.print('tee check two')
+    U.tee = nil
+    U.print('not copied')
+    _G.print = saved_print
+    local f = io.open(path, 'rb')
+    local text = f and f:read('*a') or ''
+    if f then f:close() end
+    os.remove(path)
+    eq(text, '[Vanaguide] tee check one\n[Vanaguide] tee check two\n', 'U.print appends to the tee file')
+end
+
 -- ---- shipped guides -----------------------------------------------------------
 require('guides.init')
 local shipped = 0
