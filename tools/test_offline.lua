@@ -1775,5 +1775,58 @@ do
     eq(oldCount, 61, 'superseded quest-only route remains archived with every quest target')
 end
 
+-- ---- the window follows /vg goto and summarises a route --------------------------
+do
+    local shown = {}
+    local saved_imgui = _G.imgui
+    _G.imgui = {
+        Begin = function() return true end, End = function() end,
+        Text = function(t) shown[#shown + 1] = t end,
+        TextWrapped = function(t) shown[#shown + 1] = t end,
+        TextColored = function(_, t) shown[#shown + 1] = t end,
+        PushTextWrapPos = function() end, PopTextWrapPos = function() end,
+        Separator = function() end, SameLine = function() end,
+        Button = function() return false end,
+        BeginCombo = function() return false end, EndCombo = function() end,
+        Selectable = function() return false end,
+        SetNextWindowSize = function() end, SetNextWindowPos = function() end,
+    }
+    _G.ImGuiCond_FirstUseEver, _G.ImGuiCond_Always = _G.ImGuiCond_FirstUseEver or 4, _G.ImGuiCond_Always or 1
+    local function has(needle)
+        for _, t in ipairs(shown) do if tostring(t):find(needle, 1, true) then return true end end
+        return false
+    end
+    local function has_match(pattern)
+        for _, t in ipairs(shown) do if tostring(t):match(pattern) then return true end end
+        return false
+    end
+    local Win = require('ui.window')
+    Win.open[1] = true
+    Win.set_viewport(1920, 1080)
+    local saved_zone, saved_x, saved_z = WORLD.zone, WORLD.x, WORLD.z
+    local saved_guide, saved_index = P.guide, P.index
+    WORLD.zone, WORLD.x, WORLD.z = 230, 0, 0
+
+    Win.destination = { kind = 'run', text = 'Go to West Ronfaure', zone = 100 }
+    Win.draw(C.world(), nil)
+    ok(has('Going to ' .. U.zone_name(100)), 'the window names the /vg goto destination')
+    ok(has_match('^%d+ zones? to ') and has(' to ' .. U.zone_name(100)), 'with the route summary under it')
+    Win.destination = nil
+    shown = {}
+    Win.draw(C.world(), nil)
+    ok(not has('Going to '), 'and drops it once the goto is cleared')
+
+    local travel = G.parse_line('R Walk to West Ronfaure|Z|100|POS|0,0|')
+    P.set_guide(G.register({ name = 'Window route summary fixture', steps = { travel } }))
+    shown = {}
+    Win.draw(C.world(), nil)
+    ok(has_match('^%d+ zones? to '), 'a travel step shows its route summary')
+
+    P.set_guide(saved_guide)
+    P.index = saved_index
+    WORLD.zone, WORLD.x, WORLD.z = saved_zone, saved_x, saved_z
+    _G.imgui = saved_imgui
+end
+
 print(('\n%d passed, %d failed'):format(pass, fail))
 os.exit(fail == 0 and 0 or 1)
